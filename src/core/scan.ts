@@ -101,7 +101,7 @@ export async function runScan(
       tips[chain] = await backend.tipHeight();
       if (backend.scanDescriptors) {
         log(`${chain.toUpperCase()}: scanning the UTXO set on your node (this can take minutes)…`);
-        const requests: { desc: string; range: [number, number] }[] = [];
+        const requests: { desc: string; range?: [number, number] }[] = [];
         descriptors.forEach((d, descriptorIndex) => {
           for (const branch of d.branches) {
             const last = branch.ranged ? rpcRange - 1 : 0;
@@ -114,7 +114,10 @@ export async function runScan(
                 address: out.address,
               });
             }
-            requests.push({ desc: branch.body, range: [0, last] });
+            // Core rejects a range on an unranged descriptor.
+            requests.push(
+              branch.ranged ? { desc: branch.body, range: [0, last] } : { desc: branch.body },
+            );
           }
         });
         const found = await backend.scanDescriptors(requests);

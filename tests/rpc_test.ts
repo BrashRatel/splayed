@@ -109,3 +109,70 @@ Deno.test("RPC auth: cookie file, env password, and refusal without either", asy
   await assertRejects(() => rpcAuthorization({ user: "u", passwordEnv: "PW" }, {}), BackendError);
   await assertRejects(() => rpcAuthorization(undefined, {}), BackendError);
 });
+
+Deno.test("scan: node RPC discovery (no addresses revealed) + Esplora cross-check", async () => {
+  const { HDKey } = await import("@scure/bip32");
+  const { mnemonicToSeedSync } = await import("@scure/bip39");
+  const { parseDescriptor } = await import("../src/core/descriptors.ts");
+  const { runScan } = await import("../src/core/scan.ts");
+  const { loadConfig } = await import("../src/core/config.ts");
+  const { EsploraBackend } = await import("../src/backends/esplora.ts");
+  const { fakeChain, FakeEsploraTransport, addOutput, txid } = await import("./fakes.ts");
+  const xpub = HDKey.fromMasterSeed(mnemonicToSeedSync(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+  )).derive("m/84'/0'/0'").publicExtendedKey;
+  const desc = parseDescriptor(`wpkh(${xpub}/<0;1>/*)`);
+  const a7 = desc.branches[1].derive(7);
+  const id = txid(42);
+  const seen: unknown[] = [];
+  await withFakeNode((method, params) => {
+    if (method === "getblockcount") return 975_000;
+    if (method === "scantxoutset") {
+      seen.push(params[1]);
+      return {
+        success: true,
+        unspents: [{
+          txid: id,
+          vout: 1,
+          scriptPubKey: a7.scriptPubKey,
+          amount: 0.0123,
+          height: 900_000,
+        }],
+      };
+    }
+    throw new Error(`unexpected ${method}`);
+  }, async (url) => {
+    const config = await loadConfig({ dataDir: await Deno.makeTempDir(), env: {} });
+    const route = resolveRoute(url, { kind: "tor" }, false, { host: "127.0.0.1", port: 9050 });
+    const btc = new RpcBackend("btc", cfg(url), new RoutedTransport(route), "Basic dGVzdA==");
+    const xbt = fakeChain("xbt", 970_000);
+    const ecx = fakeChain("ecx", 974_500);
+    addOutput(xbt, id, 1, 1_230_000, a7.address, a7.scriptPubKey, 900_000);
+    addOutput(ecx, id, 1, 1_230_000, a7.address, a7.scriptPubKey, 900_000);
+    ecx.spends.set(`${id}:1`, { txid: txid(43), height: 974_000 });
+    const esp = (chain: "xbt" | "ecx", c: ReturnType<typeof fakeChain>) =>
+      new EsploraBackend(
+        chain,
+        { ...cfg("http://x/api"), kind: "esplora" as const },
+        new FakeEsploraTransport(c),
+      );
+    const result = await runScan(config, [desc], {
+      backends: { btc, xbt: esp("xbt", xbt), ecx: esp("ecx", ecx) },
+      sleep: () => Promise.resolve(),
+      rpcRange: 10,
+    });
+    assertEquals(seen[0], [
+      { desc: desc.branches[0].body, range: [0, 9] },
+      { desc: desc.branches[1].body, range: [0, 9] },
+    ]);
+    assertEquals(result.addressesRevealed.btc, 0);
+    // The coin was found by the node and by XBT's gap walk, so it shows up once.
+    assertEquals(result.coins.length, 1);
+    const coin = result.coins[0];
+    assertEquals(coin.value, 1_230_000);
+    assertEquals(coin.derivationIndex, 7);
+    assertEquals(coin.observations.btc.state, "unspent");
+    assertEquals(coin.observations.xbt.state, "unspent");
+    assertEquals(coin.observations.ecx.state, "spent");
+  });
+});

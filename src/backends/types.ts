@@ -47,7 +47,7 @@ export interface ChainBackend {
   addressTxCount?(address: string, scriptPubKey: string): Promise<number>;
   addressUtxos?(address: string, scriptPubKey: string): Promise<FoundUtxo[]>;
   /** Descriptor-based discovery (node RPC scantxoutset); runs entirely on the node. */
-  scanDescriptors?(descriptors: { desc: string; range: [number, number] }[]): Promise<FoundUtxo[]>;
+  scanDescriptors?(descriptors: { desc: string; range?: [number, number] }[]): Promise<FoundUtxo[]>;
 }
 
 export class BackendError extends Error {

@@ -127,7 +127,7 @@ export class RpcBackend implements ChainBackend {
   }
 
   async scanDescriptors(
-    descriptors: { desc: string; range: [number, number] }[],
+    descriptors: { desc: string; range?: [number, number] }[],
   ): Promise<FoundUtxo[]> {
     const result = await this.call<
       {
@@ -142,7 +142,7 @@ export class RpcBackend implements ChainBackend {
       }
     >(
       "scantxoutset",
-      ["start", descriptors.map((d) => ({ desc: d.desc, range: d.range }))],
+      ["start", descriptors.map((d) => (d.range ? { desc: d.desc, range: d.range } : d.desc))],
       30 * 60_000,
     );
     if (!result?.success) throw new BackendError("scantxoutset did not complete");
