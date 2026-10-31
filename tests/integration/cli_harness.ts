@@ -4,11 +4,10 @@ import { type CliIO, main } from "../../src/cli/main.ts";
 import type { Plan } from "../../src/core/planner.ts";
 import type { ChainId } from "../../src/core/profiles.ts";
 import { decodePsbt, encodePsbtBase64 } from "../../src/core/psbt.ts";
+import { CHAINS } from "./cluster.ts";
 import { REGTEST_PROFILE_ID } from "./regtest_profile.ts";
 import { RegtestRpcTransport, type Rpc } from "./rpc.ts";
 import { stockSign, unifiedSign } from "./signers.ts";
-
-export const CHAINS: ChainId[] = ["btc", "xbt", "ecx"];
 
 /** forksplit's real CLI, in a fresh data dir, with the three regtest nodes as its only backends. */
 export interface Cli {

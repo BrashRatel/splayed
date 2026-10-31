@@ -130,6 +130,16 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 
 ## 5. Project hygiene
 
+- [ ] **Regtest playground with real signers.** `deno task regtest` is built and was exercised end
+      to end through the UI's HTTP API with a stand-in wallet exporting `tpub` keys, but it has not
+      been tried with Sparrow, the Sparrow BLAKE2b build or Shrike yet. Things to confirm:
+  - [ ] Sparrow connects to the BTC node (Core 31.0, regtest) and shows the funded coins.
+  - [ ] The Sparrow BLAKE2b build connects to the Knots node, and Shrike produces 0x21 signatures
+        from the XBT PSBTs.
+  - [ ] Each signer accepts our PSBTs (BIP32 origins, previous transactions, multisig global xpubs)
+        and the signed files import back into the UI.
+  - [ ] Write the working signer steps into the README once confirmed.
+
 - [x] CI: fmt, lint, type-check and tests on every push (`.github/workflows/ci.yml`).
 - [x] Regtest integration suite (`deno task test:integration`, `tests/integration/`): real Bitcoin
       Core 31.0, Knots 29.4.1 (BLAKE2b at regtest height 110) and eCash (built from the pinned

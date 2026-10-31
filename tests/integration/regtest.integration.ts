@@ -22,12 +22,12 @@ import {
   REGTEST_PROFILE_ID,
   XBT_ACTIVATION_HEIGHT,
 } from "./regtest_profile.ts";
-import { CHAINS, makeCli } from "./cli_harness.ts";
+import { makeCli } from "./cli_harness.ts";
+import { CHAINS, copyBlocks, docker, publishedPort, waitReady } from "./cluster.ts";
 import { RegtestRpcTransport, Rpc } from "./rpc.ts";
 import { rbfScenario, reorgScenario } from "./scenarios.ts";
 import { ignoresUnifiedSign, keyMap, stockSign, unifiedSign } from "./signers.ts";
 
-const COMPOSE = new URL("./compose.yml", import.meta.url).pathname;
 const seed = (words: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(words));
 const OTHER = seed("legal winner thank year wave sausage worth useful legal winner thank yellow");
 const fp = (k: HDKey) => k.fingerprint.toString(16).padStart(8, "0");
@@ -142,34 +142,13 @@ const WALLETS: WalletSpec[] = [
   MIXED,
 ];
 
-async function docker(project: string, ...args: string[]): Promise<string> {
-  const out = await new Deno.Command("docker", {
-    args: ["compose", "-p", project, "-f", COMPOSE, ...args],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  const text = new TextDecoder().decode(out.stdout) + new TextDecoder().decode(out.stderr);
-  if (!out.success) throw new Error(`docker compose ${args.join(" ")} failed:\n${text}`);
-  return text;
-}
-
 async function startNodes(project: string): Promise<Record<ChainId, Rpc>> {
-  await docker(project, "build"); // layers are cached after the first run
-  await docker(project, "up", "-d", "--no-build");
+  await docker(project, ["build"]); // layers are cached after the first run
+  await docker(project, ["up", "-d", "--no-build"]);
   const nodes = {} as Record<ChainId, Rpc>;
   for (const chain of CHAINS) {
-    const port = Number((await docker(project, "port", chain, "18443")).trim().split(":").pop());
-    const rpc = new Rpc(port);
-    for (let i = 0;; i++) {
-      try {
-        await rpc.call("getblockcount");
-        break;
-      } catch (error) {
-        if (i > 120) throw new Error(`${chain} node never became ready: ${error}`);
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-    nodes[chain] = rpc;
+    nodes[chain] = new Rpc(await publishedPort(project, chain));
+    await waitReady(nodes[chain], chain);
   }
   return nodes;
 }
@@ -177,16 +156,6 @@ async function startNodes(project: string): Promise<Record<ChainId, Rpc>> {
 /** Regtest address for a script, from the node's own decoder (the app uses mainnet encodings). */
 async function regtestAddress(node: Rpc, scriptPubKey: string): Promise<string> {
   return (await node.call<{ address: string }>("decodescript", scriptPubKey)).address;
-}
-
-async function copyBlocks(from: Rpc, to: Rpc[], upTo: number): Promise<void> {
-  for (let h = 1; h <= upTo; h++) {
-    const raw = await from.call<string>("getblock", await from.call("getblockhash", h), 0);
-    for (const node of to) {
-      const result = await node.call("submitblock", raw);
-      if (result !== null) throw new Error(`submitblock at ${h}: ${result}`);
-    }
-  }
 }
 
 Deno.test({
@@ -220,7 +189,7 @@ Deno.test({
       }
       await wallet("btc").call("sendmany", "", outputs);
       await nodes.btc.mine(XBT_ACTIVATION_HEIGHT - 1 - 101, await minerAddr("btc"));
-      await copyBlocks(nodes.btc, [nodes.xbt, nodes.ecx], XBT_ACTIVATION_HEIGHT - 1);
+      await copyBlocks(nodes.btc, [nodes.xbt, nodes.ecx], 0, XBT_ACTIVATION_HEIGHT - 1);
 
       // The chains diverge. Different payees make the BTC and ECX blocks differ; XBT is BLAKE2b.
       for (const c of CHAINS) await nodes[c].mine(6, await minerAddr(c));
@@ -451,7 +420,7 @@ Deno.test({
         fn: (t) => reorgScenario(t, harness, REORG_WALLET),
       });
     } finally {
-      await docker(project, "down", "-v", "--remove-orphans").catch(() => {});
+      await docker(project, ["down", "-v", "--remove-orphans"]).catch(() => {});
     }
   },
 });

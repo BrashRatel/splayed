@@ -37,6 +37,7 @@ export function makeRegtestProfile(
   const profile: NetworkProfile = {
     id: REGTEST_PROFILE_ID,
     description: "Regtest rehearsal (test code only)",
+    addressNetwork: "regtest",
     chains: {
       btc: chain("btc", {}),
       xbt: chain("xbt", {

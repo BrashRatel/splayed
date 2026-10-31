@@ -5,7 +5,8 @@ services:
   btc:
     image: forksplit-it-btc:local
     build: { context: ., dockerfile: node.Dockerfile, args: { NODE: core } }
-    ports: ["127.0.0.1::18443"]
+    ports: ["${FSPLIT_BIND:-127.0.0.1}:${FSPLIT_BTC_PORT:-}:18443"]
+    restart: "${FSPLIT_RESTART:-no}"
     volumes: ["btc:/data"]
   xbt:
     image: forksplit-it-xbt:local
@@ -15,13 +16,15 @@ services:
       - "-testactivationheight=blake2b@110"
       - "-rdtsexpiry=1819756800"
       - "-blockmaxweight=800000"
-    ports: ["127.0.0.1::18443"]
+    ports: ["${FSPLIT_BIND:-127.0.0.1}:${FSPLIT_XBT_PORT:-}:18443"]
+    restart: "${FSPLIT_RESTART:-no}"
     volumes: ["xbt:/data"]
   ecx:
     image: forksplit-it-ecx:local
     build: { context: ., dockerfile: ecx.Dockerfile }
     command: ["-rpcport=18443", "-listenonion=0"]
-    ports: ["127.0.0.1::18443"]
+    ports: ["${FSPLIT_BIND:-127.0.0.1}:${FSPLIT_ECX_PORT:-}:18443"]
+    restart: "${FSPLIT_RESTART:-no}"
     volumes: ["ecx:/data"]
 volumes:
   btc:

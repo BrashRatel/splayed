@@ -7,6 +7,17 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Regtest playground** (`deno task regtest`): a long-lived environment with stable ports for
+  trying forksplit by hand. `up` starts the three nodes and mines the shared history, `fund` puts
+  coins on your own wallet (a descriptor or an address) on all three chains before the fork, `fork`
+  separates the chains, and `ui` runs the web UI against them. `mine`, `reorg`, `check` (asks every
+  node about a plan's signed transactions, independent of forksplit), `status`, `stop` and `down`
+  complete it. It was exercised end to end through the UI's HTTP API; Sparrow and Shrike themselves
+  have not been tried yet.
+- **Regtest address network for test profiles.** A regtest profile accepts the `tpub`, `upub` and
+  `vpub` keys wallets export and shows `bcrt1` addresses, so addresses can be compared with a
+  regtest wallet. Mainnet is unchanged and still refuses testnet keys. `import` says when it stores
+  a key as the equivalent xpub.
 - **`bump`: RBF fee bump.** `forksplit bump <plan>` writes a replacement plan that spends the same
   inputs to the same destination at a higher fee, built from the original's own unsigned PSBT so the
   ECX marker and the 0x21 request carry over. It enforces BIP125 (old fee plus 1 sat/vB for the new
@@ -40,6 +51,8 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Fixed
 
+- The reorg warning said a split's "depth restarted" even when it stayed at the same height; it now
+  says it is in a different block.
 - `track` could not see confirmations through node RPC: a confirmed spend with no detail was read as
   "mempool" forever. It now asks the node about the transaction itself, and says `unknown` when a
   backend cannot tell.
