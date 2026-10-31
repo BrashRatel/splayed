@@ -194,3 +194,72 @@ Deno.test("config edits validate before saving and re-gate", async () => {
   assert(show.text().includes("local (this machine)"));
   assert(show.text().includes("Network settings confirmed: NO"));
 });
+
+Deno.test("init asks before contacting anything; declining sends zero requests", async () => {
+  const chains = scenario();
+  const h = harness(chains, false);
+  assertEquals(await main(["--data-dir", await freshDir(), "init"], h.io), 1);
+  assert(h.text().includes("Nothing was contacted"));
+  assertEquals(
+    chains.btc.requests.length + chains.xbt.requests.length + chains.ecx.requests.length,
+    0,
+  );
+});
+
+Deno.test("adding your own backend removes the profile default; only the first passing backend is contacted", async () => {
+  const chains = scenario();
+  const dir = await freshDir();
+  const urls: string[] = [];
+  const h = harness(chains);
+  h.io.transportFactory = (_config, chain, backend) => {
+    urls.push(backend.url);
+    return new FakeEsploraTransport(chains[chain]);
+  };
+  for (const [chain, port] of [["btc", 3001], ["xbt", 3002], ["ecx", 3003]] as const) {
+    assertEquals(
+      await main([
+        "--data-dir",
+        dir,
+        "config",
+        "backend",
+        "add",
+        chain,
+        "--kind",
+        "esplora",
+        "--url",
+        `http://127.0.0.1:${port}/api`,
+      ], h.io),
+      0,
+    );
+    // A second, lower-priority backend that should never be needed.
+    assertEquals(
+      await main([
+        "--data-dir",
+        dir,
+        "config",
+        "backend",
+        "add",
+        chain,
+        "--kind",
+        "esplora",
+        "--url",
+        `http://127.0.0.1:${port + 100}/api`,
+        "--priority",
+        "5",
+      ], h.io),
+      0,
+    );
+  }
+  assert(h.errors().includes("profile default backend is removed"));
+  const show = harness(chains);
+  await main(["--data-dir", dir, "config", "show"], show.io);
+  assert(!show.text().includes("mempoolhq"), "BTC default still configured");
+  assert(!show.text().includes("explorer.ecash.com/api\n"), "ECX default still configured");
+  assertEquals(await main(["--data-dir", dir, "init", "--yes"], h.io), 0, h.errors());
+  assert(h.text().includes("not contacted (a higher-priority backend passed)"));
+  assertEquals(urls.sort(), [
+    "http://127.0.0.1:3001/api",
+    "http://127.0.0.1:3002/api",
+    "http://127.0.0.1:3003/api",
+  ]);
+});

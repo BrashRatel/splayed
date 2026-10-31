@@ -8,9 +8,9 @@ chain can be **replayed** on the others, moving the copies you meant to keep. fo
 coins on all three chains, tells you which ones are still shared, and (in later milestones) builds
 replay-protected PSBTs for you to sign in your own wallet.
 
-> **Status: milestone 2.** `init`, `import`, `scan`, `status`, `dest` and `plan` work with
-> Esplora, Electrum and node-RPC backends. `plan` writes **unsigned** PSBTs; nothing in this
-> version signs or broadcasts, so it cannot move funds. `verify` and `broadcast` come next.
+> **Status: milestone 2.** `init`, `import`, `scan`, `status`, `dest` and `plan` work with Esplora,
+> Electrum and node-RPC backends. `plan` writes **unsigned** PSBTs; nothing in this version signs or
+> broadcasts, so it cannot move funds. `verify` and `broadcast` come next.
 
 ## The chains
 
@@ -88,10 +88,10 @@ deno task cli config show
 deno task cli init
 ```
 
-A backend you add is tried before the profile default, which is kept as a lower-priority
-backend (`--priority` changes the order). With node RPC, `txindex=1` lets forksplit report how
-deep a spend is and fetch previous transactions for PSBTs. Without it, a spent coin shows
-as "spent/absent ?" and stays **pending**.
+A backend you add is tried before the profile default, which is kept as a lower-priority backend
+(`--priority` changes the order). With node RPC, `txindex=1` lets forksplit report how deep a spend
+is and fetch previous transactions for PSBTs. Without it, a spent coin shows as "spent/absent ?" and
+stays **pending**.
 
 ### Import and scan
 
@@ -131,32 +131,77 @@ deno task cli plan --xbt-signer knots --fee-rate ecx=2,xbt=3
 ```
 
 For every coin the last scan saw as shared, `plan`:
+
 1. re-checks the coin on the target fork;
 2. fetches the previous transaction and checks it hashes to the right txid;
 3. builds one PSBT per batch.
 
 What it stamps on each fork's PSBTs:
 
-| Fork | Locktime | Sequence | Sighash type | Signer |
-|---|---|---|---|---|
-| ECX | 499,999,998 | `0xfffffffd` on every input | not set | any signer, including stock hardware wallets |
-| XBT | 0 | `0xfffffffd` on every input | `0x21` (`SIGHASH_ALL\|SIGHASH_UNIFIED`) on every input | must support SIGHASH_UNIFIED |
+| Fork | Locktime    | Sequence                    | Sighash type                                           | Signer                                       |
+| ---- | ----------- | --------------------------- | ------------------------------------------------------ | -------------------------------------------- |
+| ECX  | 499,999,998 | `0xfffffffd` on every input | not set                                                | any signer, including stock hardware wallets |
+| XBT  | 0           | `0xfffffffd` on every input | `0x21` (`SIGHASH_ALL\|SIGHASH_UNIFIED`) on every input | must support SIGHASH_UNIFIED                 |
 
 Each input carries:
+
 - BIP32 origins;
 - the full previous transaction for non-Taproot inputs (hardware wallets need it);
 - the redeem and witness scripts for multisig, plus `PSBT_GLOBAL_XPUB`.
 
 Options:
-- `--batch coin` (default) keeps coins unlinked. `--batch address`, `--batch N` and
-  `--batch all` combine coins, and the summary says which addresses that links publicly.
-- Fees come from `--fee-rate` or the backend's 6-block estimate. A batch whose fee would be over
-  10% of its value is skipped.
 
-The smallest transaction on each chain is marked **TEST FIRST**. Destination addresses are
-reserved, so re-planning never reuses one.
+- `--batch coin` (default) keeps coins unlinked. `--batch address`, `--batch N` and `--batch all`
+  combine coins, and the summary says which addresses that links publicly.
+- Fees come from `--fee-rate` or the backend's 6-block estimate. A batch whose fee would be over 10%
+  of its value is skipped.
+
+The smallest transaction on each chain is marked **TEST FIRST**. Destination addresses are reserved,
+so re-planning never reuses one.
 
 Plans go to `<data dir>/plans/<id>/` (`ecx/*.psbt`, `xbt/*.psbt`, `plan.json`, `README.txt`).
+
+### Sign, verify, broadcast
+
+Sign each PSBT in your wallet and save the result next to the original as `<name>.signed.psbt`.
+Finalized PSBTs, partially signed PSBTs, and raw transaction hex (`.hex`/`.txn`) are all accepted.
+
+```sh
+deno task cli verify <plan-id>          # or: verify <plan-id> path/to/signed files...
+deno task cli broadcast <plan-id>
+deno task cli track <plan-id>
+```
+
+`verify` takes only signatures from the signer's file. Scripts, keys and amounts come from the
+plan's own PSBTs. Each signed file is matched to its planned transaction by content, then:
+
+1. The transaction must be identical to the plan: same inputs, sequences, outputs and locktime.
+   Anything a signer changed (a fee bump, a swapped address) doesn't match.
+2. ECX transactions must have locktime 499,999,998 and a non-final input sequence.
+3. Every signature is checked against the digest its own chain will compute:
+   - **ECX:** Bitcoin's legacy, BIP143 or BIP341 digest, with SIGHASH_ALL or DEFAULT only.
+   - **XBT:** the Knots unified digest, and **every** signature must be 0x21. A signer that quietly
+     signs SIGHASH_ALL instead is caught here, because that transaction would also be valid on BTC.
+4. The fee must equal the plan's, and the final txid must match.
+5. If you configured your own node-RPC backends, each node is asked `testmempoolaccept` (nothing is
+   broadcast). The target chain should accept. **Any other chain accepting means the transaction
+   isn't replay-protected, and verification fails.**
+
+The final transaction is rebuilt canonically from the verified signatures.
+
+`broadcast` sends only verified transactions:
+
+- It re-verifies the exact bytes, re-checks the broadcast backend's identity, and re-checks each
+  input is still unspent on that chain.
+- It saves progress to disk before sending.
+- Each transaction goes only to its own chain, over its own Tor circuit.
+- On each chain it sends the **TEST FIRST** transaction alone and waits for it to confirm before
+  sending the rest (`--all` overrides).
+- An unknown result (timeout, Tor failure) is recorded as unknown, never as failed, and is safe to
+  retry. Re-running is idempotent.
+
+`track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
+BTC copies then show as separated and can be spent normally.
 
 ## Security model
 
@@ -176,9 +221,9 @@ Plans go to `<data dir>/plans/<id>/` (`ecx/*.psbt`, `xbt/*.psbt`, `plan.json`, `
   - Each chain and each future broadcast gets a separate Tor circuit (SOCKS credential isolation).
   - Queries are shuffled and jittered.
   - `status` reports how many addresses were revealed to remote servers.
-- **PSBTs are built in-house** (`src/core/psbt.ts`): general-purpose libraries reject sighash
-  type 0x21. The ECX PSBTs are tested against `@scure/btc-signer`, which signs them as a stock
-  signer would; the signed transaction keeps the replay marker and the predicted txid.
+- **PSBTs are built in-house** (`src/core/psbt.ts`): general-purpose libraries reject sighash type
+  0x21. The ECX PSBTs are tested against `@scure/btc-signer`, which signs them as a stock signer
+  would; the signed transaction keeps the replay marker and the predicted txid.
 - **No fetch().** HTTP goes over connections the tool opens itself, so `HTTP(S)_PROXY` environment
   variables can't silently reroute traffic.
 - **The Esplora trap.** `/tx/{txid}/outspend/{n}` reports "unspent" even for transactions that don't
@@ -203,9 +248,9 @@ Data directory: `~/.local/share/forksplit` (Linux), `~/Library/Application Suppo
    status~~
 2. Electrum backend (XBT needs a BLAKE2b-aware server with 164-byte headers)
 3. `plan`: unsigned PSBTs for the guided route
-4. `verify`: invariant checks on signed PSBTs, including the unified-sighash vectors and
-   `testmempoolaccept` on your nodes
-5. `broadcast`: persist first, then re-check identity, then send through an isolated circuit
+4. ~~`verify`: invariant checks on signed PSBTs, including the unified-sighash vectors and
+   `testmempoolaccept` on your nodes~~
+5. ~~`broadcast`: persist first, then re-check identity, then send through an isolated circuit~~
 6. Local web UI on the same core; bundled Tor
 7. Advanced donor-input routes (opt-in)
 
@@ -219,7 +264,9 @@ deno task lint
 
 ## Credits and license
 
-Parts are adapted from [smolcars/bcashjr-wallet](https://github.com/smolcars/bcashjr-wallet) and
+`src/core/unified_sighash.ts` and `testdata/unified_sighash.json` (166 Knots vectors) are vendored
+from smolcars/bcashjr-wallet. Other parts are adapted from
+[smolcars/bcashjr-wallet](https://github.com/smolcars/bcashjr-wallet) and
 [smolcars/ecashjr-wallet](https://github.com/smolcars/ecashjr-wallet) (MIT, © 2026 Hampus Sjöberg):
 byte helpers, the checkpoint-verification pattern, and Esplora response validation. See
 `third_party/LICENSE.smolcars`.

@@ -82,7 +82,8 @@ export class ElectrumConnection {
     clearTimeout(entry.timer);
     if (msg.error) {
       const message = typeof msg.error === "string" ? msg.error : msg.error.message ?? "error";
-      entry.reject(new BackendError(`Electrum: ${message}`));
+      // Status -1 marks an explicit server-side error (vs. a network failure).
+      entry.reject(new BackendError(`Electrum: ${message}`, -1));
     } else entry.resolve(msg.result);
   }
 
@@ -155,19 +156,33 @@ export class ElectrumBackend implements ChainBackend {
       (route.hostClass !== "loopback" && route.hostClass !== "lan");
   }
 
+  private async open(isolation: string): Promise<ElectrumConnection> {
+    const target = urlTarget(this.config.url);
+    const conn = this.connector
+      ? await this.connector()
+      : await openStream(this.route, { ...target, caCerts: this.caCerts, isolation });
+    const c = new ElectrumConnection(conn, this.config.url);
+    await c.request("server.version", ["", "1.4"]);
+    return c;
+  }
+
+  /** Broadcasts on a separate connection (separate Tor circuit) from the one used for reads. */
+  async broadcast(hex: string, isolation: string): Promise<string> {
+    const c = await this.open(isolation);
+    try {
+      const txid = await c.request<string>("blockchain.transaction.broadcast", [hex]);
+      if (typeof txid !== "string" || !HEX64.test(txid)) {
+        throw new BackendError(`Unexpected broadcast response: ${String(txid).slice(0, 120)}`);
+      }
+      return txid;
+    } finally {
+      await c.close();
+    }
+  }
+
   private connect(): Promise<ElectrumConnection> {
     if (!this.connection) {
-      this.connection = (async () => {
-        const target = urlTarget(this.config.url);
-        const conn = this.connector ? await this.connector() : await openStream(this.route, {
-          ...target,
-          caCerts: this.caCerts,
-          isolation: `${this.chain}:read`,
-        });
-        const c = new ElectrumConnection(conn, this.config.url);
-        await c.request("server.version", ["", "1.4"]);
-        return c;
-      })();
+      this.connection = this.open(`${this.chain}:read`);
       this.connection.catch(() => (this.connection = undefined));
     }
     return this.connection;

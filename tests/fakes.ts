@@ -18,6 +18,9 @@ export interface FakeChain {
   requests: string[];
   status429?: boolean;
   feeEstimates?: Record<string, number>;
+  broadcasts?: { txid: string; isolation: string; hex: string }[];
+  /** Optional consensus stand-in: return a reject reason, or undefined to accept. */
+  accept?: (tx: import("../src/core/tx.ts").Tx, hex: string) => string | undefined;
   /** Raw headers by height (Electrum). */
   headers?: Map<number, string>;
 }
@@ -60,6 +63,27 @@ export class FakeEsploraTransport implements Transport {
     if (this.chain.status429) return Promise.resolve(response(429, "slow down"));
     const c = this.chain;
     let m: RegExpExecArray | null;
+    if (spec.method === "POST" && path === "/tx") {
+      const hex = typeof spec.body === "string" ? spec.body : new TextDecoder().decode(spec.body);
+      const tx = parseTx(hex);
+      const id = computeTxid(tx);
+      for (const i of tx.inputs) {
+        if (!c.txs.has(i.txid) || c.spends.has(`${i.txid}:${i.vout}`)) {
+          return Promise.resolve(
+            response(400, "sendrawtransaction RPC error: bad-txns-inputs-missingorspent"),
+          );
+        }
+      }
+      const reason = c.accept?.(tx, hex);
+      if (reason) return Promise.resolve(response(400, `sendrawtransaction RPC error: ${reason}`));
+      for (const i of tx.inputs) c.spends.set(`${i.txid}:${i.vout}`, { txid: id });
+      c.txs.set(id, {
+        vout: tx.outputs.map((o) => ({ value: Number(o.value), scriptpubkey: toHex(o.script) })),
+        raw: hex,
+      });
+      (c.broadcasts ??= []).push({ txid: id, isolation: spec.isolation, hex });
+      return Promise.resolve(response(200, id));
+    }
     if (path === "/blocks/tip/height") return Promise.resolve(response(200, String(c.tip)));
     if ((m = /^\/block-height\/(\d+)$/u.exec(path))) {
       const h = Number(m[1]);

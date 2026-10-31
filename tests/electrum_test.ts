@@ -4,9 +4,10 @@ import { ElectrumBackend } from "../src/backends/electrum.ts";
 import { fromHex, reverseBytes, toHex } from "../src/core/bytes.ts";
 import { verifyIdentity } from "../src/core/identity.ts";
 import { type ChainProfile, MAINNET } from "../src/core/profiles.ts";
-import { electrumScripthash } from "../src/core/tx.ts";
+import { electrumScripthash, parseTx, txid as computeTxid } from "../src/core/tx.ts";
 import { resolveRoute } from "../src/net/transport.ts";
 import { type FakeChain, fakeChain, fund, spendReal } from "./fakes.ts";
+import { serializeStripped } from "../src/core/tx.ts";
 
 /** Minimal Electrum server over TCP backed by a FakeChain. */
 async function withElectrum(chain: FakeChain, fn: (port: number) => Promise<void>) {
@@ -80,6 +81,18 @@ async function withElectrum(chain: FakeChain, fn: (port: number) => Promise<void
                 if (sp) hist.push({ tx_hash: sp.txid, height: sp.height ?? 0 });
               }
               await ok(hist);
+              break;
+            }
+            case "blockchain.transaction.broadcast": {
+              const tx = parseTx(params[0]);
+              const id = computeTxid(tx);
+              if (tx.inputs.some((i) => chain.spends.has(`${i.txid}:${i.vout}`))) {
+                await fail("bad-txns-inputs-missingorspent");
+                break;
+              }
+              for (const i of tx.inputs) chain.spends.set(`${i.txid}:${i.vout}`, { txid: id });
+              chain.txs.set(id, { vout: [], raw: params[0] });
+              await ok(id);
               break;
             }
             case "blockchain.estimatefee":
@@ -219,6 +232,42 @@ Deno.test("Electrum: observe unspent, spent (with depth) and absent; discovery; 
       assertEquals((await b.addressUtxos("bc1qtest", script)).map((u) => u.vout), [0]);
       assertEquals(await b.feeRate(6), 2);
       assertEquals(await b.rawTransaction(id), ecx.txs.get(id)!.raw);
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+Deno.test("Electrum: broadcast on its own connection; explicit errors are marked as rejections", async () => {
+  const ecx = fakeChain("ecx", 974_500);
+  const id = fund(
+    [ecx],
+    [{ address: "bc1qx", scriptPubKey: "0014" + "22".repeat(20), value: 10_000 }],
+    900_000,
+    7,
+  );
+  const spend = {
+    version: 2,
+    inputs: [{ txid: id, vout: 0, scriptSig: new Uint8Array(), sequence: 0xfffffffd, witness: [] }],
+    outputs: [{ value: 9_000n, script: Uint8Array.of(0x51) }],
+    lockTime: 499_999_998,
+  };
+  const hex = toHex(serializeStripped(spend));
+  let connects = 0;
+  await withElectrum(ecx, async (port) => {
+    const url = `tcp://127.0.0.1:${port}`;
+    const route = resolveRoute(url, { kind: "tor" }, false, { host: "127.0.0.1", port: 9050 });
+    const b = new ElectrumBackend("ecx", cfg(url), route, undefined, () => {
+      connects++;
+      return Deno.connect({ hostname: "127.0.0.1", port });
+    });
+    try {
+      await b.tipHeight(); // read connection
+      assertEquals(await b.broadcast(hex, "broadcast:x"), computeTxid(spend));
+      assertEquals(connects, 2); // broadcast used a fresh connection
+      const again = await b.broadcast(hex, "broadcast:x").catch((e) => e);
+      assertEquals(again.status, -1);
+      assert(String(again.message).includes("missingorspent"));
     } finally {
       await b.close();
     }

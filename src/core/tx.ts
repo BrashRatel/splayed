@@ -142,3 +142,59 @@ export function txid(tx: Tx): string {
 export function electrumScripthash(script: Uint8Array): string {
   return toHex(reverseBytes(sha256(script)));
 }
+
+/** Full serialization (with witness data when any input has some). */
+export function serializeTx(tx: Tx): Uint8Array {
+  const segwit = tx.inputs.some((i) => i.witness.length > 0);
+  if (!segwit) return serializeStripped(tx);
+  return concatBytes(
+    u32le(tx.version >>> 0),
+    Uint8Array.of(0, 1),
+    compactSize(tx.inputs.length),
+    ...tx.inputs.map((i) =>
+      concatBytes(
+        reverseBytes(fromHex(i.txid)),
+        u32le(i.vout),
+        varBytes(i.scriptSig),
+        u32le(i.sequence),
+      )
+    ),
+    compactSize(tx.outputs.length),
+    ...tx.outputs.map((o) => concatBytes(i64le(o.value), varBytes(o.script))),
+    ...tx.inputs.map((i) => concatBytes(compactSize(i.witness.length), ...i.witness.map(varBytes))),
+    u32le(tx.lockTime),
+  );
+}
+
+/** Data pushes of a push-only script (scriptSig). Throws on any non-push opcode. */
+export function parsePushes(script: Uint8Array): Uint8Array[] {
+  const out: Uint8Array[] = [];
+  let i = 0;
+  while (i < script.length) {
+    const op = script[i++];
+    let len: number;
+    if (op === 0) {
+      out.push(new Uint8Array());
+      continue;
+    } else if (op >= 1 && op <= 75) len = op;
+    else if (op === 0x4c) len = script[i++];
+    else if (op === 0x4d) {
+      len = script[i] | (script[i + 1] << 8);
+      i += 2;
+    } else throw new TxParseError(`scriptSig contains a non-push opcode 0x${op.toString(16)}`);
+    if (i + len > script.length) throw new TxParseError("Truncated push in scriptSig");
+    out.push(script.slice(i, i + len));
+    i += len;
+  }
+  return out;
+}
+
+export function pushData(data: Uint8Array): Uint8Array {
+  if (data.length === 0) return Uint8Array.of(0);
+  if (data.length <= 75) return concatBytes(Uint8Array.of(data.length), data);
+  if (data.length <= 255) return concatBytes(Uint8Array.of(0x4c, data.length), data);
+  if (data.length <= 520) {
+    return concatBytes(Uint8Array.of(0x4d, data.length & 0xff, data.length >> 8), data);
+  }
+  throw new TxParseError("Push too large");
+}

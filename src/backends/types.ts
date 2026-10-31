@@ -48,6 +48,10 @@ export interface ChainBackend {
   /** Fee rate estimate in sat/vB, or undefined when the backend has none. */
   feeRate?(targetBlocks: number): Promise<number | undefined>;
   close?(): Promise<void>;
+  /** Sends a raw transaction to THIS chain over its own isolated circuit. Returns the txid. */
+  broadcast(hex: string, isolation: string): Promise<string>;
+  /** Node RPC only: would this node accept the transaction? Never broadcasts. */
+  testMempoolAccept?(hex: string): Promise<{ allowed: boolean; reason?: string }>;
   /** Address-based discovery (Esplora/Electrum). */
   addressTxCount?(address: string, scriptPubKey: string): Promise<number>;
   addressUtxos?(address: string, scriptPubKey: string): Promise<FoundUtxo[]>;

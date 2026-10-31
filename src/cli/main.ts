@@ -36,6 +36,22 @@ import {
   XBT_SIGNERS,
 } from "../core/planner.ts";
 import { join } from "node:path";
+import {
+  confirmationDepth,
+  ExecuteError,
+  findSignedFiles,
+  loadPlanDir,
+  loadProgress,
+  matchArtifacts,
+  mempoolChecks,
+  type MempoolNode,
+  ownPsbt,
+  saveProgress,
+  verifySigned,
+} from "../core/execute.ts";
+import { SigCheckError } from "../core/sigcheck.ts";
+import { parseTx } from "../core/tx.ts";
+import { BackendError } from "../backends/types.ts";
 import { observationCell, privacyLevel, sats, shortOutpoint, table } from "./format.ts";
 
 const USAGE = `forksplit - separate BTC, XBT and ECX copies of the same coins (watch-only)
@@ -74,6 +90,17 @@ Splitting (guided route: forks first, BTC untouched):
                                   Write unsigned, replay-protected PSBTs for shared coins.
                                   XBT signers: ${Object.keys(XBT_SIGNERS).join(", ")}
   plans                           List written plans
+  verify <plan> [signed files...] [--no-mempool]
+                                  Check signed PSBTs/transactions: same tx as planned, replay
+                                  marker (ECX) or 0x21 on every signature (XBT), every signature
+                                  valid, fee as planned. With your own RPC nodes configured, also
+                                  asks each one (testmempoolaccept) - the target chain must accept
+                                  and the other chains must reject.
+  broadcast <plan> [--all] [--yes]
+                                  Send verified transactions, each only to its own chain, each
+                                  over its own Tor circuit. Sends the TEST FIRST transaction alone
+                                  until it confirms (--all overrides).
+  track <plan>                    Confirmations of broadcast transactions
 
 Global options:
   --data-dir DIR    (env FORKSPLIT_DATA_DIR)   --tor-socks HOST:PORT (env FORKSPLIT_TOR_SOCKS)
@@ -136,6 +163,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         batch: { type: "string" },
         "fee-rate": { type: "string" },
         coin: { type: "string", multiple: true },
+        all: { type: "boolean" },
+        "no-mempool": { type: "boolean" },
       },
     });
   } catch (error) {
@@ -191,6 +220,12 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         });
       case "plans":
         return await cmdPlans(config, io);
+      case "verify":
+        return await cmdVerify(config, io, args, flags["no-mempool"] === true);
+      case "broadcast":
+        return await cmdBroadcast(config, io, args[0], flags.all === true, flags.yes === true);
+      case "track":
+        return await cmdTrack(config, io, args[0]);
       default:
         throw new UsageError(`Unknown command "${command}"`);
     }
@@ -202,6 +237,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
     if (
       error instanceof ConfigError || error instanceof GateClosedError ||
       error instanceof PlanError ||
+      error instanceof ExecuteError ||
       error instanceof DescriptorError || error instanceof PolicyError ||
       error instanceof TorUnavailableError
     ) {
@@ -260,15 +296,22 @@ async function editConfig(
   const [sub, ...rest] = args;
   // Load the effective config so "add" on a chain still using defaults starts from them.
   const effective = await loadConfig({ dataDir, env: io.env }).catch(() => undefined);
-  const explicit = (chain: ChainId): Record<string, unknown>[] => {
+  const explicit = (chain: ChainId, keepDefaults = true): Record<string, unknown>[] => {
     chains[chain] ??= {};
     if (!Array.isArray(chains[chain].backends)) {
-      // Keep the profile default as a lower-priority backend so the one being added is tried first.
-      chains[chain].backends = effective
-        ? effective.chains[chain].backends.map((b) =>
-          backendToToml(b.origin === "profile-default" ? { ...b, priority: 10 } : b)
+      // Adding your own backend REPLACES the profile default: it will never be contacted.
+      // (`config backend fallback` / `reset` bring defaults back explicitly.)
+      const kept = effective
+        ? effective.chains[chain].backends.filter((b) =>
+          keepDefaults || b.origin !== "profile-default"
         )
         : [];
+      if (effective && kept.length < effective.chains[chain].backends.length) {
+        io.err(
+          `${chain.toUpperCase()}: the profile default backend is removed and won't be contacted.`,
+        );
+      }
+      chains[chain].backends = kept.map(backendToToml);
     }
     return chains[chain].backends as Record<string, unknown>[];
   };
@@ -297,7 +340,7 @@ async function editConfig(
         caFile: flags["ca-file"] as string | undefined,
         origin: "user",
       };
-      const list = explicit(chain).filter((b) => b.url !== backend.url);
+      const list = explicit(chain, false).filter((b) => b.url !== backend.url);
       list.push(backendToToml(backend));
       chains[chain].backends = list;
     } else if (action === "remove") {
@@ -371,16 +414,23 @@ async function editConfig(
 
 // ---- init ----
 
+/**
+ * Tries backends in priority order and STOPS at the first one that passes, so lower-priority
+ * backends (and any profile defaults still configured) are contacted only if every backend
+ * above them failed. `role` picks read backends (scan/plan) or broadcast backends.
+ */
 async function verifiedBackendsFor(
   config: Config,
   chain: ChainId,
   io: CliIO,
   quiet = false,
+  role: "read" | "broadcast" = "read",
 ): Promise<{ backend?: ChainBackend; results: { url: string; ok: boolean; detail: string }[] }> {
   const results: { url: string; ok: boolean; detail: string }[] = [];
-  let chosen: ChainBackend | undefined;
-  for (const b of config.chains[chain].backends.filter((b) => b.role !== "broadcast")) {
-    let ok = false;
+  const candidates = config.chains[chain].backends.filter((b) =>
+    role === "read" ? b.role !== "broadcast" : b.role !== "read"
+  );
+  for (const [i, b] of candidates.entries()) {
     let detail: string;
     try {
       const backend = await createBackend(config, chain, b, {
@@ -389,25 +439,41 @@ async function verifiedBackendsFor(
         env: io.env,
       });
       const r = await verifyIdentity(backend, config.profile.chains[chain]);
-      ok = r.ok;
       detail = r.detail;
-      if (ok && !chosen) chosen = backend;
-      else await backend.close?.();
+      if (r.ok) {
+        results.push({ url: b.url, ok: true, detail });
+        if (!quiet) io.out(`  OK   ${b.url}\n       ${detail}`);
+        for (const rest of candidates.slice(i + 1)) {
+          if (!quiet) {
+            io.out(`  --   ${rest.url}\n       not contacted (a higher-priority backend passed)`);
+          }
+        }
+        return { backend, results };
+      }
+      await backend.close?.();
     } catch (error) {
       detail = (error as Error).message;
     }
-    results.push({ url: b.url, ok, detail });
-    if (!quiet) io.out(`  ${ok ? "OK  " : "FAIL"} ${b.url}\n       ${detail}`);
+    results.push({ url: b.url, ok: false, detail });
+    if (!quiet) io.out(`  FAIL ${b.url}\n       ${detail}`);
   }
-  return { backend: chosen, results };
+  return { results };
 }
 
 async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number> {
   showConfig(config, io, await networkConfirmed(config));
   io.out(
-    "Checking each backend is reachable and on the right chain. These checks ask only for the\n" +
-      "chain tip and a few fixed block hashes; nothing about your coins is sent.\n",
+    "Next: check each chain's backend is reachable and on the right chain. Only the chain tip\n" +
+      "and a few fixed block hashes are requested; nothing about your coins is sent. Backends\n" +
+      "are tried in priority order and checking stops at the first that passes, so lower ones\n" +
+      "aren't contacted.\n",
   );
+  if (!yes && !io.confirm("Contact these servers now? (Answer no to change settings first.)")) {
+    io.out(
+      "Nothing was contacted. Change settings with `forksplit config ...`, then run init again.",
+    );
+    return 1;
+  }
   const identity: Record<string, { ok: boolean; detail: string }> = {};
   let allChainsOk = true;
   for (const chain of CHAIN_IDS) {
@@ -764,6 +830,328 @@ async function cmdPlans(config: Config, io: CliIO) {
     return 0;
   }
   for (const id of ids.sort()) io.out(`${id}  ${join(dir, id)}`);
+  return 0;
+}
+
+// ---- verify / broadcast / track ----
+
+/** The user's own nodes (kind "rpc"), one per chain, first that passes identity. */
+async function ownNodes(config: Config, io: CliIO): Promise<MempoolNode[]> {
+  const nodes: MempoolNode[] = [];
+  for (const chain of CHAIN_IDS) {
+    for (const b of config.chains[chain].backends.filter((b) => b.kind === "rpc")) {
+      try {
+        const backend = await createBackend(config, chain, b, {
+          transportFactory: io.transportFactory,
+          streamFactory: io.streamFactory,
+          env: io.env,
+        });
+        if ((await verifyIdentity(backend, config.profile.chains[chain])).ok) {
+          nodes.push({ chain, backend });
+          break;
+        }
+      } catch { /* try the next */ }
+    }
+  }
+  return nodes;
+}
+
+async function cmdVerify(config: Config, io: CliIO, args: string[], noMempool: boolean) {
+  await requireNetworkConfirmed(config);
+  const [id, ...given] = args;
+  if (!id) throw new UsageError("verify <plan> [signed files...]");
+  const { dir, plan } = await loadPlanDir(config.dataDir, id);
+  const progress = await loadProgress(dir);
+  const files = given.length ? given : await findSignedFiles(dir);
+  if (!files.length) {
+    io.out(
+      `No signed files found. Save signed PSBTs next to the originals as <name>.signed.psbt in ${dir}`,
+    );
+    return 1;
+  }
+  const { matched, unmatched } = await matchArtifacts(dir, plan, files);
+  for (const f of unmatched) io.err(`Warning: ${f} doesn't match any transaction in this plan`);
+  const nodes = noMempool ? [] : await ownNodes(config, io);
+  if (!noMempool && nodes.length) {
+    io.out(`Mempool checks on your nodes: ${nodes.map((n) => n.chain.toUpperCase()).join(", ")}`);
+  }
+  let failures = 0;
+  const rows = [["Chain", "#", "File", "Result"]];
+  try {
+    for (const t of plan.transactions) {
+      const m = matched.get(t.file);
+      if (!m) {
+        rows.push([
+          t.chain.toUpperCase(),
+          String(t.order),
+          t.file,
+          progress.txs[t.file]?.verified ? "verified earlier" : "not signed yet",
+        ]);
+        continue;
+      }
+      try {
+        const v = verifySigned(t, await ownPsbt(dir, t), m.signed);
+        const mempool = nodes.length ? await mempoolChecks(t, v.finalHex, nodes) : undefined;
+        progress.txs[t.file] = {
+          ...progress.txs[t.file],
+          verified: {
+            at: new Date().toISOString(),
+            txid: v.txid,
+            finalHex: v.finalHex,
+            checks: v.checks,
+            mempool,
+          },
+        };
+        rows.push([
+          t.chain.toUpperCase(),
+          String(t.order),
+          t.file,
+          `VERIFIED ${v.txid.slice(0, 16)}…`,
+        ]);
+        for (const c of v.checks) io.out(`  ${t.file}: ${c}`);
+        for (const [chain, r] of Object.entries(mempool ?? {})) {
+          io.out(`  ${t.file}: ${chain.toUpperCase()} node: ${r}`);
+        }
+      } catch (error) {
+        if (
+          !(error instanceof SigCheckError || error instanceof BackendError ||
+            error instanceof ExecuteError)
+        ) throw error;
+        failures++;
+        rows.push([
+          t.chain.toUpperCase(),
+          String(t.order),
+          t.file,
+          `FAILED: ${(error as Error).message}`,
+        ]);
+      }
+    }
+  } finally {
+    for (const n of nodes) await n.backend.close?.();
+  }
+  await saveProgress(dir, progress);
+  io.out(table(rows));
+  if (failures) io.err(`${failures} transaction(s) failed verification. Do not broadcast them.`);
+  return failures ? 1 : 0;
+}
+
+async function cmdBroadcast(
+  config: Config,
+  io: CliIO,
+  id: string | undefined,
+  all: boolean,
+  yes: boolean,
+) {
+  await requireNetworkConfirmed(config);
+  if (!id) throw new UsageError("broadcast <plan>");
+  const { dir, plan } = await loadPlanDir(config.dataDir, id);
+  const progress = await loadProgress(dir);
+  const opened: ChainBackend[] = [];
+  try {
+    const queue: {
+      t: (typeof plan.transactions)[number];
+      hex: string;
+      txid: string;
+      send: ChainBackend;
+    }[] = [];
+    for (const chain of ["ecx", "xbt"] as const) {
+      const txs = plan.transactions.filter((t) =>
+        t.chain === chain && progress.txs[t.file]?.verified
+      );
+      const pending = txs.filter((t) => {
+        const st = progress.txs[t.file]?.broadcast?.status;
+        return st !== "accepted" && st !== "rejected" && st !== "conflict";
+      });
+      if (!pending.length) continue;
+      const { backend: send, results } = await verifiedBackendsFor(
+        config,
+        chain,
+        io,
+        true,
+        "broadcast",
+      );
+      if (!send) {
+        io.err(
+          `${chain.toUpperCase()}: no broadcast backend passed: ${
+            results.map((r) => r.detail).join("; ")
+          }`,
+        );
+        continue;
+      }
+      opened.push(send);
+      if (send.chain !== chain) throw new ExecuteError("Internal error: backend chain mismatch");
+      let allowed = pending;
+      const test = txs.find((t) => t.testFirst);
+      if (test && !all) {
+        const st = progress.txs[test.file]?.broadcast?.status;
+        if (st !== "accepted") {
+          allowed = pending.filter((t) => t === test);
+          if (allowed.length) {
+            io.out(
+              `${chain.toUpperCase()}: sending only the TEST FIRST transaction (${test.file}).`,
+            );
+          }
+        } else {
+          const tip = await send.tipHeight();
+          const d = await confirmationDepth(
+            send,
+            test,
+            progress.txs[test.file].verified!.txid,
+            tip,
+          );
+          if (d.state !== "confirmed") {
+            io.out(
+              `${chain.toUpperCase()}: waiting for the TEST FIRST transaction to confirm (${d.state}). ` +
+                "Run `forksplit track` and try again, or pass --all.",
+            );
+            allowed = [];
+          }
+        }
+      }
+      for (const t of allowed) {
+        const v = progress.txs[t.file].verified!;
+        // Re-verify the exact bytes about to be sent.
+        const again = verifySigned(t, await ownPsbt(dir, t), { tx: parseTx(v.finalHex) });
+        if (again.finalHex !== v.finalHex) {
+          throw new ExecuteError(`${t.file}: stored transaction changed`);
+        }
+        // Inputs must still be unspent on this chain (or spent by this very transaction).
+        let skip = false;
+        for (const input of t.inputs) {
+          const obs = await send.observeOutput(input.txid, input.vout);
+          if (obs.state === "spent" && obs.spendTxid === v.txid) {
+            progress.txs[t.file].broadcast = {
+              status: "accepted",
+              at: new Date().toISOString(),
+              backend: send.config.url,
+              attempts: progress.txs[t.file].broadcast?.attempts ?? 0,
+              detail: "already on chain",
+            };
+            skip = true;
+            break;
+          }
+          if (obs.state !== "unspent") {
+            progress.txs[t.file].broadcast = {
+              status: "conflict",
+              at: new Date().toISOString(),
+              backend: send.config.url,
+              attempts: 0,
+              detail: `input ${input.txid.slice(0, 8)}:${input.vout} is ${obs.state}`,
+            };
+            io.err(
+              `${t.file}: an input is no longer unspent on ${chain.toUpperCase()}; not sending`,
+            );
+            skip = true;
+            break;
+          }
+        }
+        if (!skip) queue.push({ t, hex: v.finalHex, txid: v.txid, send });
+      }
+    }
+    await saveProgress(dir, progress);
+    if (!queue.length) {
+      io.out("Nothing to broadcast right now.");
+      return 0;
+    }
+    for (const chain of ["ecx", "xbt"] as const) {
+      const items = queue.filter((q) => q.t.chain === chain);
+      if (items.length) {
+        io.out(
+          `${chain.toUpperCase()}: ${items.length} transaction(s) -> ${items[0].send.config.url} (${
+            describeRoute(items[0].send.route)
+          })`,
+        );
+      }
+    }
+    if (!yes && !io.confirm("Broadcast these now? Each goes only to its own chain.")) {
+      io.out("Nothing sent.");
+      return 1;
+    }
+    let failed = 0;
+    for (const q of queue) {
+      const entry = progress.txs[q.t.file];
+      entry.broadcast = {
+        status: "sending",
+        at: new Date().toISOString(),
+        backend: q.send.config.url,
+        attempts: (entry.broadcast?.attempts ?? 0) + 1,
+      };
+      await saveProgress(dir, progress); // persisted BEFORE sending
+      try {
+        const got = await q.send.broadcast(q.hex, `broadcast:${q.txid}`);
+        if (got !== q.txid) throw new BackendError(`Server answered with a different txid ${got}`);
+        entry.broadcast.status = "accepted";
+        io.out(`  sent ${q.t.chain.toUpperCase()} ${q.txid}`);
+      } catch (error) {
+        const explicit = error instanceof BackendError && error.status !== undefined &&
+          error.status !== 429;
+        entry.broadcast.status = explicit ? "rejected" : "unknown";
+        entry.broadcast.detail = (error as Error).message;
+        failed++;
+        io.err(
+          `  ${q.t.file}: ${explicit ? "REJECTED" : "result unknown (will be retried)"}: ${
+            (error as Error).message
+          }`,
+        );
+      }
+      await saveProgress(dir, progress);
+    }
+    io.out("Run `forksplit track <plan>` to follow confirmations.");
+    return failed ? 1 : 0;
+  } finally {
+    for (const b of opened) await b.close?.();
+  }
+}
+
+async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
+  await requireNetworkConfirmed(config);
+  if (!id) throw new UsageError("track <plan>");
+  const { dir, plan } = await loadPlanDir(config.dataDir, id);
+  const progress = await loadProgress(dir);
+  const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
+  for (const chain of ["ecx", "xbt"] as const) {
+    const txs = plan.transactions.filter((t) =>
+      t.chain === chain && progress.txs[t.file]?.broadcast
+    );
+    if (!txs.length) continue;
+    const { backend } = await verifiedBackendsFor(config, chain, io, true);
+    try {
+      const tip = backend ? await backend.tipHeight() : undefined;
+      for (const t of txs) {
+        const p = progress.txs[t.file];
+        let conf = "?";
+        if (backend && tip !== undefined && p.verified) {
+          const d = await confirmationDepth(backend, t, p.verified.txid, tip);
+          conf = d.state === "confirmed"
+            ? `${d.depth} of ${config.chains[chain].confirmations}`
+            : d.state === "conflict"
+            ? `CONFLICT: input spent by ${d.by}`
+            : d.state;
+          if (d.state === "confirmed") {
+            p.confirmations = { depth: d.depth!, at: new Date().toISOString() };
+          }
+        }
+        rows.push([
+          chain.toUpperCase(),
+          String(t.order),
+          p.verified?.txid ?? "-",
+          p.broadcast!.status,
+          conf,
+        ]);
+      }
+    } finally {
+      await backend?.close?.();
+    }
+  }
+  await saveProgress(dir, progress);
+  if (rows.length === 1) {
+    io.out("Nothing broadcast yet.");
+    return 0;
+  }
+  io.out(table(rows));
+  io.out(
+    "When every split is deep enough, run `forksplit scan`: those coins' BTC copies then show as separated.",
+  );
   return 0;
 }
 

@@ -31,14 +31,38 @@ export class RpcBackend implements ChainBackend {
     return this.transport.route;
   }
 
-  async call<T>(method: string, params: unknown[] = [], timeoutMs?: number): Promise<T> {
+  async broadcast(hex: string, isolation: string): Promise<string> {
+    const txid = await this.call<string>("sendrawtransaction", [hex], undefined, isolation);
+    if (typeof txid !== "string" || !HEX64.test(txid)) {
+      throw new BackendError("Unexpected sendrawtransaction result");
+    }
+    return txid;
+  }
+
+  async testMempoolAccept(hex: string): Promise<{ allowed: boolean; reason?: string }> {
+    const [r] = await this.call<{ allowed: boolean; "reject-reason"?: string }[]>(
+      "testmempoolaccept",
+      [[hex]],
+    );
+    if (typeof r?.allowed !== "boolean") {
+      throw new BackendError("Unexpected testmempoolaccept result");
+    }
+    return { allowed: r.allowed, reason: r["reject-reason"] };
+  }
+
+  async call<T>(
+    method: string,
+    params: unknown[] = [],
+    timeoutMs?: number,
+    isolation = `${this.chain}:rpc`,
+  ): Promise<T> {
     const id = this.nextId++;
     const response = await this.transport.request({
       url: this.config.url,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: this.authorization },
       body: JSON.stringify({ jsonrpc: "1.0", id, method, params }),
-      isolation: `${this.chain}:rpc`,
+      isolation,
       timeoutMs,
     });
     if (response.status === 401 || response.status === 403) {

@@ -577,11 +577,16 @@ xbt/  XBT splits. Every input asks for sighash type 0x21 (SIGHASH_ALL|SIGHASH_UN
 
 Sign the transaction marked TEST FIRST on each chain before the rest.
 
-Save each signed PSBT next to its original as <name>.signed.psbt. The next forksplit release
-adds \`forksplit verify\` and \`forksplit broadcast\`, which check every signature and replay
-marker and send each transaction only to its own chain. If you broadcast by hand before then,
-send ECX transactions only to an ECX node and XBT transactions only to an XBT node, and never
-to a Bitcoin node or explorer.
+Save each signed PSBT next to its original as <name>.signed.psbt (raw hex as <name>.signed.hex
+also works), then:
+
+  forksplit verify ${plan.id}
+  forksplit broadcast ${plan.id}
+  forksplit track ${plan.id}
+
+verify checks every signature and replay marker against this plan. broadcast sends each
+transaction only to its own chain, TEST FIRST transactions first. Don't broadcast these files
+any other way: never send them to a Bitcoin node or explorer.
 `;
 
 /** Writes the plan to disk and reserves its destination indexes in the wallet. */

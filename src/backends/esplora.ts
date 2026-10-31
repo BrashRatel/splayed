@@ -170,6 +170,27 @@ export class EsploraBackend implements ChainBackend {
     return typeof rate === "number" && rate > 0 ? rate : undefined;
   }
 
+  async broadcast(hex: string, isolation: string): Promise<string> {
+    const response = await this.transport.request({
+      url: `${this.config.url}/tx`,
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: hex,
+      isolation,
+    });
+    const text = response.text().trim();
+    if (response.status < 200 || response.status >= 300) {
+      throw new BackendError(
+        `Broadcast rejected (HTTP ${response.status}): ${text.slice(0, 300)}`,
+        response.status,
+      );
+    }
+    if (!HEX64.test(text)) {
+      throw new BackendError(`Unexpected broadcast response: ${text.slice(0, 80)}`);
+    }
+    return text;
+  }
+
   async addressTxCount(address: string): Promise<number> {
     const info = await this.getJson<{
       chain_stats?: { tx_count?: number };
