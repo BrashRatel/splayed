@@ -223,3 +223,38 @@ export async function saveScan(dataDir: string, result: ScanResult): Promise<voi
 export async function loadScan(dataDir: string): Promise<ScanResult | undefined> {
   return await readJson<ScanResult>(join(dataDir, SCAN_FILE));
 }
+
+/**
+ * Compares a new scan with the previous one for things that should not happen on their own: a
+ * spend that disappeared (a reorg, or a dropped transaction) or a spend replaced by another one.
+ */
+export function scanRegressions(prev: ScanResult | undefined, next: ScanResult): string[] {
+  if (!prev) return [];
+  const before = new Map(prev.coins.map((c) => [`${c.txid}:${c.vout}`, c]));
+  const warnings: string[] = [];
+  for (const coin of next.coins) {
+    const old = before.get(`${coin.txid}:${coin.vout}`);
+    if (!old) continue;
+    for (const chain of CHAIN_IDS) {
+      const was = old.observations[chain];
+      const now = coin.observations[chain];
+      const label = `${coin.txid.slice(0, 8)}:${coin.vout} on ${chain.toUpperCase()}`;
+      if (was.state === "spent" && now.state === "unspent") {
+        warnings.push(
+          `REORG? ${label} was spent at the last scan and is unspent again. A spend can leave ` +
+            "the chain in a reorg or be dropped. Do not spend the BTC copy; run `forksplit track`.",
+        );
+      } else if (
+        was.state === "spent" && now.state === "spent" && was.spendTxid && now.spendTxid &&
+        was.spendTxid !== now.spendTxid
+      ) {
+        warnings.push(
+          `${label} is now spent by ${now.spendTxid.slice(0, 16)}…, not ${
+            was.spendTxid.slice(0, 16)
+          }… as before (replaced or reorged).`,
+        );
+      }
+    }
+  }
+  return warnings;
+}

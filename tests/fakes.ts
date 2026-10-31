@@ -4,6 +4,8 @@ import { type ChainId, MAINNET } from "../src/core/profiles.ts";
 export interface FakeTx {
   vout: { value: number; scriptpubkey: string }[];
   height?: number; // undefined = unconfirmed
+  /** Hash of the confirming block, for reorg tests (defaults to the chain's hash at `height`). */
+  blockHash?: string;
   raw?: string;
 }
 
@@ -115,6 +117,21 @@ export class FakeEsploraTransport implements Transport {
       return Promise.resolve(
         tx?.raw ? response(200, tx.raw) : response(404, "Transaction not found"),
       );
+    }
+    if ((m = /^\/tx\/([0-9a-f]{64})\/status$/u.exec(path))) {
+      const tx = c.txs.get(m[1]);
+      if (!tx) return Promise.resolve(response(404, "Transaction not found"));
+      return Promise.resolve(response(
+        200,
+        JSON.stringify(
+          tx.height === undefined ? { confirmed: false } : {
+            confirmed: true,
+            block_height: tx.height,
+            block_hash: tx.blockHash ?? c.hashes.get(tx.height) ??
+              tx.height.toString(16).padStart(64, "0"),
+          },
+        ),
+      ));
     }
     if ((m = /^\/tx\/([0-9a-f]{64})$/u.exec(path))) {
       const tx = c.txs.get(m[1]);

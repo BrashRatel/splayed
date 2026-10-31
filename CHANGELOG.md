@@ -7,6 +7,21 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **`bump`: RBF fee bump.** `forksplit bump <plan>` writes a replacement plan that spends the same
+  inputs to the same destination at a higher fee, built from the original's own unsigned PSBT so the
+  ECX marker and the 0x21 request carry over. It enforces BIP125 (old fee plus 1 sat/vB for the new
+  size), refuses confirmed, conflicting and already-replaced transactions, and the result is
+  verified and broadcast like any plan. `broadcast` knows a replacement's inputs are legitimately
+  spent by the original in the mempool, and marks the original `replaced`; `track` shows it.
+- **Reorg handling in `track`.** It remembers the block a split confirmed in and reports a re-mine
+  in another block, a return to the mempool, a split that left the chain, and an input spent by a
+  different transaction. Exit status 1 and a loud warning in each case; a dropped split can be
+  broadcast again, and a conflicting one is marked and never re-sent. `scan` warns when a spend it
+  saw before disappears or changes.
+- `txStatus` on the node-RPC and Esplora backends (confirmed with block hash, mempool, absent).
+- Regtest scenarios for both features against real nodes, including reorgs forced with
+  `invalidateblock`, a fee bump broadcast after a reorg, and an outside spend of a split's input.
+  Unit tests cover the replacement rules, the reorg classification and the scan comparison.
 - **Regtest integration suite** (`deno task test:integration`, `tests/integration/`). Real Bitcoin
   Core 31.0, Bitcoin Knots 29.4.1 (BLAKE2b from regtest height 110) and an eCash node built from
   `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. forksplit's CLI runs
@@ -25,6 +40,9 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Fixed
 
+- `track` could not see confirmations through node RPC: a confirmed spend with no detail was read as
+  "mempool" forever. It now asks the node about the transaction itself, and says `unknown` when a
+  backend cannot tell.
 - `verify` rejected every correctly signed transaction that spends a P2SH-wrapped segwit input
   (`sh(wpkh)` and `sh(wsh(...))`) with "Final txid differs from the plan". Those inputs carry the
   redeem script in `scriptSig`, which is part of the txid, so only native segwit and Taproot inputs

@@ -280,6 +280,51 @@ The final transaction is rebuilt canonically from the verified signatures.
 `track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
 BTC copies then show as separated and can be spent normally.
 
+### Reorgs
+
+`track` remembers the block each split was confirmed in. If a later `track` finds that a split that
+was confirmed has changed, it says so loudly and exits with status 1:
+
+| What happened                                                                                    | What `track` says                                                         |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Re-mined in a different block (a reorg)                                                          | `REORG`, with the old and new block. Still confirmed; depth restarts      |
+| Back in the mempool                                                                              | `REORG`: back in the mempool                                              |
+| Gone from the chain and the mempool, input unspent again                                         | `REORG`: the coin is shared with BTC again. `broadcast` can send it again |
+| Input spent by a different transaction (an outside spend, or a BTC spend replayed onto the fork) | `CONFLICT`. The split is marked conflicting and will not be re-sent       |
+
+Until every split is confirmed again, leave the BTC copies alone. `scan` also warns when a spend it
+saw last time has disappeared or been replaced by a different transaction.
+
+Reorg detection needs a backend that can report a transaction's own status: Esplora, or node RPC.
+Node RPC without `txindex` can't tell a confirmed transaction from one that never existed, so
+`track` shows `unknown` rather than guessing. Electrum falls back to judging by what spent the
+input, which cannot see a block change.
+
+### Stuck transactions: fee bump (RBF)
+
+Every planned transaction signals RBF. If one is stuck at too low a fee:
+
+```sh
+deno task cli bump <plan> --fee-rate ecx=6,xbt=8   # or leave --fee-rate off for an estimate
+deno task cli verify <plan>-bump1
+deno task cli broadcast <plan>-bump1
+```
+
+`bump` writes a new plan whose transactions spend the **same inputs** to the **same destination** at
+a higher fee, from the original's own unsigned PSBT. Only the output value changes: inputs,
+sequences, locktime (the ECX marker) and the 0x21 request are copied, so the replacement is
+replay-protected exactly like the original. Sign it in your wallet and `verify` it like any plan.
+
+- It must follow BIP125: at least the old fee plus 1 sat/vB for its own size. A lower `--fee-rate`
+  is refused, and the message says the minimum.
+- Only transactions that are broadcast and not yet confirmed can be bumped. A confirmed one, one
+  whose input was spent by something else, or one already replaced is refused.
+- `--chains ecx` and `--tx N` limit what is bumped. Without `--fee-rate`, the rate is the backend's
+  estimate, at least 1.5x the old rate.
+- When the replacement is sent, the original is marked `replaced` and `track` shows
+  `REPLACED by plan ...`. If the original confirms first, the replacement is refused and `track`
+  says so.
+
 ## Security model
 
 - **Keyless.** forksplit never asks for, accepts or stores seeds or private keys. It reads your

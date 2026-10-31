@@ -272,7 +272,10 @@ Deno.test("verify -> broadcast (test first) -> track -> broadcast the rest", asy
   // Mine the test transactions, then the rest goes out.
   for (const c of [s.chains.ecx, s.chains.xbt]) {
     for (const [k, v] of c.spends) {
-      if (v.height === undefined) c.spends.set(k, { ...v, height: c.tip });
+      if (v.height === undefined) {
+        c.spends.set(k, { ...v, height: c.tip });
+        c.txs.get(v.txid)!.height = c.tip; // the transaction itself is mined too
+      }
     }
   }
   assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));

@@ -80,10 +80,20 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 
 ## 3. Safety and correctness follow-ups
 
-- [ ] **Reorg handling.** `track` should notice if a split leaves the chain (its input becomes
-      unspent again, or is spent by another txid) and warn loudly.
-- [ ] **Stuck splits.** Add an RBF fee bump: a new plan revision that spends the same inputs at a
-      higher fee, verified the same way.
+- [x] **Reorg handling.** `track` records each split's block and reports a split that was re-mined
+      in another block, went back to the mempool, left the chain, or had its input spent by a
+      different transaction; `scan` warns when a spend disappears or is replaced. Tested against
+      real nodes with `invalidateblock`.
+  - [ ] The "left the chain and the mempool, input unspent" case is only covered by unit tests: a
+        regtest node can't be made to drop a transaction that way without a restart.
+  - [ ] Electrum has no per-transaction status yet, so it can't see a block change.
+  - [ ] Show reorg alerts in the web UI, not just in the `track` output.
+- [x] **Stuck splits.** `bump` writes a BIP125 replacement plan (same inputs and destination, higher
+      fee) that is signed, verified and broadcast like any plan. Tested against real nodes.
+  - [ ] CPFP for the case where the original can't be replaced (no RBF signal from an old plan).
+  - [ ] A bump button in the web UI (the command already works from it).
+  - [ ] Bumping one transaction of a `--batch all` plan can't drop an input; it replaces the whole
+        transaction.
 - [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins. Guidance in the UI,
       not just the CLI.
 - [ ] **Chain upgrades.** Watch for:

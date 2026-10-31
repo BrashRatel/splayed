@@ -24,6 +24,17 @@ export type OutputObservation =
   | { state: "gone" }
   | { state: "unknown"; error: string };
 
+/**
+ * What a chain says about one transaction. "absent" means the backend knows the transaction is
+ * neither confirmed nor in its mempool; "unknown" means it cannot tell (node RPC without txindex
+ * cannot distinguish "never existed" from "confirmed long ago").
+ */
+export type TxStatus =
+  | { state: "confirmed"; height: number; blockHash: string }
+  | { state: "mempool" }
+  | { state: "absent" }
+  | { state: "unknown" };
+
 export interface FoundUtxo {
   txid: string;
   vout: number;
@@ -43,6 +54,8 @@ export interface ChainBackend {
   /** Extra identity problems specific to this backend type (empty = fine). */
   identityProblems(): Promise<string[]>;
   observeOutput(txid: string, vout: number): Promise<OutputObservation>;
+  /** Where a transaction is right now: in the active chain (and which block), mempool, or neither. */
+  txStatus?(txid: string): Promise<TxStatus>;
   /** Raw transaction hex, verified to hash to `txid` before it is returned. */
   rawTransaction(txid: string): Promise<string>;
   /** Fee rate estimate in sat/vB, or undefined when the backend has none. */

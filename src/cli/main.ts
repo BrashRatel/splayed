@@ -20,7 +20,7 @@ import {
 import { DescriptorError } from "../core/descriptors.ts";
 import { verifyIdentity } from "../core/identity.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId, isChainId } from "../core/profiles.ts";
-import { loadScan, runScan, saveScan } from "../core/scan.ts";
+import { loadScan, runScan, saveScan, scanRegressions } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { defaultDataDir, ensureDir } from "../core/store.ts";
 import { importDescriptor, loadWallet, parsedDescriptors, saveWallet } from "../core/wallet.ts";
@@ -37,13 +37,17 @@ import {
   type ForkChain,
   parseBatchPolicy,
   PlanError,
+  type PlannedTx,
   PLANS_DIR,
   writePlan,
   XBT_SIGNERS,
 } from "../core/planner.ts";
 import { join } from "node:path";
+import { buildReplacement, BumpError, bumpPlan, defaultBumpRate } from "../core/bump.ts";
 import {
+  assessReorg,
   confirmationDepth,
+  type DepthResult,
   ExecuteError,
   findSignedFiles,
   loadPlanDir,
@@ -110,7 +114,13 @@ Splitting (guided route: forks first, BTC untouched):
                                   Send verified transactions, each only to its own chain, each
                                   over its own Tor circuit. Sends the TEST FIRST transaction alone
                                   until it confirms (--all overrides).
-  track <plan>                    Confirmations of broadcast transactions
+  track <plan>                    Confirmations of broadcast transactions. Warns loudly if a split
+                                  that was confirmed leaves the chain, is re-mined in another
+                                  block, or has its input spent by a different transaction.
+  bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--yes]
+                                  Stuck split? Write a new plan that spends the same inputs at a
+                                  higher fee (RBF, BIP125). Sign, verify and broadcast it like any
+                                  plan; nodes replace the original with it.
 
 Web UI:
   ui [--port N] [--open]          Local web interface (127.0.0.1 only) that runs these same
@@ -183,6 +193,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         port: { type: "string" },
         open: { type: "boolean" },
         "no-mempool": { type: "boolean" },
+        tx: { type: "string", multiple: true },
       },
     });
   } catch (error) {
@@ -244,6 +255,13 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         return await cmdBroadcast(config, io, args[0], flags.all === true, flags.yes === true);
       case "track":
         return await cmdTrack(config, io, args[0]);
+      case "bump":
+        return await cmdBump(config, io, args[0], {
+          feeRate: flags["fee-rate"],
+          chains: flags.chains,
+          tx: flags.tx as string[] | undefined,
+          yes: flags.yes === true,
+        });
       case "ui":
         return await cmdUi(dataDir, io, flags.port, flags.open === true);
       default:
@@ -256,7 +274,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
     }
     if (
       error instanceof ConfigError || error instanceof GateClosedError ||
-      error instanceof PlanError ||
+      error instanceof PlanError || error instanceof BumpError ||
       error instanceof ExecuteError ||
       error instanceof DescriptorError || error instanceof PolicyError ||
       error instanceof TorUnavailableError || error instanceof TorStartError
@@ -653,6 +671,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
   } finally {
     for (const b of Object.values(backends)) await b?.close?.();
   }
+  result.warnings.push(...scanRegressions(await loadScan(config.dataDir), result));
   await saveScan(config.dataDir, result);
   for (const w of result.warnings) io.err(`Warning: ${w}`);
   io.out("");
@@ -1033,7 +1052,7 @@ async function cmdBroadcast(
       );
       const pending = txs.filter((t) => {
         const st = progress.txs[t.file]?.broadcast?.status;
-        return st !== "accepted" && st !== "rejected" && st !== "conflict";
+        return st !== "accepted" && st !== "rejected" && st !== "conflict" && st !== "replaced";
       });
       if (!pending.length) continue;
       const { backend: send, results } = await verifiedBackendsFor(
@@ -1087,6 +1106,39 @@ async function cmdBroadcast(
         const again = verifySigned(t, await ownPsbt(dir, t), { tx: parseTx(v.finalHex) });
         if (again.finalHex !== v.finalHex) {
           throw new ExecuteError(`${t.file}: stored transaction changed`);
+        }
+        if (t.replaces) {
+          // A fee bump: its inputs are legitimately spent by the original while that one sits in
+          // the mempool, so judge by the two transactions instead of the inputs.
+          const tip = await send.tipHeight();
+          const mine = await confirmationDepth(send, t, v.txid, tip);
+          const at = new Date().toISOString();
+          if (mine.state === "confirmed" || mine.state === "mempool") {
+            progress.txs[t.file].broadcast = {
+              status: "accepted",
+              at,
+              backend: send.config.url,
+              attempts: progress.txs[t.file].broadcast?.attempts ?? 0,
+              detail: `already ${mine.state === "confirmed" ? "on chain" : "in the mempool"}`,
+            };
+            continue;
+          }
+          const original = await confirmationDepth(send, t, t.replaces.txid, tip);
+          if (original.state === "confirmed" || original.state === "conflict") {
+            progress.txs[t.file].broadcast = {
+              status: "conflict",
+              at,
+              backend: send.config.url,
+              attempts: 0,
+              detail: original.state === "confirmed"
+                ? "the original transaction confirmed first; nothing left to replace"
+                : `the inputs were spent by ${original.by ?? "another transaction"}`,
+            };
+            io.err(`${t.file}: ${progress.txs[t.file].broadcast!.detail}; not sending`);
+            continue;
+          }
+          queue.push({ t, hex: v.finalHex, txid: v.txid, send });
+          continue;
         }
         // Inputs must still be unspent on this chain (or spent by this very transaction).
         let skip = false;
@@ -1155,6 +1207,7 @@ async function cmdBroadcast(
         if (got !== q.txid) throw new BackendError(`Server answered with a different txid ${got}`);
         entry.broadcast.status = "accepted";
         io.out(`  sent ${q.t.chain.toUpperCase()} ${q.txid}`);
+        if (q.t.replaces) await markReplaced(config, q.t, dir, plan.id);
       } catch (error) {
         const explicit = error instanceof BackendError && error.status !== undefined &&
           error.status !== 429;
@@ -1176,12 +1229,47 @@ async function cmdBroadcast(
   }
 }
 
+/** After a fee bump is accepted: record on the original plan that it has been replaced. */
+async function markReplaced(
+  config: Config,
+  replacement: PlannedTx,
+  _dir: string,
+  newPlanId: string,
+) {
+  const from = replacement.replaces!;
+  try {
+    const oldDir = join(config.dataDir, PLANS_DIR, from.plan);
+    const oldProgress = await loadProgress(oldDir);
+    const entry = oldProgress.txs[from.file];
+    if (!entry) return;
+    entry.replacedBy = { plan: newPlanId, file: replacement.file };
+    if (entry.broadcast) {
+      entry.broadcast = { ...entry.broadcast, status: "replaced", detail: `by plan ${newPlanId}` };
+    }
+    await saveProgress(oldDir, oldProgress);
+  } catch { /* the replacement is on the network either way; track still explains the conflict */ }
+}
+
+function describeDepth(d: DepthResult, required: number): string {
+  switch (d.state) {
+    case "confirmed":
+      return `${d.depth} of ${required}`;
+    case "conflict":
+      return `CONFLICT: input spent by ${d.by ?? "another transaction"}`;
+    case "unknown":
+      return "unknown (this backend can't say; use txindex or an Esplora backend)";
+    default:
+      return d.state;
+  }
+}
+
 async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
   await requireNetworkConfirmed(config);
   if (!id) throw new UsageError("track <plan>");
   const { dir, plan } = await loadPlanDir(config.dataDir, id);
   const progress = await loadProgress(dir);
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
+  const alerts: string[] = [];
   for (const chain of ["ecx", "xbt"] as const) {
     const txs = plan.transactions.filter((t) =>
       t.chain === chain && progress.txs[t.file]?.broadcast
@@ -1195,13 +1283,55 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
         let conf = "?";
         if (backend && tip !== undefined && p.verified) {
           const d = await confirmationDepth(backend, t, p.verified.txid, tip);
-          conf = d.state === "confirmed"
-            ? `${d.depth} of ${config.chains[chain].confirmations}`
-            : d.state === "conflict"
-            ? `CONFLICT: input spent by ${d.by}`
-            : d.state;
+          const at = new Date().toISOString();
+          conf = describeDepth(d, config.chains[chain].confirmations);
+          if (p.replacedBy && d.state === "confirmed") {
+            // The original won the race: the fee bump can no longer apply.
+            conf += "  (the ORIGINAL confirmed)";
+            alerts.push(
+              `${chain.toUpperCase()} ${t.file}: the original confirmed even though plan ` +
+                `${p.replacedBy.plan} was broadcast to replace it. The replacement is now invalid.`,
+            );
+          } else if (p.replacedBy) {
+            // Expected to be gone from the chain: ask about the replacement instead.
+            const rp = (await loadProgress(join(config.dataDir, PLANS_DIR, p.replacedBy.plan)))
+              .txs[p.replacedBy.file]?.verified?.txid;
+            const r = rp ? await confirmationDepth(backend, t, rp, tip) : undefined;
+            if (r?.state === "confirmed" || r?.state === "mempool") {
+              conf = `REPLACED by plan ${p.replacedBy.plan} (${
+                r.state === "confirmed" ? `confirmed, ${r.depth} deep` : "in the mempool"
+              })`;
+            } else {
+              conf += `  (replacement plan ${p.replacedBy.plan} is not on the network)`;
+              alerts.push(
+                `${chain.toUpperCase()} ${t.file}: plan ${p.replacedBy.plan} replaced this ` +
+                  "transaction but the replacement is no longer on the network either. " +
+                  "Run `forksplit broadcast` for whichever plan you want to go through.",
+              );
+            }
+          } else {
+            const alert = assessReorg(chain, p.confirmations, d);
+            if (alert) {
+              alerts.push(`${chain.toUpperCase()} ${t.file}: ${alert.detail}`);
+              const last = p.reorgs?.[p.reorgs.length - 1];
+              if (last?.kind !== alert.kind || last.detail !== alert.detail) {
+                p.reorgs = [...(p.reorgs ?? []), { at, kind: alert.kind, detail: alert.detail }];
+              }
+              if (alert.kind === "dropped" && p.broadcast) {
+                // Let `broadcast` send it again (it re-verifies and re-checks the inputs first).
+                p.broadcast = {
+                  ...p.broadcast,
+                  status: "unknown",
+                  detail: "left the chain in a reorg",
+                };
+              }
+              if (alert.kind === "conflict" && p.broadcast) {
+                p.broadcast = { ...p.broadcast, status: "conflict", detail: alert.detail };
+              }
+            }
+          }
           if (d.state === "confirmed") {
-            p.confirmations = { depth: d.depth!, at: new Date().toISOString() };
+            p.confirmations = { depth: d.depth!, at, height: d.height, blockHash: d.blockHash };
           }
         }
         rows.push([
@@ -1222,10 +1352,144 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
     return 0;
   }
   io.out(table(rows));
+  if (alerts.length) {
+    io.err("");
+    io.err("!!! WARNING: a split did not stay where it was put !!!");
+    for (const a of alerts) io.err(`  ${a}`);
+    io.err("Until every split is confirmed again, leave the BTC copies alone.");
+    return 1;
+  }
   io.out(
     "When every split is deep enough, run `forksplit scan`: those coins' BTC copies then show as separated.",
   );
   return 0;
+}
+
+async function cmdBump(
+  config: Config,
+  io: CliIO,
+  id: string | undefined,
+  opts: { feeRate?: string; chains?: string; tx?: string[]; yes: boolean },
+) {
+  await requireNetworkConfirmed(config);
+  if (!id) throw new UsageError("bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5]");
+  const { dir, plan } = await loadPlanDir(config.dataDir, id);
+  const progress = await loadProgress(dir);
+  const rates = parseFeeRates(opts.feeRate);
+  const chainFilter = opts.chains?.split(",").map((c) => c.trim());
+  if (chainFilter && !chainFilter.every((c) => c === "ecx" || c === "xbt")) {
+    throw new UsageError("--chains takes ecx, xbt or ecx,xbt");
+  }
+  const replacements: PlannedTx[] = [];
+  const rows = [["Chain", "#", "State", "Fee", "New fee", "sat/vB", "Result"]];
+  let refused = 0;
+  const opened: ChainBackend[] = [];
+  try {
+    for (const chain of ["ecx", "xbt"] as const) {
+      if (chainFilter && !chainFilter.includes(chain)) continue;
+      const txs = plan.transactions.filter((t) =>
+        t.chain === chain && progress.txs[t.file]?.broadcast &&
+        (!opts.tx?.length || opts.tx.includes(String(t.order)))
+      );
+      if (!txs.length) continue;
+      const { backend } = await verifiedBackendsFor(config, chain, io, true);
+      if (!backend) {
+        io.err(`${chain.toUpperCase()}: no backend passed its identity check`);
+        refused += txs.length;
+        continue;
+      }
+      opened.push(backend);
+      const tip = await backend.tipHeight();
+      for (const t of txs) {
+        const p = progress.txs[t.file];
+        const row = (state: string, result: string, fee = "", rate = "") =>
+          rows.push([
+            chain.toUpperCase(),
+            String(t.order),
+            state,
+            String(t.fee),
+            fee,
+            rate,
+            result,
+          ]);
+        if (!p.verified) {
+          refused++;
+          row("-", "not verified, so not broadcast: nothing to replace");
+          continue;
+        }
+        if (p.replacedBy) {
+          refused++;
+          row("replaced", `already replaced by plan ${p.replacedBy.plan}; bump that plan instead`);
+          continue;
+        }
+        const d = await confirmationDepth(backend, t, p.verified.txid, tip);
+        if (d.state === "confirmed" || d.state === "conflict") {
+          refused++;
+          row(
+            d.state,
+            d.state === "confirmed"
+              ? `already confirmed (${d.depth} deep): nothing to bump`
+              : `its input was spent by ${d.by ?? "another transaction"}: cannot be bumped`,
+          );
+          continue;
+        }
+        if (d.state === "unknown") {
+          io.err(
+            `Warning: ${t.file}: this backend can't tell whether it confirmed; your node will ` +
+              "refuse the replacement if it did.",
+          );
+        }
+        const estimate = rates[chain] === undefined ? await backend.feeRate?.(2) : undefined;
+        const feeRate = rates[chain] ?? defaultBumpRate(t, estimate);
+        try {
+          const r = buildReplacement({
+            oldPlanId: plan.id,
+            old: t,
+            oldTxid: p.verified.txid,
+            own: await ownPsbt(dir, t),
+            feeRate,
+            order: replacements.filter((x) => x.chain === chain).length + 1,
+          });
+          replacements.push(r);
+          row(d.state, "replacement", String(r.fee), String(r.feeRate));
+        } catch (error) {
+          if (!(error instanceof BumpError)) throw error;
+          refused++;
+          row(d.state, error.message);
+        }
+      }
+    }
+  } finally {
+    for (const b of opened) await b.close?.();
+  }
+  if (rows.length === 1) {
+    io.out("No broadcast transactions match.");
+    return 1;
+  }
+  io.out(table(rows));
+  if (!replacements.length) {
+    io.out("Nothing to bump.");
+    return refused ? 1 : 0;
+  }
+  if (!opts.yes && !(await io.confirm(`Write ${replacements.length} replacement PSBT(s)?`))) {
+    io.out("Nothing written.");
+    return 1;
+  }
+  const taken = new Set<string>();
+  try {
+    for await (const e of Deno.readDir(join(config.dataDir, PLANS_DIR))) taken.add(e.name);
+  } catch { /* none yet */ }
+  let n = 1;
+  while (taken.has(`${plan.id}-bump${n}`)) n++;
+  const bumped = bumpPlan(plan, `${plan.id}-bump${n}`, replacements, new Date());
+  const newDir = await writePlan(config.dataDir, bumped);
+  io.out(`\nWrote ${replacements.length} replacement PSBT(s) to ${newDir}`);
+  io.out(
+    `Sign them in your wallet exactly like the originals, then:\n` +
+      `  forksplit verify ${bumped.id}\n  forksplit broadcast ${bumped.id}\n  forksplit track ${bumped.id}\n` +
+      "If the original confirms first, the replacement is simply refused.",
+  );
+  return refused ? 1 : 0;
 }
 
 async function cmdUi(

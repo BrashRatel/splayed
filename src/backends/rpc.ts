@@ -9,6 +9,7 @@ import {
   type FoundUtxo,
   HEX64,
   type OutputObservation,
+  type TxStatus,
 } from "./types.ts";
 
 /** Bitcoin Core / Knots / eCash node JSON-RPC. Works without any address index. */
@@ -150,6 +151,32 @@ export class RpcBackend implements ChainBackend {
     } catch (error) {
       if ((error as { rpcCode?: number }).rpcCode === -5) return { state: "absent" };
       throw error;
+    }
+  }
+
+  async txStatus(txid: string): Promise<TxStatus> {
+    assertTxid(txid);
+    try {
+      const tx = await this.call<{ blockhash?: string; confirmations?: number }>(
+        "getrawtransaction",
+        [txid, 1],
+      );
+      if (!tx.blockhash) return { state: "mempool" };
+      // A transaction in a block that is no longer on the active chain reports no confirmations
+      // (and returns to the mempool if the node still holds it, which is answered above).
+      if (!(typeof tx.confirmations === "number" && tx.confirmations > 0)) {
+        return { state: "absent" };
+      }
+      const tip = await this.tipHeight();
+      return {
+        state: "confirmed",
+        height: tip - tx.confirmations + 1,
+        blockHash: tx.blockhash,
+      };
+    } catch (error) {
+      if ((error as { rpcCode?: number }).rpcCode !== -5) throw error;
+      // Not in the mempool. Only a transaction index can say whether it was ever confirmed.
+      return (await this.hasTxindex()) ? { state: "absent" } : { state: "unknown" };
     }
   }
 

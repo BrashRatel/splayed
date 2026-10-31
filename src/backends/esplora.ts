@@ -10,11 +10,13 @@ import {
   type FoundUtxo,
   HEX64,
   type OutputObservation,
+  type TxStatus,
 } from "./types.ts";
 
 interface EsploraStatus {
   confirmed: boolean;
   block_height?: number;
+  block_hash?: string;
 }
 
 interface EsploraTx {
@@ -103,6 +105,29 @@ export class EsploraBackend implements ChainBackend {
 
   identityProblems(): Promise<string[]> {
     return Promise.resolve([]);
+  }
+
+  async txStatus(txid: string): Promise<TxStatus> {
+    assertTxid(txid);
+    const { status, text } = await this.get(`/tx/${txid}/status`);
+    if (status === 404) return { state: "absent" };
+    if (status < 200 || status >= 300) {
+      throw new BackendError(`GET /tx/${txid}/status returned HTTP ${status}`, status);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new BackendError(`GET /tx/${txid}/status returned invalid JSON`);
+    }
+    if (!validStatus(parsed)) {
+      throw new BackendError(`GET /tx/${txid}/status returned an unexpected answer`);
+    }
+    if (!parsed.confirmed) return { state: "mempool" };
+    if (typeof parsed.block_hash !== "string" || !HEX64.test(parsed.block_hash)) {
+      throw new BackendError(`GET /tx/${txid}/status gave no valid block hash`);
+    }
+    return { state: "confirmed", height: parsed.block_height!, blockHash: parsed.block_hash };
   }
 
   /**

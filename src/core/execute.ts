@@ -39,14 +39,22 @@ export interface TxProgress {
     mempool?: Record<string, string>;
   };
   broadcast?: {
-    status: "sending" | "accepted" | "unknown" | "rejected" | "conflict";
+    /** "replaced": a fee-bump plan has since been broadcast for this transaction. */
+    status: "sending" | "accepted" | "unknown" | "rejected" | "conflict" | "replaced";
     at: string;
     backend: string;
     attempts: number;
     detail?: string;
   };
-  confirmations?: { depth: number; at: string };
+  /** Last confirmation `track` saw; the block hash is how a later reorg is noticed. */
+  confirmations?: { depth: number; at: string; height?: number; blockHash?: string };
+  /** Everything `track` has had to warn about, oldest first. */
+  reorgs?: { at: string; kind: ReorgKind; detail: string }[];
+  /** Set on the original when a fee-bump plan replaced it. */
+  replacedBy?: { plan: string; file: string };
 }
+
+export type ReorgKind = "moved" | "unconfirmed" | "dropped" | "conflict";
 
 export interface Progress {
   version: 1;
@@ -251,20 +259,121 @@ export async function mempoolChecks(
   return results;
 }
 
-/** Depth of the plan transaction on its chain, judged by what spent its first input. */
+export interface DepthResult {
+  /**
+   * confirmed: in the active chain. mempool: seen but unconfirmed. absent: neither, and its inputs
+   * are still unspent. conflict: its inputs were spent by something else. unknown: this backend
+   * can't say (node RPC without txindex can't report a confirmed spend's details).
+   */
+  state: "confirmed" | "mempool" | "absent" | "conflict" | "unknown";
+  depth?: number;
+  height?: number;
+  blockHash?: string;
+  /** The transaction that spent the inputs instead, when the backend knows it. */
+  by?: string;
+}
+
+/**
+ * Where the plan transaction is on its chain. Asks about the transaction itself first (needs a
+ * backend with txStatus); falls back to judging by what spent its first input.
+ */
 export async function confirmationDepth(
   backend: ChainBackend,
   planTx: PlannedTx,
   txid: string,
   tip: number,
-): Promise<
-  { state: "confirmed" | "mempool" | "absent" | "conflict"; depth?: number; by?: string }
-> {
+): Promise<DepthResult> {
+  const status = await backend.txStatus?.(txid);
+  if (status?.state === "confirmed") {
+    return {
+      state: "confirmed",
+      depth: tip - status.height + 1,
+      height: status.height,
+      blockHash: status.blockHash,
+    };
+  }
+  if (status?.state === "mempool") return { state: "mempool" };
+
   const first = planTx.inputs[0];
   const obs = await backend.observeOutput(first.txid, first.vout);
   if (obs.state === "unspent") return { state: "absent" };
-  if (obs.state !== "spent") return { state: "absent" };
+  if (status?.state === "absent") {
+    // Not on the chain and not in the mempool, yet the input is gone: someone else spent it.
+    return {
+      state: "conflict",
+      by: obs.state === "spent" ? obs.spendTxid : undefined,
+    };
+  }
+  if (obs.state !== "spent") return { state: obs.state === "absent" ? "absent" : "unknown" };
   if (obs.spendTxid && obs.spendTxid !== txid) return { state: "conflict", by: obs.spendTxid };
+  if (!obs.spendDetailKnown) return { state: "unknown" };
   if (obs.spendHeight === undefined) return { state: "mempool" };
-  return { state: "confirmed", depth: tip - obs.spendHeight + 1 };
+  return {
+    state: "confirmed",
+    depth: tip - obs.spendHeight + 1,
+    height: obs.spendHeight,
+    blockHash: await backend.blockHash(obs.spendHeight),
+  };
+}
+
+export interface ReorgAlert {
+  kind: ReorgKind;
+  detail: string;
+}
+
+const short = (hash?: string) => (hash ? `${hash.slice(0, 12)}…` : "unknown block");
+
+/**
+ * Compares what `track` saw last time with what it sees now. Only a transaction that was once
+ * seen confirmed can be "reorged"; a conflict is always worth shouting about.
+ */
+export function assessReorg(
+  chain: ChainId,
+  prev: TxProgress["confirmations"] | undefined,
+  now: DepthResult,
+): ReorgAlert | undefined {
+  const label = chain.toUpperCase();
+  switch (now.state) {
+    case "conflict":
+      return {
+        kind: "conflict",
+        detail:
+          `${label}: this split's input was spent by ${
+            now.by ? `transaction ${now.by}` : "another transaction"
+          }, not by this split. If you did not make that spend, treat the key as compromised; if ` +
+          `you spent the BTC copy ordinarily, it was replayed onto ${label}.`,
+      };
+    case "confirmed":
+      if (prev?.blockHash && now.blockHash && prev.blockHash !== now.blockHash) {
+        return {
+          kind: "moved",
+          detail:
+            `${label}: REORG. This split was in block ${short(prev.blockHash)} (height ${
+              prev.height ?? "?"
+            }) and is now in block ${short(now.blockHash)} (height ${now.height}). ` +
+            "It is still confirmed, but its depth restarted.",
+        };
+      }
+      return undefined;
+    case "mempool":
+      return prev
+        ? {
+          kind: "unconfirmed",
+          detail: `${label}: REORG. This split was confirmed (${prev.depth} deep) and is back in ` +
+            "the mempool. It should confirm again; do not spend the BTC copy until it does.",
+        }
+        : undefined;
+    case "absent":
+      return prev
+        ? {
+          kind: "dropped",
+          detail: `${label}: REORG. This split was confirmed (${prev.depth} deep) and has left ` +
+            `the chain; it is not in the mempool and its input is unspent again, so the coin is ` +
+            `back on ${label} and still shared with BTC. Do NOT spend the BTC copy. Run ` +
+            "`forksplit broadcast` to send it again, or `forksplit bump` to replace it.",
+        }
+        : undefined;
+    case "unknown":
+      return undefined;
+  }
 }

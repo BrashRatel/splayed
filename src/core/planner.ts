@@ -126,7 +126,7 @@ export function estimateVsize(
   return Math.ceil(total);
 }
 
-function dustLimit(script: Uint8Array): number {
+export function dustLimit(script: Uint8Array): number {
   if (script.length === 25) return 546; // P2PKH
   if (script.length === 23) return 540; // P2SH
   if (script.length === 22) return 294; // P2WPKH
@@ -169,6 +169,8 @@ export interface PlannedTx {
   sequence: number;
   sighashType?: number;
   psbt: string;
+  /** Set on a fee-bump replacement: the transaction of an earlier plan this one replaces. */
+  replaces?: { plan: string; file: string; txid: string; fee: number; feeRate: number };
 }
 
 export interface Plan {
@@ -575,8 +577,18 @@ xbt/  XBT splits. Every input asks for sighash type 0x21 (SIGHASH_ALL|SIGHASH_UN
   }.
       A signature without the 0x21 byte would be valid on BTC too. Don't let a signer "fix" it.
 
-Sign the transaction marked TEST FIRST on each chain before the rest.
+${
+    plan.transactions.some((t) => t.replaces)
+      ? `This plan is a FEE BUMP: each transaction spends the same inputs as one from plan
+${
+        [...new Set(plan.transactions.map((t) => t.replaces?.plan))].join(", ")
+      } and pays a higher fee (RBF). If the
+original confirms first, the replacement simply becomes invalid. Sign it, then verify and
+broadcast this plan as usual.
 
+`
+      : "Sign the transaction marked TEST FIRST on each chain before the rest.\n"
+  }
 Save each signed PSBT next to its original as <name>.signed.psbt (raw hex as <name>.signed.hex
 also works), then:
 
