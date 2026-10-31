@@ -140,6 +140,7 @@ export class TorManager {
   #ready?: Promise<SocksEndpoint>;
   #status: TorState = { state: "idle" };
   #listeners = new Set<(s: TorState) => void>();
+  #lastFailure?: { at: number; error: Error };
 
   get status(): TorState {
     return this.#status;
@@ -162,8 +163,13 @@ export class TorManager {
     log: (m: string) => void = () => {},
   ): Promise<SocksEndpoint> {
     if (this.#status.state === "ready") return Promise.resolve(this.#status.endpoint);
+    // Don't make every chain wait out the same failed bootstrap within one command.
+    if (!this.#ready && this.#lastFailure && Date.now() - this.#lastFailure.at < 30_000) {
+      return Promise.reject(this.#lastFailure.error);
+    }
     this.#ready ??= this.#locate(settings, appDataDir, log).catch((error) => {
       this.#ready = undefined;
+      this.#lastFailure = { at: Date.now(), error: error as Error };
       this.#set({ state: "failed", error: (error as Error).message });
       throw error;
     });
