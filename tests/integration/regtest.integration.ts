@@ -22,11 +22,12 @@ import {
   REGTEST_PROFILE_ID,
   XBT_ACTIVATION_HEIGHT,
 } from "./regtest_profile.ts";
+import { CHAINS, makeCli } from "./cli_harness.ts";
 import { RegtestRpcTransport, Rpc } from "./rpc.ts";
+import { rbfScenario, reorgScenario } from "./scenarios.ts";
 import { ignoresUnifiedSign, keyMap, stockSign, unifiedSign } from "./signers.ts";
 
 const COMPOSE = new URL("./compose.yml", import.meta.url).pathname;
-const CHAINS: ChainId[] = ["btc", "xbt", "ecx"];
 const seed = (words: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(words));
 const OTHER = seed("legal winner thank year wave sausage worth useful legal winner thank yellow");
 const fp = (k: HDKey) => k.fingerprint.toString(16).padStart(8, "0");
@@ -126,6 +127,10 @@ const MIXED = makeWallet("mixed-batch-all", [
   PART.shWsh(MIXED_COSIGNERS(50)),
 ], "all");
 
+// Wallets for the RBF and reorg scenarios: funded with the others, but not part of the loop below.
+const RBF_WALLET = makeWallet("rbf", [PART.wpkh(words(60))]);
+const REORG_WALLET = makeWallet("reorg", [PART.wpkh(words(61))]);
+
 const WALLETS: WalletSpec[] = [
   makeWallet("pkh", [PART.pkh()]),
   makeWallet("wpkh", [PART.wpkh()]),
@@ -201,7 +206,7 @@ Deno.test({
       // One funding transaction for every coin: a chain of single sends would trip the node's
       // ancestor limit, and the prefix has to stay below the fork height.
       const outputs: Record<string, number> = {};
-      for (const spec of WALLETS) {
+      for (const spec of [...WALLETS, RBF_WALLET, REORG_WALLET]) {
         for (const descriptor of spec.descriptors) {
           const source = parseDescriptor(descriptor);
           for (let i = 0; i < COIN_VALUES.length; i++) {
@@ -241,37 +246,7 @@ Deno.test({
             const coinCount = spec.descriptors.length * COIN_VALUES.length;
             const batchAll = spec.batch === "all";
             // forksplit, driven through its real CLI with real node RPC as the only backends.
-            const dir = await Deno.makeTempDir({ prefix: "forksplit-it-" });
-            const toml = ["[scan]", "jitter_min_ms = 0", "jitter_max_ms = 0", ""];
-            for (const c of CHAINS) {
-              toml.push(
-                `[chains.${c}]`,
-                "confirmations = 1",
-                `[[chains.${c}.backends]]`,
-                `kind = "rpc"`,
-                `url = "http://127.0.0.1:${nodes[c].port}"`,
-                `user = "regtest"`,
-                `password_env = "FSPLIT_RPC_PW"`,
-                "",
-              );
-            }
-            await Deno.writeTextFile(join(dir, "forksplit.toml"), toml.join("\n"));
-            const out: string[] = [];
-            const err: string[] = [];
-            const io: CliIO = {
-              out: (s) => out.push(s),
-              err: (s) => err.push(s),
-              confirm: () => true,
-              env: { FSPLIT_RPC_PW: "regtest" },
-              tor: () => Promise.reject(new Error("regtest must never start or use Tor")),
-              transportFactory: (_config, chain) => new RegtestRpcTransport(nodes[chain]),
-            };
-            const run = async (...args: string[]) => {
-              out.length = 0;
-              err.length = 0;
-              return await main(["--data-dir", dir, "--profile", REGTEST_PROFILE_ID, ...args], io);
-            };
-            const text = () => out.join("\n") + "\n" + err.join("\n");
+            const { dir, io, run, text, stdout } = await makeCli(nodes);
 
             await t.step("init: identity checks pass on all three real nodes", async () => {
               assertEquals(await run("init", "--yes"), 0, text());
@@ -298,7 +273,7 @@ Deno.test({
               }
               assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
               assertEquals(await run("status", "--json"), 0, text());
-              const status = JSON.parse(out.join("\n"));
+              const status = JSON.parse(stdout());
               const coins = status.coins as {
                 classification: { status: string; unspentOn: string[] };
               }[];
@@ -423,7 +398,7 @@ Deno.test({
               async () => {
                 assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
                 assertEquals(await run("status", "--json"), 0, text());
-                const status = JSON.parse(out.join("\n"));
+                const status = JSON.parse(stdout());
                 const coins = status.coins as {
                   classification: { status: string; unspentOn: string[] };
                 }[];
@@ -456,6 +431,25 @@ Deno.test({
           },
         });
       }
+
+      const harness = {
+        nodes,
+        minerAddr,
+        ecxDest: ECX_DEST,
+        xbtDest: XBT_DEST,
+      };
+      await t.step({
+        name: "fee bump (RBF) replaces a stuck split",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => rbfScenario(t, harness, RBF_WALLET),
+      });
+      await t.step({
+        name: "reorg handling: moved, unconfirmed and conflicting splits are reported",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => reorgScenario(t, harness, REORG_WALLET),
+      });
     } finally {
       await docker(project, "down", "-v", "--remove-orphans").catch(() => {});
     }
