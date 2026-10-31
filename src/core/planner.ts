@@ -158,7 +158,7 @@ export interface PlannedTx {
   order: number;
   testFirst: boolean;
   file: string;
-  /** For all-segwit transactions this is also the final txid. */
+  /** Equals the final txid only when every input is native segwit or Taproot (no scriptSig). */
   unsignedTxid: string;
   inputs: PlannedInput[];
   output: { address: string; value: number; destinationIndex: number };

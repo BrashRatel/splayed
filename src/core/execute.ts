@@ -158,8 +158,12 @@ export function verifySigned(
   checks.push(`fee ${planTx.fee} sats as planned`);
   const final = finalize(own.tx, ctxs, verdicts);
   const finalTxid = computeTxid(final);
-  const allSegwit = planTx.inputs.every((i) => i.kind !== "pkh" && i.kind !== "sh-ms");
-  if (allSegwit && finalTxid !== planTx.unsignedTxid) {
+  // The txid only survives signing when no input has a scriptSig. P2SH-wrapped segwit inputs put
+  // the redeem script in their scriptSig, so their final txid differs from the unsigned one.
+  const txidIsStable = planTx.inputs.every((i) =>
+    i.kind === "wpkh" || i.kind === "wsh-ms" || i.kind === "tr"
+  );
+  if (txidIsStable && finalTxid !== planTx.unsignedTxid) {
     throw new SigCheckError("Final txid differs from the plan");
   }
   return { final, finalHex: toHex(serializeTx(final)), txid: finalTxid, checks };
