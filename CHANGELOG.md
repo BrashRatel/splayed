@@ -10,10 +10,12 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 - **Regtest integration suite** (`deno task test:integration`, `tests/integration/`). Real Bitcoin
   Core 31.0, Bitcoin Knots 29.4.1 (BLAKE2b from regtest height 110) and an eCash node built from
   `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. forksplit's CLI runs
-  against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan. It also
-  checks that a node on the wrong chain is rejected, that XBT signatures without 0x21 fail `verify`,
-  and that each confirmed fork split is rejected by the other two nodes. Every run uses a random
-  Compose project with fresh volumes and loopback-only ports.
+  against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan, for six
+  wallet types (`pkh`, `wpkh`, `sh(wpkh)`, and 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`). It
+  also checks that a node on the wrong chain is rejected, that XBT signatures without 0x21 fail
+  `verify`, that a multisig input below its threshold fails `verify`, and that each confirmed fork
+  split is rejected by the other two nodes. Every run uses a random Compose project with fresh
+  volumes and loopback-only ports.
 - `registerProfileForTesting()` in `src/core/profiles.ts`, so tests can register a `regtest-*`
   profile. It is not reachable from the CLI, the environment, the config file or the UI.
 - Pinned Tor Browser 16.0 (tor 0.4.9.15) in `vendor/tor-manifest.json`. The release signature was
@@ -22,6 +24,11 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Fixed
 
+- `verify` rejected every correctly signed transaction that spends a P2SH-wrapped segwit input
+  (`sh(wpkh)` and `sh(wsh(...))`) with "Final txid differs from the plan". Those inputs carry the
+  redeem script in `scriptSig`, which is part of the txid, so only native segwit and Taproot inputs
+  keep the unsigned txid. The check now applies only to those. Found by the multisig runs of the
+  regtest suite.
 - The XBT node-RPC identity check never matched a real Knots node. Knots reports the fork at the top
   level of the `getdeploymentinfo` result (`{"blake2b": {"height", "active"}}`), not under
   `deployments`, so the check failed closed against genuine Knots. Found by the regtest suite.

@@ -7,10 +7,14 @@ import {
   encodePsbtBase64,
   findValues,
   IN_BIP32_DERIVATION,
+  IN_NON_WITNESS_UTXO,
+  IN_REDEEM_SCRIPT,
   IN_SIGHASH_TYPE,
+  IN_WITNESS_SCRIPT,
   IN_WITNESS_UTXO,
   kv,
 } from "../../src/core/psbt.ts";
+import { parseTx } from "../../src/core/tx.ts";
 import { unifiedSignatureHash } from "../../src/core/unified_sighash.ts";
 
 /** Private keys by compressed public key (hex) for the test wallet's receive branch. */
@@ -34,15 +38,26 @@ export function stockSign(b64: string, keys: Map<string, Uint8Array>): string {
   return btoa(String.fromCharCode(...tx.toPSBT()));
 }
 
-/** A SIGHASH_UNIFIED signer for P2WPKH inputs (what Knots/Shrike do). hashType 0x21 = ALL|UNIFIED. */
+/**
+ * A SIGHASH_UNIFIED signer (what Knots/Shrike do) for P2PKH, P2SH multisig, P2WPKH, P2WSH and P2SH-wrapped
+ * segwit inputs. Every
+ * key in `keys` that the PSBT lists for an input adds a partial signature, so a multisig input
+ * collects one signature per cosigner key given. hashType 0x21 = ALL|UNIFIED.
+ */
 export function unifiedSign(b64: string, keys: Map<string, Uint8Array>, hashType = 0x21): string {
   const psbt = decodePsbt(b64);
-  const spent = psbt.inputs.map((m) => {
-    const v = findValues(m, IN_WITNESS_UTXO)[0].value;
-    return {
-      amount: new DataView(v.buffer, v.byteOffset, 8).getBigUint64(0, true),
-      script: v.slice(9),
-    };
+  const spent = psbt.inputs.map((m, i) => {
+    const witness = findValues(m, IN_WITNESS_UTXO)[0]?.value;
+    if (witness) {
+      return {
+        amount: new DataView(witness.buffer, witness.byteOffset, 8).getBigUint64(0, true),
+        script: witness.slice(9),
+      };
+    }
+    // Legacy inputs carry the whole previous transaction instead.
+    const prev = parseTx(findValues(m, IN_NON_WITNESS_UTXO)[0].value);
+    const out = prev.outputs[psbt.tx.inputs[i].vout];
+    return { amount: out.value, script: out.script };
   });
   const utx = {
     version: psbt.tx.version,
@@ -55,22 +70,34 @@ export function unifiedSign(b64: string, keys: Map<string, Uint8Array>, hashType
     outputs: psbt.tx.outputs.map((o) => ({ amount: o.value, script: o.script })),
   };
   psbt.inputs.forEach((m, i) => {
-    const pub = findValues(m, IN_BIP32_DERIVATION)[0].key.slice(1);
-    const code = concatBytes(
-      Uint8Array.of(0x76, 0xa9, 0x14),
-      spent[i].script.slice(2),
-      Uint8Array.of(0x88, 0xac),
-    );
+    const witnessScript = findValues(m, IN_WITNESS_SCRIPT)[0]?.value;
+    const redeemScript = findValues(m, IN_REDEEM_SCRIPT)[0]?.value;
+    const segwit = findValues(m, IN_WITNESS_UTXO).length > 0;
+    let code: Uint8Array;
+    if (!segwit) {
+      // Legacy: P2PKH signs the output script, P2SH multisig signs the redeem script.
+      code = redeemScript ?? spent[i].script;
+    } else if (witnessScript) {
+      code = witnessScript; // P2WSH and P2SH-P2WSH
+    } else {
+      // P2WPKH signs the implied P2PKH script; for P2SH-P2WPKH the key hash is in the redeem script.
+      code = concatBytes(
+        Uint8Array.of(0x76, 0xa9, 0x14),
+        (redeemScript ?? spent[i].script).slice(2, 22),
+        Uint8Array.of(0x88, 0xac),
+      );
+    }
     const digest = unifiedSignatureHash(utx, i, hashType, spent, {
-      scriptType: 1,
+      scriptType: segwit ? 1 : 0,
       scriptCode: code,
     })!;
-    const der = secp256k1.sign(digest, keys.get(toHex(pub))!, {
-      prehash: false,
-      format: "der",
-      lowS: true,
-    });
-    m.push(kv(0x02, pub, concatBytes(der, Uint8Array.of(hashType))));
+    for (const entry of findValues(m, IN_BIP32_DERIVATION)) {
+      const pub = entry.key.slice(1);
+      const priv = keys.get(toHex(pub));
+      if (!priv) continue;
+      const der = secp256k1.sign(digest, priv, { prehash: false, format: "der", lowS: true });
+      m.push(kv(0x02, pub, concatBytes(der, Uint8Array.of(hashType))));
+    }
   });
   return encodePsbtBase64(psbt);
 }

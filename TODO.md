@@ -125,8 +125,13 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
       Core 31.0, Knots 29.4.1 (BLAKE2b at regtest height 110) and eCash (built from the pinned
       commit, which reports v1.2.0) in Docker. Drives the real CLI through init, import, scan, plan,
       verify, broadcast, track and rescan, and checks replay rejection on the other nodes.
-  - [ ] Still to cover: multisig and Taproot inputs, `--batch` variants, reorgs, RBF fee bump, a
-        hardware-wallet-style signer, CI job (needs Docker and a ~5 minute first build).
+  - [x] Covers `pkh`, `wpkh`, `sh(wpkh)` and 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`,
+        including a multisig input below its threshold being refused.
+  - [ ] Still to cover: Taproot (`tr`) inputs, other m-of-n shapes, mixed script types in one batch
+        (`--batch all`), reorgs, RBF fee bump, a hardware-wallet-style signer, a CI job (needs
+        Docker and a ~5 minute first build).
+  - [ ] Add a fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its
+        only coverage today).
 - [ ] `SECURITY.md` contact address; decide on a disclosure policy.
 - [ ] Decide on the project name and license before going public. The current license is MIT, to
       match the vendored smolcars code.
