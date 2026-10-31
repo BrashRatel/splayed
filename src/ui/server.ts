@@ -9,7 +9,7 @@ import { base64 } from "@scure/base";
 import { type CliIO, describeTor } from "../cli/main.ts";
 import { privacyLevel } from "../cli/format.ts";
 import { type Config, loadConfig, networkConfirmed, routeForBackend } from "../core/config.ts";
-import { parseDescriptor } from "../core/descriptors.ts";
+import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
@@ -129,7 +129,7 @@ async function overview(dataDir: string, env: Record<string, string | undefined>
     };
   });
   const descriptors = wallet.descriptors.map((d, i) => {
-    const parsed = parseDescriptor(d.descriptor);
+    const parsed = parseDescriptor(d.descriptor, networkForProfile(config.profile));
     return {
       number: i + 1,
       label: d.label,
@@ -144,7 +144,8 @@ async function overview(dataDir: string, env: Record<string, string | undefined>
       destinations[chain] = {
         descriptor: d.descriptor,
         nextIndex: d.nextIndex,
-        nextAddress: parseDescriptor(d.descriptor).branches[0].derive(d.nextIndex).address,
+        nextAddress: parseDescriptor(d.descriptor, networkForProfile(config.profile)).branches[0]
+          .derive(d.nextIndex).address,
       };
     }
   }

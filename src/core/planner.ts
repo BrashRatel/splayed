@@ -14,6 +14,7 @@ import { fromHex, toHex } from "./bytes.ts";
 import type { Config } from "./config.ts";
 import {
   type DerivedOutput,
+  networkForProfile,
   type OutputKind,
   type ParsedDescriptor,
   parseDescriptor,
@@ -241,7 +242,9 @@ export async function buildPlan(
 ): Promise<Plan> {
   const log = deps.log ?? (() => {});
   const warnings: string[] = [];
-  const sources = wallet.descriptors.map((d) => parseDescriptor(d.descriptor));
+  const sources = wallet.descriptors.map((d) =>
+    parseDescriptor(d.descriptor, networkForProfile(config.profile))
+  );
   if (options.chains.includes("xbt")) {
     if (!options.xbtSigner) {
       throw new PlanError(
@@ -294,7 +297,7 @@ export async function buildPlan(
           `\`forksplit dest set ${chain} '<descriptor>'\` (ideally from a new seed for ${chain.toUpperCase()}).`,
       );
     }
-    const dest = parseDescriptor(destination.descriptor);
+    const dest = parseDescriptor(destination.descriptor, networkForProfile(config.profile));
     const destBranch = dest.branches[0];
     if (!destBranch.ranged) {
       throw new PlanError("Destination descriptor must be ranged (end in /*)");

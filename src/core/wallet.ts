@@ -1,5 +1,10 @@
 import { join } from "node:path";
-import { type ParsedDescriptor, parseDescriptor } from "./descriptors.ts";
+import {
+  type AddressNetwork,
+  MAIN_NETWORK,
+  type ParsedDescriptor,
+  parseDescriptor,
+} from "./descriptors.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
 
 export const WALLET_FILE = "watch-only.json";
@@ -33,19 +38,25 @@ export async function saveWallet(dataDir: string, wallet: WatchOnlyWallet): Prom
   await writeJsonAtomic(join(dataDir, WALLET_FILE), wallet);
 }
 
-export function parsedDescriptors(wallet: WatchOnlyWallet): ParsedDescriptor[] {
-  return wallet.descriptors.map((d) => parseDescriptor(d.descriptor));
+export function parsedDescriptors(
+  wallet: WatchOnlyWallet,
+  network: AddressNetwork = MAIN_NETWORK,
+): ParsedDescriptor[] {
+  return wallet.descriptors.map((d) => parseDescriptor(d.descriptor, network));
 }
 
 export async function importDescriptor(
   dataDir: string,
   input: string,
   label?: string,
+  network: AddressNetwork = MAIN_NETWORK,
 ): Promise<{ parsed: ParsedDescriptor; added: boolean }> {
-  const parsed = parseDescriptor(input);
+  const parsed = parseDescriptor(input, network);
   const wallet = await loadWallet(dataDir);
   if (
-    wallet.descriptors.some((d) => parseDescriptor(d.descriptor).normalized === parsed.normalized)
+    wallet.descriptors.some((d) =>
+      parseDescriptor(d.descriptor, network).normalized === parsed.normalized
+    )
   ) {
     return { parsed, added: false };
   }

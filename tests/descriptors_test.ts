@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "./assert.ts";
+import { assert, assertEquals, assertThrows } from "./assert.ts";
 import { HDKey } from "@scure/bip32";
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { descriptorChecksum, DescriptorError, parseDescriptor } from "../src/core/descriptors.ts";
@@ -86,4 +86,70 @@ Deno.test("zpub is converted to xpub with identical addresses", () => {
     "wpkh(zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs/0/*)",
   );
   assertEquals(d.branches[0].derive(0).address, "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu");
+});
+
+// ---- regtest network (test profiles only) ----
+
+import { createBase58check } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { MAIN_NETWORK, REGTEST_NETWORK } from "../src/core/descriptors.ts";
+
+const b58 = createBase58check(sha256);
+function withVersion(xpub: string, version: number): string {
+  const raw = b58.decode(xpub);
+  new DataView(raw.buffer, raw.byteOffset).setUint32(0, version);
+  return b58.encode(raw);
+}
+const REG_XPUB = HDKey.fromMasterSeed(new Uint8Array(32).fill(7)).derive("m/84'/1'/0'")
+  .publicExtendedKey;
+const TPUB = withVersion(REG_XPUB, 0x043587cf);
+const VPUB = withVersion(REG_XPUB, 0x045f1cf6);
+
+Deno.test("regtest network: tpub and vpub give the same bcrt1 addresses as the xpub", () => {
+  const fromX = parseDescriptor(`wpkh(${REG_XPUB}/0/*)`, REGTEST_NETWORK);
+  const fromT = parseDescriptor(`wpkh(${TPUB}/0/*)`, REGTEST_NETWORK);
+  const fromV = parseDescriptor(`wpkh(${VPUB}/0/*)`, REGTEST_NETWORK);
+  const addr = fromT.branches[0].derive(0).address;
+  assert(addr.startsWith("bcrt1q"), addr);
+  assertEquals(fromX.branches[0].derive(0).address, addr);
+  assertEquals(fromV.branches[0].derive(0).address, addr);
+  // The stored (normalized) form uses the xpub and must parse again under the same network.
+  assertEquals(parseDescriptor(fromT.normalized, REGTEST_NETWORK).normalized, fromT.normalized);
+});
+
+Deno.test("regtest network: legacy, wrapped and multisig outputs use regtest address prefixes", () => {
+  const legacy = parseDescriptor(`pkh(${TPUB}/0/*)`, REGTEST_NETWORK).branches[0].derive(0);
+  assert(/^[mn]/u.test(legacy.address), legacy.address);
+  const wrapped = parseDescriptor(`sh(wpkh(${TPUB}/0/*))`, REGTEST_NETWORK).branches[0].derive(0);
+  assert(wrapped.address.startsWith("2"), wrapped.address);
+  const ms = parseDescriptor(`wsh(sortedmulti(1,${TPUB}/0/*,${VPUB}/1/*))`, REGTEST_NETWORK)
+    .branches[0].derive(0);
+  assert(ms.address.startsWith("bcrt1q"), ms.address);
+  const tr = parseDescriptor(`tr(${TPUB}/0/*)`, REGTEST_NETWORK).branches[0].derive(0);
+  assert(tr.address.startsWith("bcrt1p"), tr.address);
+});
+
+Deno.test("mainnet still refuses testnet keys, and regtest refuses mainnet-only versions", () => {
+  assertThrows(() => parseDescriptor(`wpkh(${TPUB}/0/*)`), DescriptorError, "mainnet");
+  assertThrows(() => parseDescriptor(`wpkh(${VPUB}/0/*)`, MAIN_NETWORK), DescriptorError);
+  const ypub = withVersion(REG_XPUB, 0x049d7cb2);
+  assertThrows(
+    () => parseDescriptor(`wpkh(${ypub}/0/*)`, REGTEST_NETWORK),
+    DescriptorError,
+    "regtest",
+  );
+  // Mainnet behaviour is unchanged: bc1 addresses.
+  assert(parseDescriptor(`wpkh(${REG_XPUB}/0/*)`).branches[0].derive(0).address.startsWith("bc1q"));
+});
+
+Deno.test("regtest network: private extended keys are still refused", () => {
+  const tprv = HDKey.fromMasterSeed(new Uint8Array(32).fill(7), {
+    private: 0x04358394,
+    public: 0x043587cf,
+  }).privateExtendedKey;
+  assertThrows(
+    () => parseDescriptor(`wpkh(${tprv}/0/*)`, REGTEST_NETWORK),
+    DescriptorError,
+    "PRIVATE",
+  );
 });

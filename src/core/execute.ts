@@ -351,7 +351,7 @@ export function assessReorg(
             `${label}: REORG. This split was in block ${short(prev.blockHash)} (height ${
               prev.height ?? "?"
             }) and is now in block ${short(now.blockHash)} (height ${now.height}). ` +
-            "It is still confirmed, but its depth restarted.",
+            "It is still confirmed, but in a different block: wait for it to be deep again.",
         };
       }
       return undefined;

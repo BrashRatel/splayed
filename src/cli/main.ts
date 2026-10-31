@@ -31,7 +31,7 @@ import {
   TorUnavailableError,
 } from "../net/transport.ts";
 import { torManager, TorStartError } from "../net/tor.ts";
-import { parseDescriptor } from "../core/descriptors.ts";
+import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import {
   buildPlan,
   type ForkChain,
@@ -594,10 +594,18 @@ async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number>
 async function cmdImport(config: Config, args: string[], label: string | undefined, io: CliIO) {
   await requireNetworkConfirmed(config);
   if (!args[0]) throw new UsageError("import <descriptor>");
-  const { parsed, added } = await importDescriptor(config.dataDir, args[0], label);
+  const { parsed, added } = await importDescriptor(
+    config.dataDir,
+    args[0],
+    label,
+    networkForProfile(config.profile),
+  );
   io.out(added ? "Imported (watch-only):" : "Already imported:");
   io.out(`  ${parsed.normalized}`);
   if (!parsed.hadChecksum) io.out("  (no checksum was given; one has been added)");
+  if (/\b[tuvyzTUVYZ]pub/u.test(args[0])) {
+    io.out("  (your extended key is stored as the equivalent xpub; addresses are unchanged)");
+  }
   io.out("Check these first addresses match your wallet before scanning:");
   for (const branch of parsed.branches) {
     io.out(`  branch ${branch.branch}: ${branch.derive(0).address}`);
@@ -663,7 +671,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
   }
   let result;
   try {
-    result = await runScan(config, parsedDescriptors(wallet), {
+    result = await runScan(config, parsedDescriptors(wallet, networkForProfile(config.profile)), {
       backends,
       log: (m) => io.out(m),
       rpcRange,
@@ -779,7 +787,7 @@ async function cmdDest(config: Config, args: string[], startIndex: string | unde
     throw new UsageError("Destinations are per fork: xbt or ecx");
   }
   if (!descriptor) throw new UsageError("dest set <xbt|ecx> <descriptor>");
-  const parsed = parseDescriptor(descriptor);
+  const parsed = parseDescriptor(descriptor, networkForProfile(config.profile));
   if (!parsed.branches[0].ranged) {
     throw new UsageError("Destination descriptor must be ranged (end in /*)");
   }

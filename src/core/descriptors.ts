@@ -10,7 +10,7 @@
 import { HDKey } from "@scure/bip32";
 import { createBase58check, hex } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { NETWORK, p2ms, p2pkh, p2sh, p2tr, p2wpkh, p2wsh } from "@scure/btc-signer";
+import { NETWORK, p2ms, p2pkh, p2sh, p2tr, p2wpkh, p2wsh, TEST_NETWORK } from "@scure/btc-signer";
 import { toHex } from "./bytes.ts";
 
 const b58c = createBase58check(sha256);
@@ -81,9 +81,50 @@ type ScriptExpr =
   | { type: "multi" | "sortedmulti"; threshold: number; keys: KeyExpr[] };
 
 const XPUB_VERSION = 0x0488b21e;
-const CONVERTIBLE_VERSIONS = new Set([0x049d7cb2, 0x04b24746, 0x0295b43f, 0x02aa7ed3]);
 
-function normalizeXpub(text: string): string {
+/**
+ * Which network a descriptor's keys and addresses belong to. Mainnet is the default and accepts
+ * only mainnet extended keys; regtest (test profiles only) accepts the testnet versions that
+ * wallets such as Sparrow export and encodes bcrt1 addresses.
+ */
+export interface AddressNetwork {
+  id: "main" | "regtest";
+  /** Address encoding parameters. */
+  params: typeof NETWORK;
+  /** Extended public key versions (other than xpub) that are converted to xpub internally. */
+  convertible: ReadonlySet<number>;
+  /** Extended private key versions, refused with an explanation. */
+  privateVersions: readonly number[];
+  keyHint: string;
+}
+
+export const MAIN_NETWORK: AddressNetwork = {
+  id: "main",
+  params: NETWORK,
+  // ypub, Ypub, zpub, Zpub
+  convertible: new Set([0x049d7cb2, 0x0295b43f, 0x04b24746, 0x02aa7ed3]),
+  privateVersions: [0x0488ade4, 0x049d7878, 0x04b2430c],
+  keyHint: "Only mainnet extended public keys (xpub/ypub/zpub) are supported",
+};
+
+export const REGTEST_NETWORK: AddressNetwork = {
+  id: "regtest",
+  params: { ...TEST_NETWORK, bech32: "bcrt" },
+  // tpub, upub, vpub, Upub, Vpub
+  convertible: new Set([0x043587cf, 0x044a5262, 0x045f1cf6, 0x024289ef, 0x02575483]),
+  privateVersions: [0x04358394, 0x044a4e28, 0x045f18bc, 0x0488ade4],
+  keyHint:
+    "Only regtest extended public keys (tpub/upub/vpub, or the xpub forksplit stores) are supported",
+};
+
+/** The descriptor network a profile uses (mainnet unless the profile says otherwise). */
+export function networkForProfile(
+  profile: { addressNetwork?: "main" | "regtest" },
+): AddressNetwork {
+  return profile.addressNetwork === "regtest" ? REGTEST_NETWORK : MAIN_NETWORK;
+}
+
+function normalizeXpub(text: string, network: AddressNetwork): string {
   let raw: Uint8Array;
   try {
     raw = b58c.decode(text);
@@ -93,22 +134,22 @@ function normalizeXpub(text: string): string {
   if (raw.length !== 78) throw new DescriptorError("Extended key has the wrong length");
   const version = new DataView(raw.buffer, raw.byteOffset).getUint32(0);
   if (version === XPUB_VERSION) return text;
-  if (CONVERTIBLE_VERSIONS.has(version)) {
+  if (network.convertible.has(version)) {
     const copy = Uint8Array.from(raw);
     new DataView(copy.buffer).setUint32(0, XPUB_VERSION);
     return b58c.encode(copy);
   }
-  if ([0x0488ade4, 0x049d7878, 0x04b2430c, 0x04358394].includes(version)) {
+  if (network.privateVersions.includes(version)) {
     throw new DescriptorError(
       "That is a PRIVATE extended key. forksplit is keyless: give it the xpub and sign in your own wallet",
     );
   }
-  throw new DescriptorError("Only mainnet extended public keys (xpub/ypub/zpub) are supported");
+  throw new DescriptorError(network.keyHint);
 }
 
 class Parser {
   pos = 0;
-  constructor(readonly text: string) {}
+  constructor(readonly text: string, readonly network: AddressNetwork) {}
 
   peek(s: string): boolean {
     return this.text.startsWith(s, this.pos);
@@ -220,12 +261,12 @@ class Parser {
       if (this.peek("/")) throw new DescriptorError("A fixed public key cannot be derived");
       return key;
     }
-    if (/^[xyzYZ]prv/u.test(token)) {
+    if (/^[xyztuvYZUV]prv/u.test(token)) {
       throw new DescriptorError(
         "That is a PRIVATE extended key. forksplit is keyless: give it the xpub and sign in your own wallet",
       );
     }
-    key.xpub = normalizeXpub(token);
+    key.xpub = normalizeXpub(token, this.network);
     while (this.peek("/")) {
       this.expect("/");
       if (this.peek("*")) {
@@ -356,20 +397,25 @@ interface Built {
   multisig?: { m: number; n: number };
 }
 
-function build(expr: ScriptExpr, branch: number, index: number): Built {
+function build(
+  expr: ScriptExpr,
+  branch: number,
+  index: number,
+  net: typeof NETWORK,
+): Built {
   switch (expr.type) {
     case "pkh": {
       const k = deriveKey(expr.key, branch, index);
-      return { ...p2pkh(k.pubkey, NETWORK), keys: [k] };
+      return { ...p2pkh(k.pubkey, net), keys: [k] };
     }
     case "wpkh": {
       const k = deriveKey(expr.key, branch, index);
-      return { ...p2wpkh(k.pubkey, NETWORK), keys: [k] };
+      return { ...p2wpkh(k.pubkey, net), keys: [k] };
     }
     case "tr": {
       const k = deriveKey(expr.key, branch, index);
       const xonly = k.pubkey.length === 33 ? k.pubkey.slice(1) : k.pubkey;
-      return { ...p2tr(xonly, undefined, NETWORK), keys: [{ ...k, pubkey: xonly }] };
+      return { ...p2tr(xonly, undefined, net), keys: [{ ...k, pubkey: xonly }] };
     }
     case "multi":
     case "sortedmulti": {
@@ -381,15 +427,15 @@ function build(expr: ScriptExpr, branch: number, index: number): Built {
       return { script: ms.script, keys, multisig: { m: expr.threshold, n: keys.length } };
     }
     case "wsh": {
-      const inner = build(expr.inner, branch, index);
+      const inner = build(expr.inner, branch, index, net);
       // deno-lint-ignore no-explicit-any
-      const out = p2wsh({ type: "ms", script: inner.script } as any, NETWORK);
+      const out = p2wsh({ type: "ms", script: inner.script } as any, net);
       return { ...out, witnessScript: inner.script, keys: inner.keys, multisig: inner.multisig };
     }
     case "sh": {
-      const inner = build(expr.inner, branch, index);
+      const inner = build(expr.inner, branch, index, net);
       // deno-lint-ignore no-explicit-any
-      const out = p2sh({ type: "unknown", script: inner.script } as any, NETWORK, true);
+      const out = p2sh({ type: "unknown", script: inner.script } as any, net, true);
       return {
         ...out,
         redeemScript: inner.script,
@@ -452,7 +498,10 @@ export interface ParsedDescriptor {
   allKeysHaveOrigin: boolean;
 }
 
-export function parseDescriptor(input: string): ParsedDescriptor {
+export function parseDescriptor(
+  input: string,
+  network: AddressNetwork = MAIN_NETWORK,
+): ParsedDescriptor {
   const trimmed = input.trim();
   const hashAt = trimmed.lastIndexOf("#");
   let body = trimmed;
@@ -468,7 +517,7 @@ export function parseDescriptor(input: string): ParsedDescriptor {
     }
     hadChecksum = true;
   }
-  const parser = new Parser(body);
+  const parser = new Parser(body, network);
   const expr = parser.script("top");
   if (parser.pos !== body.length) {
     throw new DescriptorError(
@@ -501,7 +550,7 @@ export function parseDescriptor(input: string): ParsedDescriptor {
       ranged,
       derive(index: number): DerivedOutput {
         if (!ranged && index !== 0) throw new DescriptorError("Descriptor is not ranged");
-        const built = build(expr, branch, index);
+        const built = build(expr, branch, index, network.params);
         if (!built.address) throw new DescriptorError("Could not derive an address");
         return {
           index,

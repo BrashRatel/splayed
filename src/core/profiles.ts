@@ -53,6 +53,8 @@ export interface ChainProfile {
 export interface NetworkProfile {
   readonly id: string;
   readonly description: string;
+  /** Extended-key versions and address encoding for descriptors. Default "main". */
+  readonly addressNetwork?: "main" | "regtest";
   readonly chains: Readonly<Record<ChainId, ChainProfile>>;
 }
 
