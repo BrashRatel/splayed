@@ -40,12 +40,12 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
   - [ ] ECX 974,017 in particular came from one explorer (via the user) and needs a second source,
         such as a v1.1.0 node.
   - [ ] Make sure it's buried deep enough that a reorg can't replace it.
-- [ ] **Pin a Tor release.** On a machine that can reach torproject.org:
-  1. Independently confirm the Tor Browser Developers signing-key fingerprint
-     (`EF6E286DDA85EA2A4BA7DE684E2C6E8793298290`).
-  2. Run `deno task update-tor-manifest <version>`.
-  3. Review and commit `vendor/tor-manifest.json`.
-  4. Run `deno task fetch-tor --all`.
+- [x] **Pin a Tor release.** Pinned Tor Browser 16.0, which bundles tor 0.4.9.15 (checked by running
+      the fetched Linux binary). The signing-key fingerprint
+      (`EF6E286DDA85EA2A4BA7DE684E2C6E8793298290`) was confirmed independently, and
+      `update-tor-manifest` verified the release signature against it.
+  - [ ] Run `deno task fetch-tor --all` and smoke-test the macOS and Windows bundles. Only the
+        Linux x86_64 bundle has been fetched and run so far.
 - [ ] **Real Tor run.**
   - [ ] Confirm managed Tor bootstraps on Linux, macOS and Windows.
   - [ ] Confirm per-chain and per-broadcast circuits really differ: check Tor's control port, or

@@ -104,8 +104,8 @@ deno task fetch-tor --all              # download Tor Expert Bundles, check SHA-
 deno task compile                      # dist/forksplit; ship it next to vendor/tor/
 ```
 
-`fetch-tor` refuses anything that isn't pinned in `vendor/tor-manifest.json`. That file ships
-unpinned: the pins must be added by a maintainer after checking the signature themselves.
+`fetch-tor` refuses anything that isn't pinned in `vendor/tor-manifest.json`. That file pins Tor
+Browser 16.0 (tor 0.4.9.15). Re-pin with `update-tor-manifest` after checking the signature yourself.
 
 ### Using your own nodes
 
@@ -342,7 +342,7 @@ src/ui/                 local web UI server, job runner, static assets
 scripts/                fetch-tor / update-tor-manifest (bundled Tor)
 testdata/               Knots unified-sighash vectors (166)
 tests/                  unit + end-to-end tests (fake chains, fake Tor/SOCKS/Electrum/RPC)
-vendor/tor-manifest.json  pinned Tor Expert Bundle hashes (unpinned until a maintainer verifies)
+vendor/tor-manifest.json  pinned Tor Expert Bundle hashes (Tor Browser 16.0 / tor 0.4.9.15)
 ```
 
 ## Development
