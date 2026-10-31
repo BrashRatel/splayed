@@ -191,6 +191,17 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     });
     assertEquals(up.status, 200, await up.clone().text());
     await up.body?.cancel();
+    // The plans view reports that the signed file arrived, before anything is verified.
+    const seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
+    assert(seen.signedUpload?.name.includes(".signed."), JSON.stringify(seen.signedUpload));
+    // The mining endpoints exist only in test environments.
+    assertEquals(await (await api("/api/dev")).json(), { enabled: false });
+    const noDev = await api("/api/dev/mine", {
+      method: "POST",
+      body: JSON.stringify({ chain: "ecx", blocks: 1 }),
+    });
+    assertEquals(noDev.status, 404);
+    await noDev.body?.cancel();
     // Garbage uploads are refused.
     const bad = await api(`/api/plans/${p.id}/upload`, {
       method: "POST",

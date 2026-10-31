@@ -463,6 +463,8 @@ deno task regtest ui                          # open the printed URL
 The node RPC ports bind to `0.0.0.0` by default, so a wallet on another machine on your LAN can
 connect to `<this-host>:18443` (BTC), `18543` (XBT) and `18643` (ECX). The RPC password (`regtest`)
 is public: use a network you trust, or pass `up --bind 127.0.0.1` to keep the ports on this machine.
+The plans page of the playground UI has a "Regtest tools" card to mine blocks on each chain.
+
 `ui` listens on all interfaces too (test environment only: the real `forksplit ui` is
 loopback-only). Open `http://<this-host>:18080/#token=...` from the LAN, using the token it prints;
 it is plain HTTP. `ui --bind 127.0.0.1` keeps it local, and then `ssh -L 18080:127.0.0.1:18080 host`

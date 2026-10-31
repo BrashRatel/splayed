@@ -382,6 +382,25 @@ input[type="file"]::file-selector-button {
   font: inherit;
 }
 
+.flash {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel, #1f2630);
+  border: 1px solid var(--ok, #4caf7d);
+  border-radius: 6px;
+  padding: 10px 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+
+.flash.show {
+  opacity: 1;
+}
+
 .alert {
   border: 1px solid var(--bad, #c0392b);
   border-radius: 6px;

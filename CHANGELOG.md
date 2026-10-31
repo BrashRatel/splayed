@@ -7,6 +7,12 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Regtest playground UI: mining buttons.** The plans page shows the three chains' heights and
+  "Mine 1 / Mine 6" per chain or for all, then tracks the newest broadcast plan. The endpoints exist
+  only when the playground starts the UI; the real `forksplit ui` does not have them.
+- **Web UI: an uploaded signed file is now visible** in the plan table ("✓ received", the file name,
+  and "signed file uploaded: press Verify") and in a short message at the top of the page.
+
 - **Web UI: fee bump and reorg alerts.** Each broadcast, unconfirmed split has a "Fee bump…" button
   (and the plan has one for all of them); it asks for a rate and runs `bump`. The plans view shows
   the latest reorg alert for each split, "replaced by plan …" and "replaces …".

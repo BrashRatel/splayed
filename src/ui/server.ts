@@ -208,6 +208,21 @@ async function plansView(dataDir: string) {
       const { dir: planDir, plan } = await loadPlanDir(dataDir, id);
       const progress = await loadProgress(planDir);
       const signedFiles = await findSignedFiles(planDir);
+      const uploaded = async (file: string) => {
+        const stem = file.replace("/", "-").replace(/\.psbt$/u, "");
+        for (const kind of ["psbt", "hex"]) {
+          try {
+            const st = await Deno.stat(join(planDir, "uploads", `${stem}.signed.${kind}`));
+            return { name: `${stem}.signed.${kind}`, at: st.mtime?.toISOString() };
+          } catch { /* not uploaded */ }
+        }
+        return undefined;
+      };
+      const uploads = new Map(
+        await Promise.all(
+          plan.transactions.map(async (t) => [t.file, await uploaded(t.file)] as const),
+        ),
+      );
       out.push({
         id,
         createdAt: plan.createdAt,
@@ -225,6 +240,7 @@ async function plansView(dataDir: string) {
           fee: t.fee,
           feeRate: t.feeRate,
           output: t.output,
+          signedUpload: uploads.get(t.file),
           progress: {
             verified: progress.txs[t.file]?.verified
               ? { at: progress.txs[t.file].verified!.at, txid: progress.txs[t.file].verified!.txid }
@@ -263,6 +279,11 @@ export interface UiOptions {
    * and is sent over plain HTTP. The real `forksplit ui` never sets this.
    */
   listenOnAllInterfaces?: boolean;
+  /** TEST ENVIRONMENTS ONLY: lets the page mine blocks on regtest nodes. Never set by `ui`. */
+  devTools?: {
+    heights(): Promise<Record<string, number>>;
+    mine(chain: string, blocks: number): Promise<Record<string, number>>;
+  };
 }
 
 export function startUi(
@@ -324,6 +345,21 @@ export function startUi(
         return json(await plansView(options.dataDir));
       }
       if (req.method === "GET" && path === "/api/tor") return json(torManager.status);
+      if (path === "/api/dev" && req.method === "GET") {
+        return json(
+          options.devTools ? { enabled: true, heights: await options.devTools.heights() } : {
+            enabled: false,
+          },
+        );
+      }
+      if (path === "/api/dev/mine" && req.method === "POST" && options.devTools) {
+        const body = await readBody(req) as { chain?: unknown; blocks?: unknown };
+        const blocks = Number(body.blocks);
+        if (!Number.isInteger(blocks) || blocks < 1 || blocks > 200) {
+          throw new JobError("blocks must be a whole number from 1 to 200");
+        }
+        return json({ heights: await options.devTools.mine(String(body.chain), blocks) });
+      }
       if (req.method === "POST" && path === "/api/run") {
         const body = await readBody(req) as { args?: unknown };
         return json(jobs.start(body.args));

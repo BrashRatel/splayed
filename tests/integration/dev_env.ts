@@ -326,6 +326,23 @@ async function ui(flags: Record<string, string>) {
     run: main,
     baseIO,
     listenOnAllInterfaces: lan,
+    devTools: {
+      heights: async () => {
+        const out: Record<string, number> = {};
+        for (const c of CHAINS) out[c] = await nodes[c].call<number>("getblockcount");
+        return out;
+      },
+      mine: async (which, count) => {
+        const chains = which === "all" ? CHAINS : CHAINS.filter((c) => c === which);
+        if (!chains.length) throw new Error("chain must be btc, xbt, ecx or all");
+        const out: Record<string, number> = {};
+        for (const c of chains) {
+          await nodes[c].mine(count, await minerAddress(nodes[c]));
+          out[c] = await nodes[c].call<number>("getblockcount");
+        }
+        return out;
+      },
+    },
   });
   console.log(`forksplit UI (regtest profile): ${server.url}\n`);
   console.log("Open that exact URL: it carries the access token. Ctrl+C to stop.");

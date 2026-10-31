@@ -145,14 +145,25 @@ function setBusy(busy) {
 
 // ---------- data ----------
 
+/** A short message at the top of the page, so an action's result is seen without the log. */
+function flash(text) {
+  const el = document.getElementById("flash") ??
+    document.body.appendChild(h("div", { id: "flash" }));
+  el.textContent = text;
+  el.className = "flash show";
+  clearTimeout(flash.timer);
+  flash.timer = setTimeout(() => (el.className = "flash"), 6000);
+}
+
 async function refresh() {
   try {
-    const [overview, status, plans] = await Promise.all([
+    const [overview, status, plans, dev] = await Promise.all([
       api("/api/overview"),
       api("/api/status"),
       api("/api/plans"),
+      api("/api/dev"),
     ]);
-    Object.assign(state, { overview, status, plans });
+    Object.assign(state, { overview, status, plans, dev });
   } catch (e) {
     logLine(`Couldn't load data: ${e.message}`, "err");
   }
@@ -701,6 +712,52 @@ function bump(planId, scope) {
   run(args);
 }
 
+async function mineBlocks(chain, blocks) {
+  try {
+    const r = await api("/api/dev/mine", {
+      method: "POST",
+      body: JSON.stringify({ chain, blocks }),
+    });
+    logLine(`Mined ${blocks} on ${chain}: ${JSON.stringify(r.heights)}`);
+    flash(`Mined ${blocks} block(s) on ${chain === "all" ? "every chain" : chain.toUpperCase()}.`);
+    await refresh();
+    const latest = state.plans?.plans?.find((p) =>
+      p.transactions.some((t) => t.progress.broadcast)
+    );
+    if (latest) run(["track", latest.id]);
+  } catch (e) {
+    logLine(`Mining failed: ${e.message}`, "err");
+  }
+}
+
+function devCard() {
+  if (!state.dev?.enabled) return null;
+  const heights = state.dev.heights;
+  const counts = [1, 6];
+  return h(
+    "div",
+    { class: "card" },
+    h("h2", {}, "Regtest tools (test environment only)"),
+    h(
+      "p",
+      { class: "note" },
+      "Heights: " +
+        Object.entries(heights).map(([c, n]) => `${c.toUpperCase()} ${n}`).join(" · ") +
+        ". After mining, the newest broadcast plan is tracked for you.",
+    ),
+    ...[...Object.keys(heights), "all"].map((c) =>
+      h(
+        "div",
+        { class: "row" },
+        h("span", { class: "mono" }, c === "all" ? "ALL" : c.toUpperCase()),
+        ...counts.map((n) =>
+          h("button", { class: "small secondary", onclick: () => mineBlocks(c, n) }, `Mine ${n}`)
+        ),
+      )
+    ),
+  );
+}
+
 function viewPlans() {
   const o = state.overview;
   const signer = h(
@@ -764,6 +821,9 @@ function viewPlans() {
           });
           logLine(`Saved signed file as ${r.saved}`);
           await refresh();
+          flash(
+            `Signed file received for ${t.chain.toUpperCase()} #${t.order}. Press Verify next.`,
+          );
         } catch (e) {
           logLine(`Upload failed: ${e.message}`, "err");
         }
@@ -805,13 +865,25 @@ function viewPlans() {
         h(
           "td",
           {},
+          t.signedUpload
+            ? h(
+              "div",
+              { class: "note" },
+              `✓ received ${t.signedUpload.at ? t.signedUpload.at.slice(11, 19) + " UTC" : ""}`,
+              h("div", { class: "muted mono" }, t.signedUpload.name),
+            )
+            : null,
           fileInput,
           h("button", { class: "small secondary", onclick: upload }, "Upload signed"),
         ),
         h(
           "td",
           {},
-          pr.verified ? badge("verified", "verified") : badge("not verified", ""),
+          pr.verified
+            ? badge("verified", "verified")
+            : t.signedUpload
+            ? badge("signed file uploaded: press Verify", "pending")
+            : badge("not verified", ""),
           pr.broadcast ? h("div", {}, badge(pr.broadcast.status, pr.broadcast.status)) : null,
           pr.confirmations ? h("div", { class: "muted" }, `${pr.confirmations.depth} conf`) : null,
           t.replaces
@@ -896,6 +968,8 @@ function viewPlans() {
       ),
     ));
   }
+  const dev = devCard();
+  if (dev) view.push(dev);
   return view;
 }
 
