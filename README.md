@@ -105,7 +105,8 @@ deno task compile                      # dist/forksplit; ship it next to vendor/
 ```
 
 `fetch-tor` refuses anything that isn't pinned in `vendor/tor-manifest.json`. That file pins Tor
-Browser 16.0 (tor 0.4.9.15). Re-pin with `update-tor-manifest` after checking the signature yourself.
+Browser 16.0 (tor 0.4.9.15). Re-pin with `update-tor-manifest` after checking the signature
+yourself.
 
 ### Using your own nodes
 
@@ -342,6 +343,7 @@ src/ui/                 local web UI server, job runner, static assets
 scripts/                fetch-tor / update-tor-manifest (bundled Tor)
 testdata/               Knots unified-sighash vectors (166)
 tests/                  unit + end-to-end tests (fake chains, fake Tor/SOCKS/Electrum/RPC)
+tests/integration/      Docker regtest suite: compose file, node images, test profile, signers
 vendor/tor-manifest.json  pinned Tor Expert Bundle hashes (Tor Browser 16.0 / tor 0.4.9.15)
 ```
 
@@ -351,9 +353,29 @@ vendor/tor-manifest.json  pinned Tor Expert Bundle hashes (Tor Browser 16.0 / to
 deno install
 deno task demo-ui # UI filled with in-memory test chains
 deno task test    # unit + end-to-end tests against in-memory chains and a fake SOCKS proxy
+deno task test:integration # regtest: real Core, Knots (BLAKE2b) and eCash nodes in Docker
 deno task check
 deno task lint
 ```
+
+### Regtest integration suite
+
+`deno task test:integration` needs Docker Compose v2, internet access for the first build and
+roughly 5 minutes for it (the eCash node compiles from source). It builds three images, none of
+which touches an existing container or volume:
+
+| Chain | Node                                                                                |
+| ----- | ----------------------------------------------------------------------------------- |
+| BTC   | Bitcoin Core 31.0, official binary, pinned SHA-256                                  |
+| XBT   | Bitcoin Knots 29.4.1.knots20260508, BLAKE2b from regtest height 110, pinned SHA-256 |
+| ECX   | `ecash-com/bitcoin` at commit `c8474e0b` (reports eCash v1.2.0), built from source  |
+
+The nodes share blocks 1 to 109, so the test coins exist at the same outpoint on all three chains,
+then each mines its own chain. forksplit's real CLI runs against their JSON-RPC, and the suite
+checks that each fork split is rejected by the other two nodes. Each run uses a random Compose
+project with fresh volumes and loopback-only ports, and removes them afterwards. Regtest profiles
+exist only in test code (`registerProfileForTesting`); the CLI, environment and UI cannot select
+one.
 
 ## Credits and license
 

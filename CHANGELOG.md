@@ -1,0 +1,83 @@
+# Changelog
+
+All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); see
+[TODO.md](TODO.md) for the release blockers. Newest first.
+
+## Unreleased
+
+### Added
+
+- **Regtest integration suite** (`deno task test:integration`, `tests/integration/`). Real Bitcoin
+  Core 31.0, Bitcoin Knots 29.4.1 (BLAKE2b from regtest height 110) and an eCash node built from
+  `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. forksplit's CLI runs
+  against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan. It also
+  checks that a node on the wrong chain is rejected, that XBT signatures without 0x21 fail `verify`,
+  and that each confirmed fork split is rejected by the other two nodes. Every run uses a random
+  Compose project with fresh volumes and loopback-only ports.
+- `registerProfileForTesting()` in `src/core/profiles.ts`, so tests can register a `regtest-*`
+  profile. It is not reachable from the CLI, the environment, the config file or the UI.
+- Pinned Tor Browser 16.0 (tor 0.4.9.15) in `vendor/tor-manifest.json`. The release signature was
+  verified against the Tor Browser Developers key (`EF6E286DDA85EA2A4BA7DE684E2C6E8793298290`). Only
+  the Linux x86_64 bundle has been fetched and run.
+
+### Fixed
+
+- The XBT node-RPC identity check never matched a real Knots node. Knots reports the fork at the top
+  level of the `getdeploymentinfo` result (`{"blake2b": {"height", "active"}}`), not under
+  `deployments`, so the check failed closed against genuine Knots. Found by the regtest suite.
+
+### Changed
+
+- TODO and README now name eCash v1.2.0, the version the pinned node commit reports (they said
+  v1.1.0).
+- Default endpoints probed through Tor: both onion addresses match the operators' `Onion-Location`
+  headers, and both serve the REST API under `/api`.
+
+## Docs and UI polish (2026-10-31)
+
+- Describe forksplit as keyless (your wallet signs) rather than watch-only.
+- TODO.md with release blockers and open work, SECURITY.md, project layout in the README, and a CI
+  workflow (fmt, lint, type-check, tests).
+- UI: dark mode by default, with a light toggle that is remembered per browser.
+- Tor: a failed bootstrap is not retried for every chain within 30 seconds.
+
+## Milestone 4: managed Tor and local web UI (2026-10-31)
+
+- Tor manager with `auto`, `managed` and `system` modes. forksplit's own Tor uses
+  `IsolateSOCKSAuth`, `SafeSocks 1` and `__OwningControllerProcess`, and starts only when a backend
+  about to be contacted needs it.
+- `fetch-tor` and `update-tor-manifest`: GPG-verified, SHA-256-pinned Tor Expert Bundles.
+- Local web UI: loopback only, token in the URL fragment, Host, Origin and Content-Type checks,
+  strict CSP. It runs the same CLI commands, with prompts shown as dialogs, and supports PSBT
+  download and upload.
+
+## Milestone 3: verify, broadcast, track (2026-10-31)
+
+- `verify`: the transaction must match the plan; replay markers are checked; every signature is
+  verified against its own chain's digest (legacy, BIP143 and BIP341 for ECX; the Knots unified
+  digest for XBT, with 166 vendored vectors, and every XBT signature must be 0x21). The final
+  transaction is rebuilt canonically. `testmempoolaccept` runs on your own nodes, and any other
+  chain accepting fails verification.
+- `broadcast`: re-verifies, re-checks backend identity and that inputs are unspent, saves progress
+  before sending, uses a separate circuit per transaction and sends the TEST FIRST transaction
+  first. Esplora, Electrum and RPC backends are supported.
+- `track` reports confirmation depth.
+- Adding a backend replaces that chain's profile default, identity checks stop at the first backend
+  that passes, and `init` asks before contacting anything.
+
+## Milestone 2: Electrum, destinations, PSBT planner (2026-10-31)
+
+- Electrum backend over `ssl://` and `tcp://` with the same Tor or direct routing policy and
+  optional certificate pinning. Identity uses the next header's prev-hash, so it works for XBT's
+  164-byte headers.
+- `dest` for fork destinations and `plan` for the guided route: live re-check, verified previous
+  transactions, batching policies, fee handling and reserved destination addresses.
+- BIP174 PSBT encoder and decoder, including `PSBT_IN_SIGHASH_TYPE = 0x21`.
+- RPC: ranges are omitted for unranged descriptors.
+
+## Milestone 1: read-only core (2026-10-31)
+
+- Network profiles with pinned checkpoints, Tor-routed transport, Esplora and node-RPC backends,
+  descriptor parsing (`pkh`, `wpkh`, `sh(wpkh)`, `tr` key path, `wsh` and `sh(wsh)` with
+  `multi`/`sortedmulti`), `scan` and `status`.
+- Coin classification: `shared`, `separated`, `pending`, `unverified` and `spent`.

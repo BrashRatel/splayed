@@ -175,8 +175,22 @@ export const PROFILES: Readonly<Record<string, NetworkProfile>> = Object.freeze(
   mainnet: MAINNET,
 });
 
+/**
+ * Profiles registered by test code only (regtest rehearsals). Nothing user-reachable calls
+ * registerProfileForTesting: it is not wired to the CLI, the environment, the config file or the UI,
+ * and PROFILES (what users may choose and what error messages list) stays mainnet-only.
+ */
+const testProfiles = new Map<string, NetworkProfile>();
+
+export function registerProfileForTesting(profile: NetworkProfile): void {
+  if (!/^regtest-[a-z0-9-]+$/u.test(profile.id)) {
+    throw new Error(`Test profile ids must look like "regtest-<name>", got "${profile.id}"`);
+  }
+  testProfiles.set(profile.id, deepFreeze(profile));
+}
+
 export function getProfile(id: string): NetworkProfile {
-  const profile = PROFILES[id];
+  const profile = PROFILES[id] ?? testProfiles.get(id);
   if (!profile) {
     throw new Error(
       `Unknown network profile "${id}". Available: ${Object.keys(PROFILES).join(", ")}`,

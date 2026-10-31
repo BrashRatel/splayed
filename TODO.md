@@ -28,24 +28,24 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 - [ ] **ECX signers.** Confirm hardware wallets sign locktime 499,999,998 without complaint, and
       that the signed transaction keeps the locktime and sequences (`verify` checks this, but we
       should know which devices warn or refuse).
-- [ ] **Default endpoints.**
-  - [ ] Confirm the mempool.space onion against mempool.space's own published link.
-  - [ ] Confirm the mempool.guide onion against an operator-published link, such as an
-        `Onion-Location` header.
-  - [ ] Confirm both onions serve the REST API under `/api`.
-  - [ ] Confirm explorer.ecash.com answers through Tor exits, with no Cloudflare challenge.
-  - [ ] Confirm esplora.ecash.ninja works as the ECX fallback.
+- [ ] **Default endpoints.** Probed through Tor on 2026-10-31.
+  - [x] mempool.space onion matches the `Onion-Location` header mempool.space serves.
+  - [x] mempool.guide onion matches the `Onion-Location` header mempool.guide serves.
+  - [x] Both onions serve the REST API under `/api` (`/blocks/tip/height` answered 200).
+  - [ ] explorer.ecash.com answered through a Tor exit with no Cloudflare challenge on one request.
+        Repeat from several exits and under scan load before ticking.
+  - [x] esplora.ecash.ninja answers as the ECX fallback.
 - [ ] **Checkpoint hashes** in `src/core/profiles.ts`.
   - [ ] Re-verify every hash from two independent sources.
   - [ ] ECX 974,017 in particular came from one explorer (via the user) and needs a second source,
-        such as a v1.1.0 node.
+        such as an eCash node (v1.2.0 is what the pinned commit reports).
   - [ ] Make sure it's buried deep enough that a reorg can't replace it.
 - [x] **Pin a Tor release.** Pinned Tor Browser 16.0, which bundles tor 0.4.9.15 (checked by running
       the fetched Linux binary). The signing-key fingerprint
       (`EF6E286DDA85EA2A4BA7DE684E2C6E8793298290`) was confirmed independently, and
       `update-tor-manifest` verified the release signature against it.
-  - [ ] Run `deno task fetch-tor --all` and smoke-test the macOS and Windows bundles. Only the
-        Linux x86_64 bundle has been fetched and run so far.
+  - [ ] Run `deno task fetch-tor --all` and smoke-test the macOS and Windows bundles. Only the Linux
+        x86_64 bundle has been fetched and run so far.
 - [ ] **Real Tor run.**
   - [ ] Confirm managed Tor bootstraps on Linux, macOS and Windows.
   - [ ] Confirm per-chain and per-broadcast circuits really differ: check Tor's control port, or
@@ -61,11 +61,13 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 
 ## 2. Backends against real servers
 
-- [ ] Node RPC against real Bitcoin Core 31.x, Knots 29.4.x (XBT) and eCash v1.1.0:
+- [ ] Node RPC against real Bitcoin Core 31.x, Knots 29.4.x (XBT) and eCash v1.2.0 (the version the
+      pinned `ecash-com/bitcoin` commit reports):
   - [ ] `scantxoutset` with ranged descriptors;
   - [ ] `testmempoolaccept` reject reasons. The pass/fail rules in `src/core/execute.ts`
         (`mempoolChecks`) assume Core's strings.
-  - [ ] Knots `getdeploymentinfo`: confirm it really names the deployment `blake2b`.
+  - [x] Knots `getdeploymentinfo`: reports `blake2b` at the top level of the result, not under
+        `deployments` (confirmed on a Knots 29.4.1 regtest node; the check was wrong and is fixed).
 - [ ] Electrum against Fulcrum and electrs:
   - [ ] an XBT server patched for 164-byte headers;
   - [ ] the "transaction not found" error text for each implementation (`isNotFound`);
@@ -85,7 +87,7 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 - [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins. Guidance in the UI,
       not just the CLI.
 - [ ] **Chain upgrades.** Watch for:
-  - eCash node upgrades after v1.1.0, which may need new checkpoints;
+  - eCash node upgrades after v1.2.0, which may need new checkpoints;
   - XBT Knots changes: coinbase maturity ends at block 979,920, RDTS expires 2027-09-01.
 - [ ] **Explicit chain-specific coins.** Detect coins that are already chain-specific because their
       creating transaction is protected, rather than only "absent elsewhere". Feeds the donor work
@@ -119,8 +121,12 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 ## 5. Project hygiene
 
 - [x] CI: fmt, lint, type-check and tests on every push (`.github/workflows/ci.yml`).
-- [ ] Run the regtest integration suite against real nodes (Core, Knots and eCash in Docker),
-      modelled on smolcars/bcashjr-wallet's setup.
+- [x] Regtest integration suite (`deno task test:integration`, `tests/integration/`): real Bitcoin
+      Core 31.0, Knots 29.4.1 (BLAKE2b at regtest height 110) and eCash (built from the pinned
+      commit, which reports v1.2.0) in Docker. Drives the real CLI through init, import, scan, plan,
+      verify, broadcast, track and rescan, and checks replay rejection on the other nodes.
+  - [ ] Still to cover: multisig and Taproot inputs, `--batch` variants, reorgs, RBF fee bump, a
+        hardware-wallet-style signer, CI job (needs Docker and a ~5 minute first build).
 - [ ] `SECURITY.md` contact address; decide on a disclosure policy.
 - [ ] Decide on the project name and license before going public. The current license is MIT, to
       match the vendored smolcars code.

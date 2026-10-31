@@ -1,0 +1,29 @@
+# forksplit regtest nodes. Every volume belongs to the runner's own Compose project (random name);
+# nothing is mounted from the host and ports bind to loopback only. No mainnet data, no existing
+# containers are touched.
+services:
+  btc:
+    image: forksplit-it-btc:local
+    build: { context: ., dockerfile: node.Dockerfile, args: { NODE: core } }
+    ports: ["127.0.0.1::18443"]
+    volumes: ["btc:/data"]
+  xbt:
+    image: forksplit-it-xbt:local
+    build: { context: ., dockerfile: node.Dockerfile, args: { NODE: knots } }
+    command:
+      - "-blake2b_headline=forksplit integration regtest"
+      - "-testactivationheight=blake2b@110"
+      - "-rdtsexpiry=1819756800"
+      - "-blockmaxweight=800000"
+    ports: ["127.0.0.1::18443"]
+    volumes: ["xbt:/data"]
+  ecx:
+    image: forksplit-it-ecx:local
+    build: { context: ., dockerfile: ecx.Dockerfile }
+    command: ["-rpcport=18443", "-listenonion=0"]
+    ports: ["127.0.0.1::18443"]
+    volumes: ["ecx:/data"]
+volumes:
+  btc:
+  xbt:
+  ecx:
