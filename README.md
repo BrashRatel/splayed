@@ -163,6 +163,9 @@ Security:
 - Server data is only ever inserted as text, never as HTML.
 - The UI can't change the data directory, Tor address or profile, and can't start another UI.
 
+The UI is dark by default. The header button switches to light mode, and the choice is remembered in
+that browser.
+
 `deno task demo-ui` starts a UI filled with in-memory test chains (no network), for development.
 
 ### Import and scan

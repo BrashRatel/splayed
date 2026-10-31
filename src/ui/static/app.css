@@ -14,16 +14,24 @@
   font-size: 14px;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f5f6f8;
-    --panel: #ffffff;
-    --panel2: #f0f2f5;
-    --line: #d9dde3;
-    --text: #1b1f24;
-    --muted: #5d6673;
-    color-scheme: light;
-  }
+/* Dark is the default; the header toggle switches to light and is remembered per browser. */
+:root.light {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --panel2: #f0f2f5;
+  --line: #d9dde3;
+  --text: #1b1f24;
+  --muted: #5d6673;
+  color-scheme: light;
+}
+#theme-toggle {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
 }
 * {
   box-sizing: border-box;
@@ -358,4 +366,18 @@ details summary {
 }
 .mr8 {
   margin-right: 8px;
+}
+input[type="file"] {
+  padding: 3px;
+  font-size: 12px;
+}
+input[type="file"]::file-selector-button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  margin-right: 6px;
+  cursor: pointer;
+  font: inherit;
 }

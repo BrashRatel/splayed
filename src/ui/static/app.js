@@ -11,6 +11,24 @@ const token = (() => {
   return sessionStorage.getItem("forksplit-token");
 })();
 
+// Theme: dark by default; "light" is remembered in this browser only.
+function applyTheme(light) {
+  document.documentElement.classList.toggle("light", light);
+  document.getElementById("theme-toggle").textContent = light ? "Dark mode" : "Light mode";
+}
+let lightTheme = false;
+try {
+  lightTheme = localStorage.getItem("forksplit-theme") === "light";
+} catch { /* storage unavailable: stay dark */ }
+applyTheme(lightTheme);
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  lightTheme = !lightTheme;
+  applyTheme(lightTheme);
+  try {
+    localStorage.setItem("forksplit-theme", lightTheme ? "light" : "dark");
+  } catch { /* not persisted */ }
+});
+
 const state = { tab: "network", overview: null, status: null, plans: null, job: null, after: 0 };
 
 // ---------- helpers ----------
