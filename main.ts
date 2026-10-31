@@ -1,3 +1,3 @@
-import { main } from "./src/cli/main.ts";
+import { run } from "./src/cli/main.ts";
 
-Deno.exit(await main(Deno.args));
+await run(Deno.args);

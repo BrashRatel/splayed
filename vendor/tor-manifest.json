@@ -1,0 +1,6 @@
+{
+  "_comment": "Pinned Tor Expert Bundle hashes. Fill with `deno task update-tor-manifest <version>`, which verifies the Tor Browser team's GPG signature over the published sha256 sums. fetch-tor refuses to download anything not pinned here.",
+  "version": null,
+  "baseUrl": "https://archive.torproject.org/tor-package-archive/torbrowser",
+  "files": {}
+}

@@ -197,7 +197,7 @@ export async function matchArtifacts(
 /** Signed files the user saved inside the plan directory. */
 export async function findSignedFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for (const sub of ["ecx", "xbt", "."]) {
+  for (const sub of ["ecx", "xbt", "uploads", "."]) {
     try {
       for await (const e of Deno.readDir(join(dir, sub))) {
         if (!e.isFile) continue;

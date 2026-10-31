@@ -5,12 +5,13 @@ the same coins after the 2026 forks.
 
 Coins that existed before a fork exist on both chains at the same outpoint. An ordinary spend on one
 chain can be **replayed** on the others, moving the copies you meant to keep. forksplit finds your
-coins on all three chains, tells you which ones are still shared, and (in later milestones) builds
-replay-protected PSBTs for you to sign in your own wallet.
+coins on all three chains, tells you which ones are still shared, builds replay-protected PSBTs for
+you to sign in your own wallet, then verifies and broadcasts each one only to its own chain.
 
-> **Status: milestone 2.** `init`, `import`, `scan`, `status`, `dest` and `plan` work with Esplora,
-> Electrum and node-RPC backends. `plan` writes **unsigned** PSBTs; nothing in this version signs or
-> broadcasts, so it cannot move funds. `verify` and `broadcast` come next.
+> **Status: milestone 4.** The full guided route works end to end against test chains: `init`,
+> `import`, `scan`, `status`, `dest`, `plan`, `verify`, `broadcast` and `track`, from the CLI or the
+> local web UI, with Esplora, Electrum and node-RPC backends and a managed or system Tor. It has not
+> yet been run against live servers or real signers; start with one small coin.
 
 ## The chains
 
@@ -62,8 +63,48 @@ Defaults are public servers reached **over Tor**, and fail closed if Tor isn't r
 | XBT   | mempool.guide onion                                              |
 | ECX   | `https://explorer.ecash.com/api` via a Tor exit (no onion known) |
 
-Tor must be listening on `127.0.0.1:9050`. If you use the Tor Browser, run
-`deno task cli config tor 127.0.0.1:9150`.
+#### Tor
+
+forksplit finds or starts Tor for you, but only when a backend that's about to be contacted needs
+it. Local and LAN backends never start Tor.
+
+| Mode             | What it does                                                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto` (default) | Uses a Tor that's already running: the configured address, then `127.0.0.1:9050` (tor daemon), then `127.0.0.1:9150` (Tor Browser). If none is running, it starts forksplit's own. |
+| `managed`        | Always starts forksplit's own Tor.                                                                                                                                                 |
+| `system`         | Only uses a Tor you run, and never starts one. Fails closed if it isn't there.                                                                                                     |
+
+```sh
+deno task cli config tor auto
+deno task cli config tor system 127.0.0.1:9150   # Tor Browser
+deno task cli config tor managed
+```
+
+forksplit's own Tor:
+
+- runs as a child process, with its own data directory under the forksplit data dir;
+- uses SOCKS on a random loopback port with `IsolateSOCKSAuth`, so each chain and each broadcast
+  gets its own circuit;
+- sets `SafeSocks 1`, so every name is resolved inside Tor;
+- is tied to forksplit with `__OwningControllerProcess`, so it exits if forksplit dies, and is
+  stopped on normal exit or Ctrl+C.
+
+The binary comes from, in order:
+
+1. `tor.binary` in the config, or `FORKSPLIT_TOR_BINARY`;
+2. the bundled copy in `vendor/tor/<os>-<arch>/`;
+3. `tor` on `PATH`.
+
+**Bundling Tor (maintainers / release builds):**
+
+```sh
+deno task update-tor-manifest 15.0.1   # pin hashes after verifying the Tor Browser team's GPG signature
+deno task fetch-tor --all              # download Tor Expert Bundles, check SHA-256, unpack to vendor/tor/
+deno task compile                      # dist/forksplit; ship it next to vendor/tor/
+```
+
+`fetch-tor` refuses anything that isn't pinned in `vendor/tor-manifest.json`. That file ships
+unpinned: the pins must be added by a maintainer after checking the signature themselves.
 
 ### Using your own nodes
 
@@ -88,10 +129,41 @@ deno task cli config show
 deno task cli init
 ```
 
-A backend you add is tried before the profile default, which is kept as a lower-priority backend
-(`--priority` changes the order). With node RPC, `txindex=1` lets forksplit report how deep a spend
-is and fetch previous transactions for PSBTs. Without it, a spent coin shows as "spent/absent ?" and
-stays **pending**.
+**Adding your own backend for a chain removes that chain's profile default**, so the default is
+never contacted (`config backend fallback` / `reset` bring defaults back). Backends are tried in
+priority order and the tool stops at the first that passes its identity check; lower ones are
+contacted only if every backend above them failed. `init` shows where queries will go and asks
+before contacting anything. With node RPC, `txindex=1` lets forksplit report how deep a spend is and
+fetch previous transactions for PSBTs. Without it, a spent coin shows as "spent/absent ?" and stays
+**pending**.
+
+### Web UI
+
+```sh
+deno task ui        # or: deno task cli ui [--port N] [--open]
+```
+
+The UI runs the same `forksplit` commands as the CLI, with the same checks. Their confirmation
+prompts appear as dialogs in the browser. It has four tabs:
+
+1. **Network:** backends, privacy level per backend, Tor mode, and "Check servers & confirm".
+2. **Wallet:** descriptors and fork destinations.
+3. **Coins:** scan, plus per-coin status on all three chains.
+4. **Plans & signing:** create a plan, download the unsigned PSBTs (binary or base64), upload signed
+   files, then verify, broadcast and track.
+
+Security:
+
+- The server listens on 127.0.0.1 only, on a random port.
+- Access needs a random token passed in the URL fragment. It's never sent in a request URL or
+  `Referer`; it's removed from the address bar and sent only as an `Authorization` header.
+- Requests naming another `Host` are refused, which blocks DNS rebinding.
+- POST requests must be JSON and same-origin.
+- The CSP allows only the UI's own script and stylesheet.
+- Server data is only ever inserted as text, never as HTML.
+- The UI can't change the data directory, Tor address or profile, and can't start another UI.
+
+`deno task demo-ui` starts a UI filled with in-memory test chains (no network), for development.
 
 ### Import and scan
 
@@ -246,12 +318,12 @@ Data directory: `~/.local/share/forksplit` (Linux), `~/Library/Application Suppo
 
 1. ~~Read-only core: profiles, Tor transport, Esplora and node RPC backends, descriptors, scan,
    status~~
-2. Electrum backend (XBT needs a BLAKE2b-aware server with 164-byte headers)
-3. `plan`: unsigned PSBTs for the guided route
+2. ~~Electrum backend (XBT needs a BLAKE2b-aware server with 164-byte headers)~~
+3. ~~`plan`: unsigned PSBTs for the guided route~~
 4. ~~`verify`: invariant checks on signed PSBTs, including the unified-sighash vectors and
    `testmempoolaccept` on your nodes~~
 5. ~~`broadcast`: persist first, then re-check identity, then send through an isolated circuit~~
-6. Local web UI on the same core; bundled Tor
+6. ~~Local web UI on the same core; bundled Tor~~
 7. Advanced donor-input routes (opt-in)
 
 ## Development

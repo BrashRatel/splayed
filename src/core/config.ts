@@ -48,9 +48,27 @@ export interface ScanSettings {
   jitterMaxMs: number;
 }
 
+export type TorMode = "auto" | "system" | "managed";
+
+export interface TorSettings {
+  /**
+   * auto: use a running Tor (configured address, then 127.0.0.1:9050 / 9150), else start our own.
+   * system: only use the configured/running Tor; never start one.
+   * managed: always start our own Tor (bundled binary, or `tor` from PATH).
+   */
+  mode: TorMode;
+  /** Explicit SOCKS address of a Tor you run yourself. */
+  socks?: SocksEndpoint;
+  /** Path to a tor executable for managed mode (default: bundled, then PATH). */
+  binary?: string;
+  bootstrapTimeoutSec: number;
+}
+
 export interface Config {
   profile: NetworkProfile;
   dataDir: string;
+  tor: TorSettings;
+  /** The SOCKS endpoint in use. Updated at runtime once Tor is located or started. */
   torSocks: SocksEndpoint;
   scan: ScanSettings;
   chains: Record<ChainId, ChainConfig>;
@@ -199,12 +217,32 @@ export async function loadConfig(options: LoadOptions): Promise<Config> {
   const profile = getProfile(profileId);
 
   const tor = asRecord(file.tor, "[tor]");
-  const torSocks = parseSocks(
-    options.torSocks ?? env.FORKSPLIT_TOR_SOCKS ??
-      (typeof tor.socks === "string"
-        ? tor.socks
-        : `${DEFAULT_TOR_SOCKS.host}:${DEFAULT_TOR_SOCKS.port}`),
-  );
+  for (const key of Object.keys(tor)) {
+    if (!["mode", "socks", "binary", "bootstrap_timeout_sec"].includes(key)) {
+      throw new ConfigError(`[tor]: unknown key "${key}"`);
+    }
+  }
+  const socksText = options.torSocks ?? env.FORKSPLIT_TOR_SOCKS ??
+    (typeof tor.socks === "string" ? tor.socks : undefined);
+  const mode = tor.mode ?? "auto";
+  if (mode !== "auto" && mode !== "system" && mode !== "managed") {
+    throw new ConfigError('tor.mode must be "auto", "system" or "managed"');
+  }
+  const binary = env.FORKSPLIT_TOR_BINARY ??
+    (typeof tor.binary === "string" ? tor.binary : undefined);
+  const torSettings: TorSettings = {
+    mode,
+    socks: socksText ? parseSocks(socksText) : undefined,
+    binary,
+    bootstrapTimeoutSec: intIn(
+      tor.bootstrap_timeout_sec,
+      "tor.bootstrap_timeout_sec",
+      10,
+      3600,
+      180,
+    ),
+  };
+  const torSocks = torSettings.socks ?? DEFAULT_TOR_SOCKS;
 
   const scanRaw = asRecord(file.scan, "[scan]");
   const scan: ScanSettings = {
@@ -264,7 +302,14 @@ export async function loadConfig(options: LoadOptions): Promise<Config> {
       clearnetOptIn: raw.clearnet_opt_in === true,
     };
   }
-  const config: Config = { profile, dataDir: options.dataDir, torSocks, scan, chains };
+  const config: Config = {
+    profile,
+    dataDir: options.dataDir,
+    tor: torSettings,
+    torSocks,
+    scan,
+    chains,
+  };
   validateRoutes(config);
   return config;
 }
@@ -303,7 +348,11 @@ export function validateRoutes(config: Config): void {
 export function privacyRelevantConfig(config: Config): unknown {
   return {
     profile: config.profile.id,
-    torSocks: config.torSocks,
+    tor: {
+      mode: config.tor.mode,
+      socks: config.tor.socks ?? null,
+      binary: config.tor.binary ?? null,
+    },
     // Gap limit and jitter change how much a server learns, so they re-gate too.
     scan: config.scan,
     chains: Object.fromEntries(CHAIN_IDS.map((chain) => {

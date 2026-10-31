@@ -2,12 +2,30 @@
   "version": "0.1.0-dev",
   "nodeModulesDir": "auto",
   "tasks": {
-    "cli": "deno run --allow-net --allow-read --allow-write --allow-env main.ts",
-    "test": "deno test --allow-net=127.0.0.1 --allow-read --allow-write --allow-env",
+    "cli": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
+    "test": "deno test --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run",
     "check": "deno check main.ts src/ tests/",
-    "lint": "deno lint"
+    "lint": "deno lint",
+    "fetch-tor": "deno run --allow-net=archive.torproject.org --allow-read --allow-write --allow-run=tar scripts/fetch_tor.ts",
+    "update-tor-manifest": "deno run --allow-net=archive.torproject.org --allow-read --allow-write --allow-run=gpg scripts/update_tor_manifest.ts",
+    "ui": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts ui --open",
+    "compile": "deno compile --allow-net --allow-read --allow-write --allow-env --allow-run --include src/ui/static -o dist/forksplit main.ts",
+    "demo-ui": "deno run -A tests/demo_ui.ts"
   },
-  "fmt": { "lineWidth": 100, "semiColons": true, "singleQuote": false },
-  "lint": { "include": ["main.ts", "src/", "tests/"] },
-  "exclude": ["node_modules/"]
+  "fmt": {
+    "lineWidth": 100,
+    "semiColons": true,
+    "singleQuote": false
+  },
+  "lint": {
+    "include": [
+      "main.ts",
+      "src/",
+      "tests/",
+      "scripts/"
+    ]
+  },
+  "exclude": [
+    "node_modules/"
+  ]
 }

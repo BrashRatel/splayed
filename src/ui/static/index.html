@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>forksplit</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header>
+      <div
+        class="brand">forksplit <span class="sub">BTC · XBT · ECX coin splitting, watch-only</span></div>
+      <div id="tor-pill" class="pill">Tor: …</div>
+      <div id="gate-pill" class="pill">…</div>
+    </header>
+    <nav id="tabs">
+      <button data-tab="network" class="active">1 · Network</button>
+      <button data-tab="wallet">2 · Wallet</button>
+      <button data-tab="coins">3 · Coins</button>
+      <button data-tab="plans">4 · Plans &amp; signing</button>
+    </nav>
+    <main>
+      <section id="view"></section>
+      <aside id="activity">
+        <div class="activity-head">
+          <strong>Activity</strong>
+          <span id="job-state" class="muted">idle</span>
+        </div>
+        <pre id="log"></pre>
+      </aside>
+    </main>
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-box">
+        <p id="modal-text"></p>
+        <div class="modal-actions">
+          <button id="modal-no" class="secondary">No</button>
+          <button id="modal-yes">Yes</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

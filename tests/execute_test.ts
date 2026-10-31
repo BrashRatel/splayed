@@ -195,6 +195,7 @@ async function setup(opts: { nodes?: boolean; brokenBtcNode?: boolean } = {}) {
     err: (t) => err.push(t),
     confirm: () => true,
     env: {},
+    tor: () => Promise.resolve({ host: "127.0.0.1", port: 9050 }),
     transportFactory: (_config, chain, backend) => {
       contacted.push(backend.url);
       if (backend.kind === "rpc") {

@@ -24,7 +24,13 @@ import { loadScan, runScan, saveScan } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { defaultDataDir, ensureDir } from "../core/store.ts";
 import { importDescriptor, loadWallet, parsedDescriptors, saveWallet } from "../core/wallet.ts";
-import { describeRoute, PolicyError, TorUnavailableError } from "../net/transport.ts";
+import {
+  describeRoute,
+  PolicyError,
+  type SocksEndpoint,
+  TorUnavailableError,
+} from "../net/transport.ts";
+import { torManager, TorStartError } from "../net/tor.ts";
 import { parseDescriptor } from "../core/descriptors.ts";
 import {
   buildPlan,
@@ -71,7 +77,10 @@ Setup (nothing about your coins is sent anywhere until you confirm):
   config backend reset <chain>    Go back to the profile's default backend
   config backend fallback <chain> Add the profile's fallback backend to the list
   config clearnet <chain> on|off  Allow direct (non-Tor) connections to public hosts
-  config tor <host:port>          Tor SOCKS address (default 127.0.0.1:9050)
+  config tor auto|managed|system [host:port]
+                                  auto (default): use a running Tor, else start forksplit's own.
+                                  system: only a Tor you run (e.g. 127.0.0.1:9150 for Tor
+                                  Browser). managed: always start forksplit's own Tor.
   config confirmations <chain> N  Depth required before a spend counts as final
 
 Coins:
@@ -102,6 +111,10 @@ Splitting (guided route: forks first, BTC untouched):
                                   until it confirms (--all overrides).
   track <plan>                    Confirmations of broadcast transactions
 
+Web UI:
+  ui [--port N] [--open]          Local web interface (127.0.0.1 only) that runs these same
+                                  commands, prompts included
+
 Global options:
   --data-dir DIR    (env FORKSPLIT_DATA_DIR)   --tor-socks HOST:PORT (env FORKSPLIT_TOR_SOCKS)
   --profile ID      (env FORKSPLIT_PROFILE)    --json   -h, --help
@@ -110,7 +123,9 @@ Global options:
 export interface CliIO {
   out: (text: string) => void;
   err: (text: string) => void;
-  confirm: (question: string) => boolean;
+  confirm: (question: string) => boolean | Promise<boolean>;
+  /** Locates/starts Tor and returns its SOCKS endpoint. Tests replace it. */
+  tor?: (config: Config, log: (m: string) => void) => Promise<SocksEndpoint>;
   env: Record<string, string | undefined>;
   transportFactory?: TransportFactory;
   streamFactory?: StreamFactory;
@@ -164,6 +179,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         "fee-rate": { type: "string" },
         coin: { type: "string", multiple: true },
         all: { type: "boolean" },
+        port: { type: "string" },
+        open: { type: "boolean" },
         "no-mempool": { type: "boolean" },
       },
     });
@@ -226,6 +243,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         return await cmdBroadcast(config, io, args[0], flags.all === true, flags.yes === true);
       case "track":
         return await cmdTrack(config, io, args[0]);
+      case "ui":
+        return await cmdUi(dataDir, io, flags.port, flags.open === true);
       default:
         throw new UsageError(`Unknown command "${command}"`);
     }
@@ -239,7 +258,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
       error instanceof PlanError ||
       error instanceof ExecuteError ||
       error instanceof DescriptorError || error instanceof PolicyError ||
-      error instanceof TorUnavailableError
+      error instanceof TorUnavailableError || error instanceof TorStartError
     ) {
       io.err(`Error: ${error.message}`);
       return 1;
@@ -250,11 +269,25 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
 
 // ---- config ----
 
+export function describeTor(config: Config): string {
+  const t = config.tor;
+  const where = t.socks ? `${t.socks.host}:${t.socks.port}` : "127.0.0.1:9050 or :9150";
+  switch (t.mode) {
+    case "auto":
+      return `auto (use a running Tor at ${where}, else start forksplit's own)`;
+    case "system":
+      return `system (only the Tor running at ${t.socks ? where : "127.0.0.1:9050"})`;
+    case "managed":
+      return `managed (forksplit starts its own Tor${t.binary ? `: ${t.binary}` : ""})`;
+  }
+}
+
 function showConfig(config: Config, io: CliIO, confirmed: boolean): void {
   io.out(
     `Profile: ${config.profile.id}    Tor SOCKS: ${config.torSocks.host}:${config.torSocks.port}`,
   );
   io.out(`Data directory: ${config.dataDir}`);
+  io.out(`Tor: ${describeTor(config)}`);
   io.out(`Network settings confirmed: ${confirmed ? "yes" : "NO (run `forksplit init`)"}\n`);
   for (const chain of CHAIN_IDS) {
     const cc = config.chains[chain];
@@ -389,9 +422,22 @@ async function editConfig(
       );
     }
   } else if (sub === "tor") {
-    if (!rest[0]) throw new UsageError("config tor <host:port>");
-    parseSocks(rest[0]);
-    file.tor = { socks: rest[0] };
+    // config tor auto|managed|system [host:port]   (or the shorthand: config tor host:port)
+    const tor = (file.tor ?? {}) as Record<string, unknown>;
+    const [first, second] = rest;
+    if (!first) throw new UsageError("config tor auto|managed|system [host:port]");
+    if (first === "auto" || first === "managed" || first === "system") {
+      tor.mode = first;
+      if (second) {
+        parseSocks(second);
+        tor.socks = second;
+      } else if (first === "managed") delete tor.socks;
+    } else {
+      parseSocks(first);
+      tor.mode = "system";
+      tor.socks = first;
+    }
+    file.tor = tor;
   } else if (sub === "confirmations") {
     const chain = requireChain(rest[0]);
     const n = Number(rest[1]);
@@ -415,6 +461,23 @@ async function editConfig(
 // ---- init ----
 
 /**
+ * Starts or locates Tor only when a backend that is about to be contacted needs it, and points
+ * the config at the endpoint in use. Local backends never cause Tor to start.
+ */
+async function torFor(
+  config: Config,
+  chain: ChainId,
+  backend: BackendConfig,
+  io: CliIO,
+): Promise<void> {
+  const route = routeForBackend(config, chain, backend);
+  if (route.via !== "socks" || !route.tor) return;
+  const provider = io.tor ??
+    ((c: Config, log: (m: string) => void) => torManager.ensure(c.tor, c.dataDir, log));
+  config.torSocks = await provider(config, (m) => io.out(m));
+}
+
+/**
  * Tries backends in priority order and STOPS at the first one that passes, so lower-priority
  * backends (and any profile defaults still configured) are contacted only if every backend
  * above them failed. `role` picks read backends (scan/plan) or broadcast backends.
@@ -433,6 +496,7 @@ async function verifiedBackendsFor(
   for (const [i, b] of candidates.entries()) {
     let detail: string;
     try {
+      await torFor(config, chain, b, io);
       const backend = await createBackend(config, chain, b, {
         transportFactory: io.transportFactory,
         streamFactory: io.streamFactory,
@@ -468,7 +532,9 @@ async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number>
       "are tried in priority order and checking stops at the first that passes, so lower ones\n" +
       "aren't contacted.\n",
   );
-  if (!yes && !io.confirm("Contact these servers now? (Answer no to change settings first.)")) {
+  if (
+    !yes && !(await io.confirm("Contact these servers now? (Answer no to change settings first.)"))
+  ) {
     io.out(
       "Nothing was contacted. Change settings with `forksplit config ...`, then run init again.",
     );
@@ -491,7 +557,9 @@ async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number>
     );
     return 1;
   }
-  if (!yes && !io.confirm("Use these network settings for importing and scanning your coins?")) {
+  if (
+    !yes && !(await io.confirm("Use these network settings for importing and scanning your coins?"))
+  ) {
     io.out("Not confirmed. Nothing was saved.");
     return 1;
   }
@@ -796,7 +864,10 @@ async function cmdPlan(
             : "; no coins combined"),
       );
     }
-    if (!opts.yes && !io.confirm("Write these PSBTs (and reserve their destination addresses)?")) {
+    if (
+      !opts.yes &&
+      !(await io.confirm("Write these PSBTs (and reserve their destination addresses)?"))
+    ) {
       io.out("Nothing written.");
       return 1;
     }
@@ -841,6 +912,7 @@ async function ownNodes(config: Config, io: CliIO): Promise<MempoolNode[]> {
   for (const chain of CHAIN_IDS) {
     for (const b of config.chains[chain].backends.filter((b) => b.kind === "rpc")) {
       try {
+        await torFor(config, chain, b, io);
         const backend = await createBackend(config, chain, b, {
           transportFactory: io.transportFactory,
           streamFactory: io.streamFactory,
@@ -1063,7 +1135,7 @@ async function cmdBroadcast(
         );
       }
     }
-    if (!yes && !io.confirm("Broadcast these now? Each goes only to its own chain.")) {
+    if (!yes && !(await io.confirm("Broadcast these now? Each goes only to its own chain."))) {
       io.out("Nothing sent.");
       return 1;
     }
@@ -1155,6 +1227,55 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
   return 0;
 }
 
-if (import.meta.main) {
-  Deno.exit(await main(Deno.args));
+async function cmdUi(
+  dataDir: string,
+  io: CliIO,
+  portFlag: string | undefined,
+  open: boolean,
+): Promise<number> {
+  const port = portFlag === undefined ? 0 : Number(portFlag);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new UsageError("--port must be 0-65535");
+  }
+  const { startUi } = await import("../ui/server.ts");
+  const { out: _o, err: _e, confirm: _c, ...baseIO } = io;
+  const ui = startUi({ dataDir, port, run: main, baseIO });
+  io.out(`forksplit UI: ${ui.url}`);
+  io.out(
+    "Open that exact URL (it carries a one-time access token). Only this machine can reach it.",
+  );
+  io.out("Press Ctrl+C to stop; a Tor started by forksplit stops with it.");
+  if (open) {
+    const opener = Deno.build.os === "darwin"
+      ? "open"
+      : Deno.build.os === "windows"
+      ? "explorer"
+      : "xdg-open";
+    try {
+      new Deno.Command(opener, { args: [ui.url], stdout: "null", stderr: "null" }).spawn();
+    } catch {
+      io.err("Couldn't open a browser; copy the URL above.");
+    }
+  }
+  await ui.server.finished;
+  return 0;
 }
+
+/** Process entry point: runs a command, then always stops a Tor this process started. */
+export async function run(argv: string[]): Promise<never> {
+  const onSignal = async () => {
+    await torManager.stop();
+    Deno.exit(130);
+  };
+  Deno.addSignalListener("SIGINT", onSignal);
+  if (Deno.build.os !== "windows") Deno.addSignalListener("SIGTERM", onSignal);
+  let code = 1;
+  try {
+    code = await main(argv);
+  } finally {
+    await torManager.stop();
+  }
+  Deno.exit(code);
+}
+
+if (import.meta.main) await run(Deno.args);

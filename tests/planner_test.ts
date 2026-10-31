@@ -41,6 +41,7 @@ function harness(chains: Record<ChainId, FakeChain>) {
     err: (t) => err.push(t),
     confirm: () => true,
     env: {},
+    tor: () => Promise.resolve({ host: "127.0.0.1", port: 9050 }),
     transportFactory: (_c, chain) => new FakeEsploraTransport(chains[chain]),
   };
   return { io, text: () => out.join("\n"), errors: () => err.join("\n") };
