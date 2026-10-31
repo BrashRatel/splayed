@@ -309,29 +309,44 @@ BTC copies then show as separated and can be spent normally.
 Data directory: `~/.local/share/forksplit` (Linux), `~/Library/Application Support/forksplit`
 (macOS) or `%APPDATA%\forksplit` (Windows). Override with `--data-dir` or `FORKSPLIT_DATA_DIR`.
 
-## Before a release
+## Roadmap and open work
 
-- Confirm both onion addresses against the operators' own published links.
-- Re-check each pinned hash from a second independent source:
-  - ECX 974,017: from esplora.ecash.ninja or your own v1.1.0 node;
-  - the BTC, XBT and ECX fork hashes copied from the smolcars repos.
-- Check explorer.ecash.com accepts requests from Tor exits.
+Done:
 
-## Roadmap
+1. Read-only core: profiles, Tor transport, Esplora and node-RPC backends, descriptors, scan,
+   status.
+2. Electrum backend. XBT works through a BLAKE2b-aware server.
+3. `plan`: unsigned PSBTs for the guided route.
+4. `verify`: invariant checks, the unified-sighash vectors, and `testmempoolaccept` on your own
+   nodes.
+5. `broadcast` and `track`.
+6. Local web UI and the Tor manager.
 
-1. ~~Read-only core: profiles, Tor transport, Esplora and node RPC backends, descriptors, scan,
-   status~~
-2. ~~Electrum backend (XBT needs a BLAKE2b-aware server with 164-byte headers)~~
-3. ~~`plan`: unsigned PSBTs for the guided route~~
-4. ~~`verify`: invariant checks on signed PSBTs, including the unified-sighash vectors and
-   `testmempoolaccept` on your nodes~~
-5. ~~`broadcast`: persist first, then re-check identity, then send through an isolated circuit~~
-6. ~~Local web UI on the same core; bundled Tor~~
-7. Advanced donor-input routes (opt-in)
+What's left, including the **release blockers** (live tests with real signers, pinning a Tor
+release, confirming endpoints and checkpoints), is in [TODO.md](TODO.md). Please read it before
+using forksplit with real coins.
+
+## Project layout
+
+```
+main.ts                 CLI entry (`deno task cli`)
+src/core/               profiles (pinned constants), config, descriptors, scan + coin state,
+                        planner, PSBT encoder, signature checks, verify/broadcast/track
+src/backends/           Esplora, Electrum and node-RPC clients
+src/net/                SOCKS5/Tor routing policy, HTTP/1.1 client, Tor manager
+src/cli/                command-line interface
+src/ui/                 local web UI server, job runner, static assets
+scripts/                fetch-tor / update-tor-manifest (bundled Tor)
+testdata/               Knots unified-sighash vectors (166)
+tests/                  unit + end-to-end tests (fake chains, fake Tor/SOCKS/Electrum/RPC)
+vendor/tor-manifest.json  pinned Tor Expert Bundle hashes (unpinned until a maintainer verifies)
+```
 
 ## Development
 
 ```sh
+deno install
+deno task demo-ui # UI filled with in-memory test chains
 deno task test    # unit + end-to-end tests against in-memory chains and a fake SOCKS proxy
 deno task check
 deno task lint
