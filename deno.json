@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0-dev",
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "cli": "deno run --allow-net --allow-read --allow-write --allow-env main.ts",
+    "test": "deno test --allow-net=127.0.0.1 --allow-read --allow-write --allow-env",
+    "check": "deno check main.ts src/ tests/",
+    "lint": "deno lint"
+  },
+  "fmt": { "lineWidth": 100, "semiColons": true, "singleQuote": false },
+  "lint": { "include": ["main.ts", "src/", "tests/"] },
+  "exclude": ["node_modules/"]
+}

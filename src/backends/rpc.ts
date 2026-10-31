@@ -1,0 +1,195 @@
+import type { BackendConfig } from "../core/config.ts";
+import type { ChainId } from "../core/profiles.ts";
+import type { Route, Transport } from "../net/transport.ts";
+import {
+  assertTxid,
+  BackendError,
+  type ChainBackend,
+  type FoundUtxo,
+  HEX64,
+  type OutputObservation,
+} from "./types.ts";
+
+/** Bitcoin Core / Knots / eCash node JSON-RPC. Works without any address index. */
+export class RpcBackend implements ChainBackend {
+  readonly remote: boolean;
+  private nextId = 1;
+  private txindex: boolean | undefined;
+
+  constructor(
+    readonly chain: ChainId,
+    readonly config: BackendConfig,
+    private readonly transport: Transport,
+    private readonly authorization: string,
+    private readonly requiredDeployment?: string,
+  ) {
+    this.remote = transport.route.via === "socks";
+  }
+
+  get route(): Route {
+    return this.transport.route;
+  }
+
+  async call<T>(method: string, params: unknown[] = [], timeoutMs?: number): Promise<T> {
+    const id = this.nextId++;
+    const response = await this.transport.request({
+      url: this.config.url,
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: this.authorization },
+      body: JSON.stringify({ jsonrpc: "1.0", id, method, params }),
+      isolation: `${this.chain}:rpc`,
+      timeoutMs,
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new BackendError(`RPC authentication failed for ${this.config.url}`, response.status);
+    }
+    let payload: { result?: T; error?: { code: number; message: string } | null };
+    try {
+      payload = response.json();
+    } catch {
+      throw new BackendError(`RPC ${method} returned HTTP ${response.status} with invalid JSON`);
+    }
+    if (payload.error) {
+      const error = new BackendError(`RPC ${method}: ${payload.error.message}`, response.status);
+      (error as BackendError & { rpcCode?: number }).rpcCode = payload.error.code;
+      throw error;
+    }
+    return payload.result as T;
+  }
+
+  async tipHeight(): Promise<number> {
+    const height = await this.call<number>("getblockcount");
+    if (!Number.isSafeInteger(height)) throw new BackendError("Unexpected getblockcount result");
+    return height;
+  }
+
+  async blockHash(height: number): Promise<string> {
+    const hash = await this.call<string>("getblockhash", [height]);
+    if (typeof hash !== "string" || !HEX64.test(hash)) {
+      throw new BackendError(`Unexpected getblockhash result at ${height}`);
+    }
+    return hash;
+  }
+
+  async identityProblems(): Promise<string[]> {
+    const problems: string[] = [];
+    if (this.requiredDeployment) {
+      try {
+        const info = await this.call<{ deployments?: Record<string, { active?: boolean }> }>(
+          "getdeploymentinfo",
+        );
+        if (info.deployments?.[this.requiredDeployment]?.active !== true) {
+          problems.push(`getdeploymentinfo does not report "${this.requiredDeployment}" active`);
+        }
+      } catch (error) {
+        problems.push(`getdeploymentinfo failed: ${(error as Error).message}`);
+      }
+    }
+    return problems;
+  }
+
+  private async hasTxindex(): Promise<boolean> {
+    if (this.txindex === undefined) {
+      try {
+        const info = await this.call<Record<string, { synced?: boolean }>>("getindexinfo");
+        this.txindex = info?.txindex?.synced === true;
+      } catch {
+        this.txindex = false;
+      }
+    }
+    return this.txindex;
+  }
+
+  async observeOutput(txid: string, vout: number): Promise<OutputObservation> {
+    assertTxid(txid);
+    const out = await this.call<
+      { confirmations: number; value: number } | null
+    >("gettxout", [txid, vout, true]);
+    if (out) {
+      const tip = await this.tipHeight();
+      return {
+        state: "unspent",
+        value: btcToSats(out.value),
+        createdHeight: out.confirmations > 0 ? tip - out.confirmations + 1 : undefined,
+      };
+    }
+    // Not in the UTXO set: spent, or never existed. Only a transaction index can tell.
+    if (!(await this.hasTxindex())) return { state: "gone" };
+    try {
+      const tx = await this.call<{ vout?: { value: number }[] }>("getrawtransaction", [txid, 1]);
+      const output = tx.vout?.[vout];
+      if (!output) return { state: "absent" };
+      return { state: "spent", value: btcToSats(output.value), spendDetailKnown: false };
+    } catch (error) {
+      if ((error as { rpcCode?: number }).rpcCode === -5) return { state: "absent" };
+      throw error;
+    }
+  }
+
+  async scanDescriptors(
+    descriptors: { desc: string; range: [number, number] }[],
+  ): Promise<FoundUtxo[]> {
+    const result = await this.call<
+      {
+        success: boolean;
+        unspents: {
+          txid: string;
+          vout: number;
+          scriptPubKey: string;
+          amount: number;
+          height: number;
+        }[];
+      }
+    >(
+      "scantxoutset",
+      ["start", descriptors.map((d) => ({ desc: d.desc, range: d.range }))],
+      30 * 60_000,
+    );
+    if (!result?.success) throw new BackendError("scantxoutset did not complete");
+    return result.unspents.map((u) => ({
+      txid: u.txid,
+      vout: u.vout,
+      value: btcToSats(u.amount),
+      scriptPubKey: u.scriptPubKey,
+      height: u.height > 0 ? u.height : undefined,
+    }));
+  }
+}
+
+/** JSON-RPC amounts are decimal BTC; convert without float drift. */
+export function btcToSats(amount: number): number {
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
+    throw new BackendError(`Invalid amount ${amount}`);
+  }
+  const [whole, frac = ""] = amount.toFixed(8).split(".");
+  const sats = Number(whole) * 100_000_000 + Number(frac.padEnd(8, "0"));
+  if (!Number.isSafeInteger(sats)) throw new BackendError(`Amount out of range: ${amount}`);
+  return sats;
+}
+
+export async function rpcAuthorization(
+  auth: BackendConfig["auth"],
+  env: Record<string, string | undefined>,
+): Promise<string> {
+  if (auth?.cookieFile) {
+    const path = auth.cookieFile.replace(/^~(?=\/|$)/u, env.HOME ?? "~");
+    let cookie: string;
+    try {
+      cookie = (await Deno.readTextFile(path)).trim();
+    } catch (error) {
+      throw new BackendError(`Cannot read RPC cookie file ${path}: ${(error as Error).message}`);
+    }
+    return `Basic ${btoa(cookie)}`;
+  }
+  if (auth?.user) {
+    const password = auth.passwordEnv ? env[auth.passwordEnv] : undefined;
+    if (!password) {
+      throw new BackendError(
+        `RPC user "${auth.user}" needs a password in the environment variable ` +
+          `${auth.passwordEnv ?? "(set password_env)"}`,
+      );
+    }
+    return `Basic ${btoa(`${auth.user}:${password}`)}`;
+  }
+  throw new BackendError("RPC backends need cookie_file, or user + password_env");
+}

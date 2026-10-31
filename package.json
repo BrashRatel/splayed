@@ -1,0 +1,15 @@
+{
+  "name": "forksplit",
+  "private": true,
+  "version": "0.1.0-dev",
+  "type": "module",
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@scure/base": "2.0.0",
+    "@scure/bip32": "2.4.0",
+    "@scure/bip39": "2.4.0",
+    "@scure/btc-signer": "2.4.0",
+    "smol-toml": "1.9.1"
+  }
+}
