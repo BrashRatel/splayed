@@ -319,12 +319,23 @@ async function ui(flags: Record<string, string>) {
     transportFactory: (_config, chain) => new RegtestRpcTransport(nodes[chain]),
   };
   const port = Number(flags.port ?? UI_PORT);
-  const server = startUi({ dataDir: APP_DIR, port, run: main, baseIO });
+  const lan = (flags.bind ?? "0.0.0.0") !== "127.0.0.1";
+  const server = startUi({
+    dataDir: APP_DIR,
+    port,
+    run: main,
+    baseIO,
+    listenOnAllInterfaces: lan,
+  });
   console.log(`forksplit UI (regtest profile): ${server.url}\n`);
   console.log("Open that exact URL: it carries the access token. Ctrl+C to stop.");
   console.log(
-    `From another machine, forward the same port first:  ssh -L ${server.port}:127.0.0.1:${server.port} <this-host>\n` +
-      `and open http://localhost:${server.port}/#token=...`,
+    lan
+      ? `Test environment: also listening on all interfaces. From the LAN open ` +
+        `http://<this-host>:${server.port}/ with the same #token=... (plain HTTP, so use a ` +
+        `network you trust; --bind 127.0.0.1 keeps it local).`
+      : `From another machine, forward the same port first:  ssh -L ${server.port}:127.0.0.1:${server.port} <this-host>\n` +
+        `and open http://localhost:${server.port}/#token=...`,
   );
   console.log(`\nIts data (wallet, scans, plans, PSBTs) lives in ${APP_DIR}`);
   await server.server.finished;
@@ -405,7 +416,7 @@ const HELP = `deno task regtest <command>
   up [--bind ADDR (default 0.0.0.0: reachable from the LAN)] [--btc-port N --xbt-port N --ecx-port N]
   fund <descriptor|address> [--coins N] [--btc AMOUNT]   (before fork)
   fork
-  ui [--port N]
+  ui [--port N] [--bind 127.0.0.1 to keep it local]
   mine <btc|xbt|ecx|all> [n]
   check <plan-id>
   reorg <btc|xbt|ecx> [depth]

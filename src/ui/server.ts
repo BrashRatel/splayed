@@ -257,6 +257,12 @@ export interface UiOptions {
   baseIO: Omit<CliIO, "out" | "err" | "confirm">;
   staticDir?: string;
   token?: string;
+  /**
+   * TEST ENVIRONMENTS ONLY (the regtest playground). Listens on every interface and answers any
+   * Host name on our port, so another machine on the LAN can open it. The token is still required
+   * and is sent over plain HTTP. The real `forksplit ui` never sets this.
+   */
+  listenOnAllInterfaces?: boolean;
 }
 
 export function startUi(
@@ -272,7 +278,8 @@ export function startUi(
     const url = new URL(req.url);
     const host = req.headers.get("host");
     // DNS-rebinding defence: only our own loopback host names are answered.
-    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+    const loopbackHost = host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+    if (!loopbackHost && !(options.listenOnAllInterfaces && host?.endsWith(`:${port}`))) {
       return new Response("Forbidden", { status: 403, headers: SECURITY_HEADERS });
     }
     if (!url.pathname.startsWith("/api/")) {
@@ -295,7 +302,8 @@ export function startUi(
       const origin = req.headers.get("origin");
       if (
         origin !== null && origin !== `http://127.0.0.1:${port}` &&
-        origin !== `http://localhost:${port}`
+        origin !== `http://localhost:${port}` &&
+        !(options.listenOnAllInterfaces && origin === `http://${host}`)
       ) {
         return json({ error: "Cross-origin request refused" }, 403);
       }
@@ -372,7 +380,7 @@ export function startUi(
   };
 
   const server = Deno.serve({
-    hostname: "127.0.0.1",
+    hostname: options.listenOnAllInterfaces ? "0.0.0.0" : "127.0.0.1",
     port: options.port ?? 0,
     onListen: () => {},
   }, handler);
