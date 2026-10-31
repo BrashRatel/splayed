@@ -1,6 +1,7 @@
-import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { schnorr, secp256k1 } from "@noble/curves/secp256k1.js";
 import { HDKey } from "@scure/bip32";
 import { Transaction } from "@scure/btc-signer";
+import { taprootTweakPrivKey } from "@scure/btc-signer/utils.js";
 import { concatBytes, fromHex, toHex } from "../../src/core/bytes.ts";
 import {
   decodePsbt,
@@ -10,12 +11,17 @@ import {
   IN_NON_WITNESS_UTXO,
   IN_REDEEM_SCRIPT,
   IN_SIGHASH_TYPE,
+  IN_TAP_INTERNAL_KEY,
+  IN_TAP_KEY_SIG,
   IN_WITNESS_SCRIPT,
   IN_WITNESS_UTXO,
   kv,
 } from "../../src/core/psbt.ts";
 import { parseTx } from "../../src/core/tx.ts";
-import { unifiedSignatureHash } from "../../src/core/unified_sighash.ts";
+import {
+  UNIFIED_SCRIPT_TYPE_TAPROOT,
+  unifiedSignatureHash,
+} from "../../src/core/unified_sighash.ts";
 
 /** Private keys by compressed public key (hex) for the test wallet's receive branch. */
 export function keyMap(account: HDKey, count = 8): Map<string, Uint8Array> {
@@ -31,16 +37,20 @@ export function keyMap(account: HDKey, count = 8): Map<string, Uint8Array> {
 export function stockSign(b64: string, keys: Map<string, Uint8Array>): string {
   const tx = Transaction.fromPSBT(Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0)));
   for (let i = 0; i < tx.inputsLength; i++) {
+    const input = tx.getInput(i);
     for (const [pub, priv] of keys) {
-      if (tx.getInput(i).bip32Derivation?.some(([p]) => toHex(p) === pub)) tx.signIdx(priv, i);
+      const listed = input.bip32Derivation?.some(([p]) => toHex(p) === pub);
+      // Taproot key-path inputs name only the x-only internal key.
+      const internal = input.tapInternalKey && toHex(input.tapInternalKey) === pub.slice(2);
+      if (listed || internal) tx.signIdx(priv, i);
     }
   }
   return btoa(String.fromCharCode(...tx.toPSBT()));
 }
 
 /**
- * A SIGHASH_UNIFIED signer (what Knots/Shrike do) for P2PKH, P2SH multisig, P2WPKH, P2WSH and P2SH-wrapped
- * segwit inputs. Every
+ * A SIGHASH_UNIFIED signer (what Knots/Shrike do) for P2PKH, P2SH multisig, P2WPKH, P2WSH, P2SH-wrapped
+ * segwit and Taproot key-path inputs. Every
  * key in `keys` that the PSBT lists for an input adds a partial signature, so a multisig input
  * collects one signature per cosigner key given. hashType 0x21 = ALL|UNIFIED.
  */
@@ -70,6 +80,18 @@ export function unifiedSign(b64: string, keys: Map<string, Uint8Array>, hashType
     outputs: psbt.tx.outputs.map((o) => ({ amount: o.value, script: o.script })),
   };
   psbt.inputs.forEach((m, i) => {
+    const internalKey = findValues(m, IN_TAP_INTERNAL_KEY)[0]?.value;
+    if (internalKey) {
+      // Taproot key path: Schnorr over the unified digest, with the BIP341-tweaked key.
+      const entry = [...keys].find(([pub]) => pub.slice(2) === toHex(internalKey));
+      if (!entry) return;
+      const digest = unifiedSignatureHash(utx, i, hashType, spent, {
+        scriptType: UNIFIED_SCRIPT_TYPE_TAPROOT,
+      })!;
+      const sig = schnorr.sign(digest, taprootTweakPrivKey(entry[1]));
+      m.push(kv(IN_TAP_KEY_SIG, new Uint8Array(), concatBytes(sig, Uint8Array.of(hashType))));
+      return;
+    }
     const witnessScript = findValues(m, IN_WITNESS_SCRIPT)[0]?.value;
     const redeemScript = findValues(m, IN_REDEEM_SCRIPT)[0]?.value;
     const segwit = findValues(m, IN_WITNESS_UTXO).length > 0;

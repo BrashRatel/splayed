@@ -125,11 +125,12 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
       Core 31.0, Knots 29.4.1 (BLAKE2b at regtest height 110) and eCash (built from the pinned
       commit, which reports v1.2.0) in Docker. Drives the real CLI through init, import, scan, plan,
       verify, broadcast, track and rescan, and checks replay rejection on the other nodes.
-  - [x] Covers `pkh`, `wpkh`, `sh(wpkh)` and 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`,
-        including a multisig input below its threshold being refused.
-  - [ ] Still to cover: Taproot (`tr`) inputs, other m-of-n shapes, mixed script types in one batch
-        (`--batch all`), reorgs, RBF fee bump, a hardware-wallet-style signer, a CI job (needs
-        Docker and a ~5 minute first build).
+  - [x] Covers `pkh`, `wpkh`, `sh(wpkh)`, `tr` key path and 2-of-3 `sh`, `wsh` and `sh(wsh)`
+        `sortedmulti`, including a multisig input below its threshold being refused.
+  - [x] Mixed batch: one `--batch all` transaction per fork spending all seven script types.
+  - [ ] Still to cover: other m-of-n shapes, Taproot with script trees or miniscript (not supported
+        yet), reorgs, RBF fee bump, a hardware-wallet-style signer, a CI job (needs Docker and a ~5
+        minute first build).
   - [ ] Add a fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its
         only coverage today).
 - [ ] `SECURITY.md` contact address; decide on a disclosure policy.

@@ -10,9 +10,10 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 - **Regtest integration suite** (`deno task test:integration`, `tests/integration/`). Real Bitcoin
   Core 31.0, Bitcoin Knots 29.4.1 (BLAKE2b from regtest height 110) and an eCash node built from
   `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. forksplit's CLI runs
-  against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan, for six
-  wallet types (`pkh`, `wpkh`, `sh(wpkh)`, and 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`). It
-  also checks that a node on the wrong chain is rejected, that XBT signatures without 0x21 fail
+  against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan, for eight
+  wallets (`pkh`, `wpkh`, `sh(wpkh)`, `tr` key path, 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`,
+  and a mixed wallet whose single `--batch all` transaction per fork spends all seven script types).
+  It also checks that a node on the wrong chain is rejected, that XBT signatures without 0x21 fail
   `verify`, that a multisig input below its threshold fails `verify`, and that each confirmed fork
   split is rejected by the other two nodes. Every run uses a random Compose project with fresh
   volumes and loopback-only ports.

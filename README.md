@@ -372,11 +372,12 @@ which touches an existing container or volume:
 
 The nodes share blocks 1 to 109, so the test coins exist at the same outpoint on all three chains,
 then each mines its own chain. forksplit's real CLI runs against their JSON-RPC, and the suite
-checks that each fork split is rejected by the other two nodes. It does this for six wallet types:
-`pkh`, `wpkh`, `sh(wpkh)`, and 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`. Each run uses a
-random Compose project with fresh volumes and loopback-only ports, and removes them afterwards.
-Regtest profiles exist only in test code (`registerProfileForTesting`); the CLI, environment and UI
-cannot select one.
+checks that each fork split is rejected by the other two nodes. It does this for eight wallets:
+`pkh`, `wpkh`, `sh(wpkh)`, `tr` (key path), 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`, and a
+mixed wallet whose single `--batch all` transaction per fork spends all seven of those script types
+at once. Each run uses a random Compose project with fresh volumes and loopback-only ports, and
+removes them afterwards. Regtest profiles exist only in test code (`registerProfileForTesting`); the
+CLI, environment and UI cannot select one.
 
 ## Credits and license
 

@@ -11,7 +11,8 @@
  */
 import { join } from "node:path";
 import { HDKey } from "@scure/bip32";
-import { mnemonicToSeedSync } from "@scure/bip39";
+import { entropyToMnemonic, mnemonicToSeedSync } from "@scure/bip39";
+import { wordlist as english } from "@scure/bip39/wordlists/english.js";
 import { assert, assertEquals } from "../assert.ts";
 import { type CliIO, main } from "../../src/cli/main.ts";
 import { parseDescriptor } from "../../src/core/descriptors.ts";
@@ -36,56 +37,104 @@ const XBT_DEST = `wpkh([${fp(OTHER)}/84h/0h/1h]${
   OTHER.derive("m/84'/0'/1'").publicExtendedKey
 }/0/*)`;
 
+/** Deterministic, valid mnemonics so each wallet group gets its own coins. */
+const words = (n: number) => entropyToMnemonic(new Uint8Array(16).fill(n), english);
+const DEFAULT_SINGLE = words(1);
+const DEFAULT_COSIGNERS = [words(2), words(3), words(4)];
+
+const COIN_VALUES = [1, 0.5]; // BTC per coin; every descriptor gets one coin of each
+
 /** A source wallet to split, with the keys test code signs it with. */
 interface WalletSpec {
   name: string;
-  descriptor: string;
-  /** Enough keys to satisfy the wallet. */
+  /** Descriptors imported together; the wallet's coins are the union of theirs. */
+  descriptors: string[];
+  /** Enough keys to satisfy every descriptor. */
   keys: Map<string, Uint8Array>;
-  /** Too few keys (multisig only): verify must refuse the result. */
+  /** Too few keys for at least one multisig input: verify must refuse the result. */
+  belowThreshold?: Map<string, Uint8Array>;
+  /** `plan --batch` value; "all" puts every coin of a fork in one transaction. */
+  batch?: string;
+}
+
+interface Part {
+  descriptor: string;
+  keys: Map<string, Uint8Array>;
   belowThreshold?: Map<string, Uint8Array>;
 }
 
-function singleSig(name: string, purpose: number, wrap: (inner: string) => string): WalletSpec {
-  const root = seed(
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-  );
+function singleSigPart(
+  purpose: number,
+  wrap: (inner: string) => string,
+  mnemonic = DEFAULT_SINGLE,
+): Part {
+  const root = seed(mnemonic);
   const account = root.derive(`m/${purpose}'/0'/0'`);
   return {
-    name,
     descriptor: wrap(`[${fp(root)}/${purpose}h/0h/0h]${account.publicExtendedKey}/<0;1>/*`),
     keys: keyMap(account),
   };
 }
 
 /** 2-of-3 sortedmulti with three independent cosigners. */
-function multiSig(name: string, wrap: (inner: string) => string): WalletSpec {
-  const cosigners = [
-    "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
-    "letter advice cage absurd amount doctor acoustic avoid letter advice cage above",
-    "void come effort suffer camp survey warrior heavy shoot primary clutch crush",
-  ].map((words) => {
-    const root = seed(words);
+function multiSigPart(wrap: (inner: string) => string, mnemonics = DEFAULT_COSIGNERS): Part {
+  const cosigners = mnemonics.map((m) => {
+    const root = seed(m);
     return { root, account: root.derive("m/48'/0'/0'/2'") };
   });
   const parts = cosigners.map((c) =>
     `[${fp(c.root)}/48h/0h/0h/2h]${c.account.publicExtendedKey}/<0;1>/*`
   );
   return {
-    name,
     descriptor: wrap(`sortedmulti(2,${parts.join(",")})`),
     keys: new Map([...keyMap(cosigners[0].account), ...keyMap(cosigners[2].account)]),
     belowThreshold: keyMap(cosigners[1].account),
   };
 }
 
+const makeWallet = (name: string, parts: Part[], batch?: string): WalletSpec => ({
+  name,
+  descriptors: parts.map((p) => p.descriptor),
+  keys: new Map(parts.flatMap((p) => [...p.keys])),
+  belowThreshold: parts.some((p) => p.belowThreshold)
+    // Every single-sig input is fully signed; only the multisig inputs are short of a signature.
+    ? new Map(parts.flatMap((p) => [...(p.belowThreshold ?? p.keys)]))
+    : undefined,
+  batch,
+});
+
+const PART = {
+  pkh: (m?: string) => singleSigPart(44, (k) => `pkh(${k})`, m),
+  wpkh: (m?: string) => singleSigPart(84, (k) => `wpkh(${k})`, m),
+  shWpkh: (m?: string) => singleSigPart(49, (k) => `sh(wpkh(${k}))`, m),
+  tr: (m?: string) => singleSigPart(86, (k) => `tr(${k})`, m),
+  sh: (m?: string[]) => multiSigPart((k) => `sh(${k})`, m),
+  wsh: (m?: string[]) => multiSigPart((k) => `wsh(${k})`, m),
+  shWsh: (m?: string[]) => multiSigPart((k) => `sh(wsh(${k}))`, m),
+};
+
+// Mixed wallet: every script type, each from its own seeds, so a single transaction per fork
+// spends inputs of all seven kinds at once.
+const MIXED_COSIGNERS = (n: number) => [words(n), words(n + 1), words(n + 2)];
+const MIXED = makeWallet("mixed-batch-all", [
+  PART.pkh(words(20)),
+  PART.wpkh(words(21)),
+  PART.shWpkh(words(22)),
+  PART.tr(words(23)),
+  PART.sh(MIXED_COSIGNERS(30)),
+  PART.wsh(MIXED_COSIGNERS(40)),
+  PART.shWsh(MIXED_COSIGNERS(50)),
+], "all");
+
 const WALLETS: WalletSpec[] = [
-  singleSig("pkh", 44, (k) => `pkh(${k})`),
-  singleSig("wpkh", 84, (k) => `wpkh(${k})`),
-  singleSig("sh-wpkh", 49, (k) => `sh(wpkh(${k}))`),
-  multiSig("sh-sortedmulti-2of3", (m) => `sh(${m})`),
-  multiSig("wsh-sortedmulti-2of3", (m) => `wsh(${m})`),
-  multiSig("sh-wsh-sortedmulti-2of3", (m) => `sh(wsh(${m}))`),
+  makeWallet("pkh", [PART.pkh()]),
+  makeWallet("wpkh", [PART.wpkh()]),
+  makeWallet("sh-wpkh", [PART.shWpkh()]),
+  makeWallet("tr-keypath", [PART.tr()]),
+  makeWallet("sh-sortedmulti-2of3", [PART.sh()]),
+  makeWallet("wsh-sortedmulti-2of3", [PART.wsh()]),
+  makeWallet("sh-wsh-sortedmulti-2of3", [PART.shWsh()]),
+  MIXED,
 ];
 
 async function docker(project: string, ...args: string[]): Promise<string> {
@@ -148,15 +197,23 @@ Deno.test({
       const minerAddr = (c: ChainId) => wallet(c).call<string>("getnewaddress");
 
       // Coins: two outputs per test wallet, created in the shared prefix (heights < 110).
-      const coinValues = [1, 0.5];
       await nodes.btc.mine(101, await minerAddr("btc"));
+      // One funding transaction for every coin: a chain of single sends would trip the node's
+      // ancestor limit, and the prefix has to stay below the fork height.
+      const outputs: Record<string, number> = {};
       for (const spec of WALLETS) {
-        const source = parseDescriptor(spec.descriptor);
-        for (let i = 0; i < coinValues.length; i++) {
-          const addr = await regtestAddress(nodes.btc, source.branches[0].derive(i).scriptPubKey);
-          await wallet("btc").call("sendtoaddress", addr, coinValues[i]);
+        for (const descriptor of spec.descriptors) {
+          const source = parseDescriptor(descriptor);
+          for (let i = 0; i < COIN_VALUES.length; i++) {
+            const addr = await regtestAddress(
+              nodes.btc,
+              source.branches[0].derive(i).scriptPubKey,
+            );
+            outputs[addr] = COIN_VALUES[i];
+          }
         }
       }
+      await wallet("btc").call("sendmany", "", outputs);
       await nodes.btc.mine(XBT_ACTIVATION_HEIGHT - 1 - 101, await minerAddr("btc"));
       await copyBlocks(nodes.btc, [nodes.xbt, nodes.ecx], XBT_ACTIVATION_HEIGHT - 1);
 
@@ -179,9 +236,10 @@ Deno.test({
           sanitizeOps: false,
           sanitizeResources: false,
           fn: async (t) => {
-            const SRC_DESC = spec.descriptor;
             const keys = spec.keys;
-            const source = parseDescriptor(SRC_DESC);
+            const sources = spec.descriptors.map((d) => parseDescriptor(d));
+            const coinCount = spec.descriptors.length * COIN_VALUES.length;
+            const batchAll = spec.batch === "all";
             // forksplit, driven through its real CLI with real node RPC as the only backends.
             const dir = await Deno.makeTempDir({ prefix: "forksplit-it-" });
             const toml = ["[scan]", "jitter_min_ms = 0", "jitter_max_ms = 0", ""];
@@ -234,15 +292,17 @@ Deno.test({
               assertEquals(code, 1);
             });
 
-            await t.step("import + scan: both coins are shared on all three chains", async () => {
-              assertEquals(await run("import", SRC_DESC, "--label", "it"), 0, text());
+            await t.step("import + scan: every coin is shared on all three chains", async () => {
+              for (const descriptor of spec.descriptors) {
+                assertEquals(await run("import", descriptor, "--label", "it"), 0, text());
+              }
               assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
               assertEquals(await run("status", "--json"), 0, text());
               const status = JSON.parse(out.join("\n"));
               const coins = status.coins as {
                 classification: { status: string; unspentOn: string[] };
               }[];
-              assertEquals(coins.length, 2, text());
+              assertEquals(coins.length, coinCount, text());
               for (const coin of coins) {
                 assertEquals(coin.classification.status, "shared", JSON.stringify(coin));
               }
@@ -250,21 +310,45 @@ Deno.test({
 
             let planDir = "";
             let planId = "";
-            let plan: { transactions: { chain: string; file: string }[] };
-            await t.step("plan: one PSBT per coin per fork", async () => {
-              assertEquals(await run("dest", "set", "ecx", ECX_DEST), 0, text());
-              assertEquals(await run("dest", "set", "xbt", XBT_DEST), 0, text());
-              assertEquals(
-                await run("plan", "--xbt-signer", "knots", "--fee-rate", "ecx=2,xbt=3", "--yes"),
-                0,
-                text(),
-              );
-              for await (const e of Deno.readDir(join(dir, "plans"))) planId = e.name;
-              planDir = join(dir, "plans", planId);
-              plan = JSON.parse(await Deno.readTextFile(join(planDir, "plan.json")));
-              assertEquals(plan.transactions.filter((x) => x.chain === "ecx").length, 2);
-              assertEquals(plan.transactions.filter((x) => x.chain === "xbt").length, 2);
-            });
+            let plan: {
+              transactions: { chain: string; file: string; inputs: { kind: string }[] }[];
+            };
+            await t.step(
+              "plan: one PSBT per coin per fork (one per fork with --batch all)",
+              async () => {
+                assertEquals(await run("dest", "set", "ecx", ECX_DEST), 0, text());
+                assertEquals(await run("dest", "set", "xbt", XBT_DEST), 0, text());
+                assertEquals(
+                  await run(
+                    "plan",
+                    "--xbt-signer",
+                    "knots",
+                    "--fee-rate",
+                    "ecx=2,xbt=3",
+                    ...(spec.batch ? ["--batch", spec.batch] : []),
+                    "--yes",
+                  ),
+                  0,
+                  text(),
+                );
+                for await (const e of Deno.readDir(join(dir, "plans"))) planId = e.name;
+                planDir = join(dir, "plans", planId);
+                plan = JSON.parse(await Deno.readTextFile(join(planDir, "plan.json")));
+                for (const chain of ["ecx", "xbt"]) {
+                  const txs = plan.transactions.filter((x) => x.chain === chain);
+                  assertEquals(txs.length, batchAll ? 1 : coinCount, `${chain} transactions`);
+                  if (batchAll) {
+                    assertEquals(txs[0].inputs.length, coinCount);
+                    // The point of the batch: one transaction spending every script type at once.
+                    assertEquals(
+                      new Set(txs[0].inputs.map((i) => i.kind)).size,
+                      spec.descriptors.length,
+                      `${chain} input kinds: ${txs[0].inputs.map((i) => i.kind)}`,
+                    );
+                  }
+                }
+              },
+            );
 
             const signAll = async (xbtSigner: (b64: string) => string) => {
               for (const tx of plan.transactions) {
@@ -280,7 +364,8 @@ Deno.test({
             await t.step("verify refuses XBT signatures that are plain SIGHASH_ALL", async () => {
               await signAll((b64) => ignoresUnifiedSign(b64, keys));
               assertEquals(await run("verify", planId), 1, text());
-              assert(text().includes("signature hash type 0x01, not 0x21"), text());
+              // A legacy/segwit signer falls back to ALL (0x01); a Taproot signer to DEFAULT (0x00).
+              assert(/signature hash type 0x0[01], not 0x21/u.test(text()), text());
             });
 
             if (spec.belowThreshold) {
@@ -349,17 +434,23 @@ Deno.test({
                     JSON.stringify(coin),
                   );
                 }
+                const addrs: string[] = [];
+                for (const source of sources) {
+                  for (let i = 0; i < COIN_VALUES.length; i++) {
+                    addrs.push(
+                      `addr(${await regtestAddress(
+                        nodes.btc,
+                        source.branches[0].derive(i).scriptPubKey,
+                      )})`,
+                    );
+                  }
+                }
                 const btcUtxos = await nodes.btc.call<{ unspents: unknown[] }>(
                   "scantxoutset",
                   "start",
-                  [
-                    `addr(${await regtestAddress(
-                      nodes.btc,
-                      source.branches[0].derive(0).scriptPubKey,
-                    )})`,
-                  ],
+                  addrs,
                 );
-                assertEquals(btcUtxos.unspents.length, 1);
+                assertEquals(btcUtxos.unspents.length, coinCount);
               },
             );
           },
