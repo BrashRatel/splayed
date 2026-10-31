@@ -19,6 +19,7 @@ import {
   type FoundUtxo,
   HEX64,
   type OutputObservation,
+  type TxStatus,
 } from "./types.ts";
 
 const MAX_LINE = 16 * 1024 * 1024;
@@ -303,6 +304,36 @@ export class ElectrumBackend implements ChainBackend {
     throw new BackendError(
       `Server says ${txid}:${vout} is spent but shows no spending transaction`,
     );
+  }
+
+  /**
+   * Electrum has no "where is this txid" call, so ask for the history of its first output's script:
+   * the server lists the transaction there with its height (0 or -1 while unconfirmed), or not at
+   * all once it was dropped or replaced.
+   */
+  async txStatus(txid: string): Promise<TxStatus> {
+    assertTxid(txid);
+    let raw: string;
+    try {
+      raw = await this.rawTransaction(txid);
+    } catch (error) {
+      if (isNotFound(error)) return { state: "absent" };
+      throw error;
+    }
+    const [first] = parseTx(raw).outputs;
+    if (!first) throw new BackendError(`Transaction ${txid} has no outputs`);
+    const entry = (await this.history(toHex(first.script))).find((h) => h.tx_hash === txid);
+    if (!entry) return { state: "absent" };
+    if (!Number.isSafeInteger(entry.height)) throw new BackendError("Malformed history entry");
+    if (entry.height <= 0) return { state: "mempool" };
+    return { state: "confirmed", height: entry.height, blockHash: await this.hashAt(entry.height) };
+  }
+
+  /** Block hash at a height: hashed directly for 80-byte headers, else via the next header. */
+  private async hashAt(height: number): Promise<string> {
+    const own = await this.header(height);
+    if (own.length === 80) return toHex(reverseBytes(sha256d(own)));
+    return await this.blockHash(height);
   }
 
   async addressTxCount(_address: string, scriptPubKey: string): Promise<number> {

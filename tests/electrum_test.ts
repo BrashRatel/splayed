@@ -238,6 +238,40 @@ Deno.test("Electrum: observe unspent, spent (with depth) and absent; discovery; 
   });
 });
 
+Deno.test("Electrum: txStatus reads confirmed (with block hash), mempool and absent", async () => {
+  const ecx = fakeChain("ecx", 974_500);
+  const id = fund(
+    [ecx],
+    [{ address: "bc1qs", scriptPubKey: "0014" + "33".repeat(20), value: 10_000 }],
+    900_000,
+    1,
+  );
+  const mined = spendReal(ecx, id, 0, 974_400, 2);
+  const pooled = spendReal(ecx, mined, 0, undefined, 3);
+  const header = new Uint8Array(80).fill(7);
+  ecx.headers = new Map([[974_400, toHex(header)]]);
+  const expected = toHex(reverseBytes(sha256(sha256(header))));
+  await withElectrum(ecx, async (port) => {
+    const b = backend("ecx", port);
+    try {
+      // The spends use a bare OP_1 script, so look them up by that script's history.
+      assertEquals(await b.txStatus(mined), {
+        state: "confirmed",
+        height: 974_400,
+        blockHash: expected,
+      });
+      assertEquals(await b.txStatus(pooled), { state: "mempool" });
+      assertEquals(await b.txStatus("cd".repeat(32)), { state: "absent" });
+      // Dropped from the mempool: the server stops listing it (the raw bytes are cached).
+      ecx.txs.delete(pooled);
+      ecx.spends.delete(`${mined}:0`);
+      assertEquals(await b.txStatus(pooled), { state: "absent" });
+    } finally {
+      await b.close();
+    }
+  });
+});
+
 Deno.test("Electrum: broadcast on its own connection; explicit errors are marked as rejections", async () => {
   const ecx = fakeChain("ecx", 974_500);
   const id = fund(

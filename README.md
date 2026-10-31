@@ -295,10 +295,10 @@ was confirmed has changed, it says so loudly and exits with status 1:
 Until every split is confirmed again, leave the BTC copies alone. `scan` also warns when a spend it
 saw last time has disappeared or been replaced by a different transaction.
 
-Reorg detection needs a backend that can report a transaction's own status: Esplora, or node RPC.
-Node RPC without `txindex` can't tell a confirmed transaction from one that never existed, so
-`track` shows `unknown` rather than guessing. Electrum falls back to judging by what spent the
-input, which cannot see a block change.
+Reorg detection needs a backend that can report a transaction's own status: Esplora, Electrum, or
+node RPC. Node RPC without `txindex` can't tell a confirmed transaction from one that never existed,
+so `track` shows `unknown` rather than guessing. In the web UI, reorg alerts appear above a plan's
+table, and each broadcast split has a "Fee bump…" button (plus one for the whole plan).
 
 ### Stuck transactions: fee bump (RBF)
 

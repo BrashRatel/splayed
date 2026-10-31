@@ -381,3 +381,10 @@ input[type="file"]::file-selector-button {
   cursor: pointer;
   font: inherit;
 }
+
+.alert {
+  border: 1px solid var(--bad, #c0392b);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}

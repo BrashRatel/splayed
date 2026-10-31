@@ -7,6 +7,12 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Web UI: fee bump and reorg alerts.** Each broadcast, unconfirmed split has a "Fee bump…" button
+  (and the plan has one for all of them); it asks for a rate and runs `bump`. The plans view shows
+  the latest reorg alert for each split, "replaced by plan …" and "replaces …".
+- **Electrum `txStatus`**, so `track` sees a block change through Electrum servers too. It reads the
+  history of the transaction's first output script.
+
 - **Regtest playground** (`deno task regtest`): a long-lived environment with stable ports for
   trying forksplit by hand. `up` starts the three nodes and mines the shared history, `fund` puts
   coins on your own wallet (a descriptor or an address) on all three chains before the fork, `fork`

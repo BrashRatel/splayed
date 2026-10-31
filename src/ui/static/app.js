@@ -680,6 +680,27 @@ async function download(planId, file, format) {
   }, 1000);
 }
 
+/** A split can be replaced while it is sent and not yet replaced (the CLI makes the final call). */
+function bumpable(pr) {
+  return !!pr.broadcast && pr.broadcast.status !== "replaced" && !pr.replacedBy &&
+    !(pr.confirmations && pr.confirmations.depth > 0);
+}
+
+function bump(planId, scope) {
+  const rate = prompt(
+    "New fee rate in sat/vB for the replacement (empty = the tool's suggestion, at least 1.5x):",
+    "",
+  );
+  if (rate === null) return;
+  const args = ["bump", planId, ...scope];
+  if (rate.trim()) {
+    if (!/^\d+(\.\d+)?$/u.test(rate.trim())) return logLine("Fee rate must be a number", "err");
+    const chains = scope[0] === "--chains" ? [scope[1]] : ["ecx", "xbt"];
+    args.push("--fee-rate", chains.map((c) => `${c}=${rate.trim()}`).join(","));
+  }
+  run(args);
+}
+
 function viewPlans() {
   const o = state.overview;
   const signer = h(
@@ -793,6 +814,25 @@ function viewPlans() {
           pr.verified ? badge("verified", "verified") : badge("not verified", ""),
           pr.broadcast ? h("div", {}, badge(pr.broadcast.status, pr.broadcast.status)) : null,
           pr.confirmations ? h("div", { class: "muted" }, `${pr.confirmations.depth} conf`) : null,
+          t.replaces
+            ? h(
+              "div",
+              { class: "muted" },
+              `replaces ${t.replaces.txid.slice(0, 8)}… in ${t.replaces.plan}`,
+            )
+            : null,
+          pr.replacedBy
+            ? h("div", { class: "muted" }, `replaced by plan ${pr.replacedBy.plan}`)
+            : null,
+          pr.reorgs?.length
+            ? h("div", { class: "muted" }, `${pr.reorgs.length} reorg alert(s), see above`)
+            : null,
+          bumpable(pr)
+            ? h("button", {
+              class: "small secondary",
+              onclick: () => bump(p.id, ["--chains", t.chain, "--tx", String(t.order)]),
+            }, "Fee bump…")
+            : null,
         ),
       );
     });
@@ -806,6 +846,17 @@ function viewPlans() {
         `XBT signer: ${p.xbtSigner ?? "none"} · signed files: ${p.signedFiles.length}`,
       ),
       ...p.warnings.map((w) => h("div", { class: "note" }, `⚠ ${w}`)),
+      ...p.transactions.flatMap((t) =>
+        (t.progress.reorgs ?? []).slice(-1).map((r) =>
+          h(
+            "div",
+            { class: "alert" },
+            `REORG ${t.chain.toUpperCase()} #${t.order} (${r.kind}, ${
+              r.at.slice(0, 19)
+            }): ${r.detail}`,
+          )
+        )
+      ),
       h(
         "table",
         {},
@@ -835,6 +886,13 @@ function viewPlans() {
           { class: "secondary", onclick: () => run(["track", p.id]) },
           "Track confirmations",
         ),
+        p.transactions.some((t) => bumpable(t.progress))
+          ? h(
+            "button",
+            { class: "secondary", onclick: () => bump(p.id, []) },
+            "Fee bump all unconfirmed…",
+          )
+          : null,
       ),
     ));
   }

@@ -212,5 +212,8 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     assert(verify.text.includes("VERIFIED"));
     const after = (await (await api("/api/plans")).json()).plans[0];
     assert(after.transactions[0].progress.verified);
+    // Fee bump is reachable from the UI; nothing is broadcast, so there is nothing to replace.
+    const bump = await runJob(["bump", p.id, "--yes"]);
+    assertEquals(bump.exitCode, 1, bump.text);
   });
 });

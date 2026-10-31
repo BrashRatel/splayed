@@ -231,7 +231,10 @@ async function plansView(dataDir: string) {
               : undefined,
             broadcast: progress.txs[t.file]?.broadcast,
             confirmations: progress.txs[t.file]?.confirmations,
+            reorgs: progress.txs[t.file]?.reorgs,
+            replacedBy: progress.txs[t.file]?.replacedBy,
           },
+          replaces: t.replaces,
         })),
       });
     } catch { /* skip unreadable plan dirs */ }

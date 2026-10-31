@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { assert, assertEquals } from "../assert.ts";
 import type { ChainId } from "../../src/core/profiles.ts";
 import {
-  type Cli,
   foreignSpendHex,
   makeCli,
   planIds,

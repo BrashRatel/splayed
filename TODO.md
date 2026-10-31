@@ -86,12 +86,14 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
       real nodes with `invalidateblock`.
   - [ ] The "left the chain and the mempool, input unspent" case is only covered by unit tests: a
         regtest node can't be made to drop a transaction that way without a restart.
-  - [ ] Electrum has no per-transaction status yet, so it can't see a block change.
-  - [ ] Show reorg alerts in the web UI, not just in the `track` output.
+  - [x] Electrum per-transaction status (from the history of the transaction's first output script).
+        Unit-tested against a fake server only; try it against Fulcrum and electrs.
+  - [x] Reorg alerts in the web UI plans view. Not yet looked at in a real browser.
 - [x] **Stuck splits.** `bump` writes a BIP125 replacement plan (same inputs and destination, higher
       fee) that is signed, verified and broadcast like any plan. Tested against real nodes.
   - [ ] CPFP for the case where the original can't be replaced (no RBF signal from an old plan).
-  - [ ] A bump button in the web UI (the command already works from it).
+  - [x] Fee bump buttons in the web UI (per split and for the whole plan). Not yet looked at in a
+        real browser.
   - [ ] Bumping one transaction of a `--batch all` plan can't drop an input; it replaces the whole
         transaction.
 - [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins. Guidance in the UI,
