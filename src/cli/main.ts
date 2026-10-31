@@ -60,7 +60,8 @@ import { parseTx } from "../core/tx.ts";
 import { BackendError } from "../backends/types.ts";
 import { observationCell, privacyLevel, sats, shortOutpoint, table } from "./format.ts";
 
-const USAGE = `forksplit - separate BTC, XBT and ECX copies of the same coins (watch-only)
+const USAGE =
+  `forksplit - separate BTC, XBT and ECX copies of the same coins (keyless: your wallet signs)
 
 Usage: forksplit [global options] <command> [args]
 

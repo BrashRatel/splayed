@@ -437,7 +437,7 @@ function viewWallet() {
   view.push(h(
     "div",
     { class: "card" },
-    h("h2", {}, "Watch-only descriptors"),
+    h("h2", {}, "Wallet descriptors (public keys only)"),
     h(
       "p",
       { class: "note" },

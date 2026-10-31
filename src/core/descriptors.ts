@@ -100,7 +100,7 @@ function normalizeXpub(text: string): string {
   }
   if ([0x0488ade4, 0x049d7878, 0x04b2430c, 0x04358394].includes(version)) {
     throw new DescriptorError(
-      "That is a PRIVATE extended key. forksplit is watch-only: use the xpub",
+      "That is a PRIVATE extended key. forksplit is keyless: give it the xpub and sign in your own wallet",
     );
   }
   throw new DescriptorError("Only mainnet extended public keys (xpub/ypub/zpub) are supported");
@@ -222,7 +222,7 @@ class Parser {
     }
     if (/^[xyzYZ]prv/u.test(token)) {
       throw new DescriptorError(
-        "That is a PRIVATE extended key. forksplit is watch-only: use the xpub",
+        "That is a PRIVATE extended key. forksplit is keyless: give it the xpub and sign in your own wallet",
       );
     }
     key.xpub = normalizeXpub(token);

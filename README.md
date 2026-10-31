@@ -1,12 +1,13 @@
 # forksplit
 
-Watch-only tool for separating the **BTC**, **XBT** (Bitcoin BLAKE2b) and **ECX** (eCash) copies of
-the same coins after the 2026 forks.
+Keyless tool for separating the **BTC**, **XBT** (Bitcoin BLAKE2b) and **ECX** (eCash) copies of the
+same coins after the 2026 forks: forksplit builds replay-protected PSBTs, your (cold) wallet signs
+them, and forksplit verifies and broadcasts each split only to its own chain, over Tor.
 
 Coins that existed before a fork exist on both chains at the same outpoint. An ordinary spend on one
 chain can be **replayed** on the others, moving the copies you meant to keep. forksplit finds your
-coins on all three chains, tells you which ones are still shared, builds replay-protected PSBTs for
-you to sign in your own wallet, then verifies and broadcasts each one only to its own chain.
+coins on all three chains, tells you which ones are still shared, and walks each shared coin through
+plan → sign (in your wallet) → verify → broadcast. Your keys never leave your wallet.
 
 > **Status: milestone 4.** The full guided route works end to end against test chains: `init`,
 > `import`, `scan`, `status`, `dest`, `plan`, `verify`, `broadcast` and `track`, from the CLI or the
@@ -280,7 +281,9 @@ BTC copies then show as separated and can be spent normally.
 
 ## Security model
 
-- **Watch-only.** No seeds or private keys are ever accepted.
+- **Keyless.** forksplit never asks for, accepts or stores seeds or private keys. It reads your
+  wallet through xpub-based (watch-only) descriptors, and your own (cold) wallet signs the PSBTs it
+  builds.
 - **Network identity is compiled in.** The replay constants, fork heights and checkpoint block
   hashes are in `src/core/profiles.ts` and can't be edited by configuration. Before it is used, and
   again on every scan, each backend must report the pinned hash at every checkpoint:
