@@ -56,7 +56,9 @@ Deno.test("RPC: identity incl. XBT deployment check, local route, auth header", 
   await withFakeNode((method, params) => {
     if (method === "getblockcount") return 970_000;
     if (method === "getblockhash") return params[0] === 961_640 ? xbtHash : "00".repeat(32);
-    if (method === "getdeploymentinfo") return { deployments: { blake2b: { active } } };
+    if (method === "getdeploymentinfo") {
+      return { deployments: {}, blake2b: { height: 110, active } };
+    }
     throw new Error(`unexpected ${method}`);
   }, async (url, auths) => {
     const b = backend(url, "blake2b");

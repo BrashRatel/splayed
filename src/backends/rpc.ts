@@ -100,10 +100,12 @@ export class RpcBackend implements ChainBackend {
     const problems: string[] = [];
     if (this.requiredDeployment) {
       try {
-        const info = await this.call<{ deployments?: Record<string, { active?: boolean }> }>(
+        // Knots reports the BLAKE2b fork at the top level of the result ({height, active}), not
+        // under "deployments" with the soft forks (src/rpc/blockchain.cpp, getdeploymentinfo).
+        const info = await this.call<Record<string, { active?: boolean } | undefined>>(
           "getdeploymentinfo",
         );
-        if (info.deployments?.[this.requiredDeployment]?.active !== true) {
+        if (info[this.requiredDeployment]?.active !== true) {
           problems.push(`getdeploymentinfo does not report "${this.requiredDeployment}" active`);
         }
       } catch (error) {

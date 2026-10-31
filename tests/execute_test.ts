@@ -134,7 +134,7 @@ class FakeRpcTransport implements Transport {
       result = MAINNET.chains[this.chain].checkpoints.find((c) => c.height === params[0])?.hash ??
         "00".repeat(32);
     } else if (method === "getdeploymentinfo") {
-      result = { deployments: { blake2b: { active: true } } };
+      result = { deployments: {}, blake2b: { height: 110, active: true } };
     } else if (method === "testmempoolaccept") {
       const reason = this.accept(parseTx(params[0][0]));
       result = [{ allowed: !reason, "reject-reason": reason }];
