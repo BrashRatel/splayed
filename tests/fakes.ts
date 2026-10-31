@@ -4,6 +4,7 @@ import { type ChainId, MAINNET } from "../src/core/profiles.ts";
 export interface FakeTx {
   vout: { value: number; scriptpubkey: string }[];
   height?: number; // undefined = unconfirmed
+  raw?: string;
 }
 
 export interface FakeChain {
@@ -16,6 +17,9 @@ export interface FakeChain {
   history: Map<string, string[]>;
   requests: string[];
   status429?: boolean;
+  feeEstimates?: Record<string, number>;
+  /** Raw headers by height (Electrum). */
+  headers?: Map<number, string>;
 }
 
 export function fakeChain(chain: ChainId, tip = 974_500): FakeChain {
@@ -78,6 +82,15 @@ export class FakeEsploraTransport implements Transport {
             : { confirmed: true, block_height: spend.height },
         }),
       ));
+    }
+    if (path === "/fee-estimates") {
+      return Promise.resolve(response(200, JSON.stringify(c.feeEstimates ?? { "1": 5, "6": 2.5 })));
+    }
+    if ((m = /^\/tx\/([0-9a-f]{64})\/hex$/u.exec(path))) {
+      const tx = c.txs.get(m[1]);
+      return Promise.resolve(
+        tx?.raw ? response(200, tx.raw) : response(404, "Transaction not found"),
+      );
     }
     if ((m = /^\/tx\/([0-9a-f]{64})$/u.exec(path))) {
       const tx = c.txs.get(m[1]);
@@ -144,4 +157,73 @@ export function addOutput(
   const list = c.history.get(address) ?? [];
   list.push(`${id}:${vout}`);
   c.history.set(address, list);
+}
+
+import { parseTx, serializeStripped, txid as computeTxid } from "../src/core/tx.ts";
+import { toHex } from "../src/core/bytes.ts";
+
+/** Create a real, hashable transaction paying the given outputs and register it on chains. */
+export function fund(
+  chains: FakeChain[],
+  outputs: { address: string; scriptPubKey: string; value: number }[],
+  height: number | undefined,
+  salt: number,
+): string {
+  const tx = {
+    version: 2,
+    inputs: [{
+      txid: txid(10_000 + salt),
+      vout: 0,
+      scriptSig: new Uint8Array(),
+      sequence: 0xffffffff,
+      witness: [],
+    }],
+    outputs: outputs.map((o) => ({
+      value: BigInt(o.value),
+      script: Uint8Array.from(o.scriptPubKey.match(/../g)!.map((h) => parseInt(h, 16))),
+    })),
+    lockTime: 0,
+  };
+  const raw = toHex(serializeStripped(tx));
+  const id = computeTxid(parseTx(raw));
+  for (const c of chains) {
+    c.txs.set(id, {
+      vout: outputs.map((o) => ({ value: o.value, scriptpubkey: o.scriptPubKey })),
+      height,
+      raw,
+    });
+    outputs.forEach((o, i) => {
+      const list = c.history.get(o.address) ?? [];
+      list.push(`${id}:${i}`);
+      c.history.set(o.address, list);
+    });
+  }
+  return id;
+}
+
+/** Spend an outpoint on one chain with a real transaction (so Electrum servers can serve it). */
+export function spendReal(
+  c: FakeChain,
+  prevTxid: string,
+  vout: number,
+  height: number | undefined,
+  salt: number,
+): string {
+  const tx = {
+    version: 2,
+    inputs: [{
+      txid: prevTxid,
+      vout,
+      scriptSig: new Uint8Array(),
+      sequence: 0xfffffffd,
+      witness: [],
+    }],
+    outputs: [{ value: 1000n + BigInt(salt), script: Uint8Array.of(0x51) }],
+    lockTime: 0,
+  };
+  const raw = toHex(serializeStripped(tx));
+  const id = computeTxid(parseTx(raw));
+  c.txs.set(id, { vout: [{ value: 1000 + salt, scriptpubkey: "51" }], height, raw });
+  c.spends.set(`${prevTxid}:${vout}`, { txid: id, height });
+  return id;
 }

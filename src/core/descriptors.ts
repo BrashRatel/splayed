@@ -68,6 +68,8 @@ type Step = { kind: "fixed"; index: number } | { kind: "multi"; indexes: number[
 
 interface KeyExpr {
   origin?: string; // "[fp/path]" exactly as normalized
+  originFingerprint?: Uint8Array;
+  originPath?: number[];
   xpub?: string; // normalized to xpub version
   pubkey?: Uint8Array; // fixed key
   steps: Step[];
@@ -200,6 +202,13 @@ class Parser {
     }
     const token = this.until("/,)");
     const key: KeyExpr = { origin, steps: [] };
+    if (origin) {
+      const [fp, ...path] = origin.slice(1, -1).split("/");
+      key.originFingerprint = hex.decode(fp);
+      key.originPath = path.map((p) =>
+        p.endsWith("h") ? (Number(p.slice(0, -1)) + 0x8000_0000) >>> 0 : Number(p)
+      );
+    }
     if (/^[0-9a-fA-F]+$/u.test(token)) {
       const bytes = hex.decode(token.toLowerCase());
       if (!(bytes.length === 33 || (xonlyAllowed && bytes.length === 32))) {
@@ -282,56 +291,143 @@ function exprToString(expr: ScriptExpr, branch: number): string {
 
 const hdCache = new Map<string, HDKey>();
 
-function deriveKey(key: KeyExpr, branch: number, index: number): Uint8Array {
-  if (key.pubkey) return key.pubkey;
-  let node = hdCache.get(key.xpub!);
+function hdNode(xpub: string): HDKey {
+  let node = hdCache.get(xpub);
   if (!node) {
-    node = HDKey.fromExtendedKey(key.xpub!);
-    hdCache.set(key.xpub!, node);
+    node = HDKey.fromExtendedKey(xpub);
+    hdCache.set(xpub, node);
   }
+  return node;
+}
+
+function fingerprintBytes(n: number): Uint8Array {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, n >>> 0);
+  return out;
+}
+
+/** A derived key plus what a PSBT signer needs to find it (BIP32 origin). */
+export interface KeyInfo {
+  pubkey: Uint8Array;
+  fingerprint: Uint8Array;
+  path: number[];
+  /** False when the descriptor had no [fingerprint/path] origin: most signers can't match it. */
+  hasOrigin: boolean;
+}
+
+function deriveKey(key: KeyExpr, branch: number, index: number): KeyInfo {
+  if (key.pubkey) {
+    return {
+      pubkey: key.pubkey,
+      fingerprint: key.originFingerprint ?? new Uint8Array(4),
+      path: key.originPath ?? [],
+      hasOrigin: key.originFingerprint !== undefined,
+    };
+  }
+  const root = hdNode(key.xpub!);
+  let node = root;
+  const rel: number[] = [];
   for (const step of key.steps) {
     const n = step.kind === "fixed"
       ? step.index
       : step.kind === "multi"
       ? step.indexes[branch]
       : index;
+    rel.push(n);
     node = node.deriveChild(n);
   }
   if (!node.publicKey) throw new DescriptorError("Derivation produced no public key");
-  return node.publicKey;
+  return {
+    pubkey: node.publicKey,
+    fingerprint: key.originFingerprint ?? fingerprintBytes(root.fingerprint),
+    path: [...(key.originPath ?? []), ...rel],
+    hasOrigin: key.originFingerprint !== undefined,
+  };
 }
 
-type Payment = { script: Uint8Array; address?: string };
+export type OutputKind = "pkh" | "wpkh" | "sh-wpkh" | "tr" | "wsh-ms" | "sh-wsh-ms" | "sh-ms";
 
-function build(expr: ScriptExpr, branch: number, index: number): Payment {
+interface Built {
+  script: Uint8Array;
+  address?: string;
+  redeemScript?: Uint8Array;
+  witnessScript?: Uint8Array;
+  keys: KeyInfo[];
+  multisig?: { m: number; n: number };
+}
+
+function build(expr: ScriptExpr, branch: number, index: number): Built {
   switch (expr.type) {
-    case "pkh":
-      return p2pkh(deriveKey(expr.key, branch, index), NETWORK);
-    case "wpkh":
-      return p2wpkh(deriveKey(expr.key, branch, index), NETWORK);
+    case "pkh": {
+      const k = deriveKey(expr.key, branch, index);
+      return { ...p2pkh(k.pubkey, NETWORK), keys: [k] };
+    }
+    case "wpkh": {
+      const k = deriveKey(expr.key, branch, index);
+      return { ...p2wpkh(k.pubkey, NETWORK), keys: [k] };
+    }
     case "tr": {
       const k = deriveKey(expr.key, branch, index);
-      return p2tr(k.length === 33 ? k.slice(1) : k, undefined, NETWORK);
+      const xonly = k.pubkey.length === 33 ? k.pubkey.slice(1) : k.pubkey;
+      return { ...p2tr(xonly, undefined, NETWORK), keys: [{ ...k, pubkey: xonly }] };
     }
     case "multi":
     case "sortedmulti": {
-      const pubkeys = expr.keys.map((k) => deriveKey(k, branch, index));
-      if (expr.type === "sortedmulti") pubkeys.sort((a, b) => (toHex(a) < toHex(b) ? -1 : 1));
-      return p2ms(expr.threshold, pubkeys);
+      const keys = expr.keys.map((k) => deriveKey(k, branch, index));
+      if (expr.type === "sortedmulti") {
+        keys.sort((a, b) => (toHex(a.pubkey) < toHex(b.pubkey) ? -1 : 1));
+      }
+      const ms = p2ms(expr.threshold, keys.map((k) => k.pubkey));
+      return { script: ms.script, keys, multisig: { m: expr.threshold, n: keys.length } };
     }
-    case "wsh":
+    case "wsh": {
+      const inner = build(expr.inner, branch, index);
       // deno-lint-ignore no-explicit-any
-      return p2wsh(build(expr.inner, branch, index) as any, NETWORK);
-    case "sh":
+      const out = p2wsh({ type: "ms", script: inner.script } as any, NETWORK);
+      return { ...out, witnessScript: inner.script, keys: inner.keys, multisig: inner.multisig };
+    }
+    case "sh": {
+      const inner = build(expr.inner, branch, index);
       // deno-lint-ignore no-explicit-any
-      return p2sh(build(expr.inner, branch, index) as any, NETWORK);
+      const out = p2sh({ type: "unknown", script: inner.script } as any, NETWORK, true);
+      return {
+        ...out,
+        redeemScript: inner.script,
+        witnessScript: inner.witnessScript,
+        keys: inner.keys,
+        multisig: inner.multisig,
+      };
+    }
   }
+}
+
+function kindOf(expr: ScriptExpr): OutputKind {
+  if (expr.type === "sh") {
+    if (expr.inner.type === "wpkh") return "sh-wpkh";
+    if (expr.inner.type === "wsh") return "sh-wsh-ms";
+    return "sh-ms";
+  }
+  if (expr.type === "wsh") return "wsh-ms";
+  if (expr.type === "pkh" || expr.type === "wpkh" || expr.type === "tr") return expr.type;
+  throw new DescriptorError("Unsupported top-level descriptor");
 }
 
 export interface DerivedOutput {
   index: number;
   address: string;
   scriptPubKey: string;
+  kind: OutputKind;
+  redeemScript?: Uint8Array;
+  witnessScript?: Uint8Array;
+  keys: KeyInfo[];
+  multisig?: { m: number; n: number };
+}
+
+export interface GlobalXpub {
+  /** 78-byte serialized extended public key. */
+  raw: Uint8Array;
+  fingerprint: Uint8Array;
+  path: number[];
 }
 
 export interface DescriptorBranch {
@@ -349,6 +445,11 @@ export interface ParsedDescriptor {
   normalized: string;
   branches: DescriptorBranch[];
   hadChecksum: boolean;
+  kind: OutputKind;
+  /** Every extended key with its origin, for PSBT_GLOBAL_XPUB. */
+  xpubs: GlobalXpub[];
+  /** False if any key lacks a [fingerprint/path] origin. */
+  allKeysHaveOrigin: boolean;
 }
 
 export function parseDescriptor(input: string): ParsedDescriptor {
@@ -400,14 +501,34 @@ export function parseDescriptor(input: string): ParsedDescriptor {
       ranged,
       derive(index: number): DerivedOutput {
         if (!ranged && index !== 0) throw new DescriptorError("Descriptor is not ranged");
-        const payment = build(expr, branch, index);
-        if (!payment.address) throw new DescriptorError("Could not derive an address");
-        return { index, address: payment.address, scriptPubKey: toHex(payment.script) };
+        const built = build(expr, branch, index);
+        if (!built.address) throw new DescriptorError("Could not derive an address");
+        return {
+          index,
+          address: built.address,
+          scriptPubKey: toHex(built.script),
+          kind: kindOf(expr),
+          redeemScript: built.redeemScript,
+          witnessScript: built.witnessScript,
+          keys: built.keys,
+          multisig: built.multisig,
+        };
       },
     });
   }
   const normalized = exprToStringMulti(expr);
+  const xpubs: GlobalXpub[] = keys.filter((k) => k.xpub).map((k) => {
+    const root = hdNode(k.xpub!);
+    return {
+      raw: b58c.decode(k.xpub!),
+      fingerprint: k.originFingerprint ?? fingerprintBytes(root.fingerprint),
+      path: k.originPath ?? [],
+    };
+  });
   return {
+    kind: kindOf(expr),
+    xpubs,
+    allKeysHaveOrigin: keys.every((k) => k.originFingerprint !== undefined),
     input: trimmed,
     normalized: `${normalized}#${descriptorChecksum(normalized)}`,
     branches,

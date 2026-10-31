@@ -2,6 +2,7 @@
 import type { BackendConfig } from "../core/config.ts";
 import type { ChainId } from "../core/profiles.ts";
 import type { Route, Transport } from "../net/transport.ts";
+import { parseTx, txid as computeTxid } from "../core/tx.ts";
 import {
   assertTxid,
   BackendError,
@@ -148,6 +149,25 @@ export class EsploraBackend implements ChainBackend {
       spendHeight: spendStatus?.confirmed ? spendStatus.block_height : undefined,
       spendDetailKnown: spendStatus !== undefined,
     };
+  }
+
+  async rawTransaction(txid: string): Promise<string> {
+    assertTxid(txid);
+    const hex = (await this.getOk(`/tx/${txid}/hex`)).trim().toLowerCase();
+    if (!/^[0-9a-f]+$/u.test(hex) || computeTxid(parseTx(hex)) !== txid) {
+      throw new BackendError(`Server returned a transaction that doesn't hash to ${txid}`);
+    }
+    return hex;
+  }
+
+  async feeRate(targetBlocks: number): Promise<number | undefined> {
+    const estimates = await this.getJson<Record<string, number>>("/fee-estimates");
+    const targets = Object.keys(estimates).map(Number).filter((n) => n >= targetBlocks).sort((
+      a,
+      b,
+    ) => a - b);
+    const rate = estimates[String(targets[0] ?? targetBlocks)];
+    return typeof rate === "number" && rate > 0 ? rate : undefined;
   }
 
   async addressTxCount(address: string): Promise<number> {

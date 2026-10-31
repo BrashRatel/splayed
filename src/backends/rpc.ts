@@ -1,6 +1,7 @@
 import type { BackendConfig } from "../core/config.ts";
 import type { ChainId } from "../core/profiles.ts";
 import type { Route, Transport } from "../net/transport.ts";
+import { parseTx, txid as computeTxid } from "../core/tx.ts";
 import {
   assertTxid,
   BackendError,
@@ -124,6 +125,27 @@ export class RpcBackend implements ChainBackend {
       if ((error as { rpcCode?: number }).rpcCode === -5) return { state: "absent" };
       throw error;
     }
+  }
+
+  async rawTransaction(txid: string): Promise<string> {
+    assertTxid(txid);
+    let hex: string;
+    try {
+      hex = await this.call<string>("getrawtransaction", [txid, 0]);
+    } catch (error) {
+      throw new BackendError(
+        `${(error as Error).message}. (Node RPC needs txindex=1 to fetch confirmed transactions.)`,
+      );
+    }
+    if (typeof hex !== "string" || computeTxid(parseTx(hex)) !== txid) {
+      throw new BackendError(`Node returned a transaction that doesn't hash to ${txid}`);
+    }
+    return hex.toLowerCase();
+  }
+
+  async feeRate(targetBlocks: number): Promise<number | undefined> {
+    const r = await this.call<{ feerate?: number }>("estimatesmartfee", [targetBlocks]);
+    return typeof r?.feerate === "number" && r.feerate > 0 ? r.feerate * 100_000 : undefined;
   }
 
   async scanDescriptors(

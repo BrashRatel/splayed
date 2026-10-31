@@ -10,9 +10,18 @@ export interface StoredDescriptor {
   addedAt: string;
 }
 
+export interface Destination {
+  /** Ranged descriptor; fresh addresses come from branch 0 (receive). */
+  descriptor: string;
+  /** Next derivation index not yet handed out by a plan. */
+  nextIndex: number;
+}
+
 export interface WatchOnlyWallet {
   version: 1;
   descriptors: StoredDescriptor[];
+  /** Where split outputs go on each fork (ideally a new seed per fork). */
+  destinations?: Partial<Record<"xbt" | "ecx", Destination>>;
 }
 
 export async function loadWallet(dataDir: string): Promise<WatchOnlyWallet> {

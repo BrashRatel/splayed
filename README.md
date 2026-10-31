@@ -8,9 +8,9 @@ chain can be **replayed** on the others, moving the copies you meant to keep. fo
 coins on all three chains, tells you which ones are still shared, and (in later milestones) builds
 replay-protected PSBTs for you to sign in your own wallet.
 
-> **Status: milestone 1 (read-only).** `init`, `import`, `scan` and `status` work. Nothing in this
-> version builds, signs or broadcasts a transaction, so it cannot move funds. PSBT planning,
-> verification and broadcast come next.
+> **Status: milestone 2.** `init`, `import`, `scan`, `status`, `dest` and `plan` work with
+> Esplora, Electrum and node-RPC backends. `plan` writes **unsigned** PSBTs; nothing in this
+> version signs or broadcasts, so it cannot move funds. `verify` and `broadcast` come next.
 
 ## The chains
 
@@ -79,11 +79,18 @@ deno task cli config backend add xbt --kind rpc --url http://127.0.0.1:18332 \
   --user me --password-env XBT_RPC_PASSWORD
 # Your own Esplora/mempool instance for ECX
 deno task cli config backend add ecx --kind esplora --url http://192.168.1.20:3002/api
+# An Electrum server (Fulcrum/electrs). XBT needs a BLAKE2b-aware one (164-byte headers).
+deno task cli config backend add xbt --kind electrum --url ssl://electrum.example.org:50002
+# Self-signed TLS certificate? Pin it:
+deno task cli config backend add btc --kind electrum --url ssl://192.168.1.20:50002 \
+  --ca-file ~/fulcrum-cert.pem
 deno task cli config show
 deno task cli init
 ```
 
-With node RPC, `txindex=1` lets forksplit report how deep a spend is. Without it, a spent coin shows
+A backend you add is tried before the profile default, which is kept as a lower-priority
+backend (`--priority` changes the order). With node RPC, `txindex=1` lets forksplit report how
+deep a spend is and fetch previous transactions for PSBTs. Without it, a spent coin shows
 as "spent/absent ?" and stays **pending**.
 
 ### Import and scan
@@ -113,6 +120,44 @@ Each coin gets one status:
 | `unverified` | A chain couldn't be asked. Never treated as safe                 |
 | `spent`      | Not unspent anywhere                                             |
 
+### Plan the splits (unsigned PSBTs)
+
+```sh
+# Where split coins go on each fork (best: a new seed per fork). Ranged descriptor, branch 0 used.
+deno task cli dest set ecx "wpkh([fp/84h/0h/0h]xpub.../0/*)"
+deno task cli dest set xbt "tr([fp/86h/0h/0h]xpub.../0/*)"
+# Say what will sign XBT: knots, sparrow-blake2b, shrike, embit, privkeyio-firmware
+deno task cli plan --xbt-signer knots --fee-rate ecx=2,xbt=3
+```
+
+For every coin the last scan saw as shared, `plan`:
+1. re-checks the coin on the target fork;
+2. fetches the previous transaction and checks it hashes to the right txid;
+3. builds one PSBT per batch.
+
+What it stamps on each fork's PSBTs:
+
+| Fork | Locktime | Sequence | Sighash type | Signer |
+|---|---|---|---|---|
+| ECX | 499,999,998 | `0xfffffffd` on every input | not set | any signer, including stock hardware wallets |
+| XBT | 0 | `0xfffffffd` on every input | `0x21` (`SIGHASH_ALL\|SIGHASH_UNIFIED`) on every input | must support SIGHASH_UNIFIED |
+
+Each input carries:
+- BIP32 origins;
+- the full previous transaction for non-Taproot inputs (hardware wallets need it);
+- the redeem and witness scripts for multisig, plus `PSBT_GLOBAL_XPUB`.
+
+Options:
+- `--batch coin` (default) keeps coins unlinked. `--batch address`, `--batch N` and
+  `--batch all` combine coins, and the summary says which addresses that links publicly.
+- Fees come from `--fee-rate` or the backend's 6-block estimate. A batch whose fee would be over
+  10% of its value is skipped.
+
+The smallest transaction on each chain is marked **TEST FIRST**. Destination addresses are
+reserved, so re-planning never reuses one.
+
+Plans go to `<data dir>/plans/<id>/` (`ecx/*.psbt`, `xbt/*.psbt`, `plan.json`, `README.txt`).
+
 ## Security model
 
 - **Watch-only.** No seeds or private keys are ever accepted.
@@ -131,6 +176,9 @@ Each coin gets one status:
   - Each chain and each future broadcast gets a separate Tor circuit (SOCKS credential isolation).
   - Queries are shuffled and jittered.
   - `status` reports how many addresses were revealed to remote servers.
+- **PSBTs are built in-house** (`src/core/psbt.ts`): general-purpose libraries reject sighash
+  type 0x21. The ECX PSBTs are tested against `@scure/btc-signer`, which signs them as a stock
+  signer would; the signed transaction keeps the replay marker and the predicted txid.
 - **No fetch().** HTTP goes over connections the tool opens itself, so `HTTP(S)_PROXY` environment
   variables can't silently reroute traffic.
 - **The Esplora trap.** `/tx/{txid}/outspend/{n}` reports "unspent" even for transactions that don't

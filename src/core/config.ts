@@ -30,6 +30,8 @@ export interface BackendConfig {
   priority: number;
   label?: string;
   auth?: RpcAuth;
+  /** PEM file to trust for this backend's TLS (pin a self-signed Electrum/Esplora server). */
+  caFile?: string;
   origin: "profile-default" | "user";
 }
 
@@ -119,6 +121,7 @@ function parseBackend(raw: unknown, where: string): BackendConfig {
     "cookie_file",
     "user",
     "password_env",
+    "ca_file",
   ]);
   for (const key of Object.keys(b)) {
     if (key === "password") {
@@ -141,6 +144,15 @@ function parseBackend(raw: unknown, where: string): BackendConfig {
   if (b.cookie_file !== undefined) auth.cookieFile = String(b.cookie_file);
   if (b.user !== undefined) auth.user = String(b.user);
   if (b.password_env !== undefined) auth.passwordEnv = String(b.password_env);
+  if (b.ca_file !== undefined && typeof b.ca_file !== "string") {
+    throw new ConfigError(`${where}.ca_file must be a path`);
+  }
+  if (kind === "electrum" && !/^(ssl|tcp):\/\//u.test(String(b.url))) {
+    throw new ConfigError(`${where}: Electrum URLs look like ssl://host:50002 or tcp://host:50001`);
+  }
+  if (kind !== "electrum" && /^(ssl|tcp):\/\//u.test(String(b.url))) {
+    throw new ConfigError(`${where}: ssl:// and tcp:// URLs are for kind = "electrum"`);
+  }
   if (kind !== "rpc" && Object.keys(auth).length > 0) {
     throw new ConfigError(`${where}: auth settings only apply to kind = "rpc"`);
   }
@@ -152,6 +164,7 @@ function parseBackend(raw: unknown, where: string): BackendConfig {
     priority: intIn(b.priority, `${where}.priority`, 0, 1000, 0),
     label: typeof b.label === "string" ? b.label : undefined,
     auth: Object.keys(auth).length ? auth : undefined,
+    caFile: typeof b.ca_file === "string" ? b.ca_file : undefined,
     origin: "user",
   };
 }
@@ -382,5 +395,6 @@ export function backendToToml(b: BackendConfig): Record<string, unknown> {
   if (b.auth?.cookieFile) out.cookie_file = b.auth.cookieFile;
   if (b.auth?.user) out.user = b.auth.user;
   if (b.auth?.passwordEnv) out.password_env = b.auth.passwordEnv;
+  if (b.caFile) out.ca_file = b.caFile;
   return out;
 }

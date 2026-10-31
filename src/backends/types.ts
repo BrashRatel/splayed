@@ -43,6 +43,11 @@ export interface ChainBackend {
   /** Extra identity problems specific to this backend type (empty = fine). */
   identityProblems(): Promise<string[]>;
   observeOutput(txid: string, vout: number): Promise<OutputObservation>;
+  /** Raw transaction hex, verified to hash to `txid` before it is returned. */
+  rawTransaction(txid: string): Promise<string>;
+  /** Fee rate estimate in sat/vB, or undefined when the backend has none. */
+  feeRate?(targetBlocks: number): Promise<number | undefined>;
+  close?(): Promise<void>;
   /** Address-based discovery (Esplora/Electrum). */
   addressTxCount?(address: string, scriptPubKey: string): Promise<number>;
   addressUtxos?(address: string, scriptPubKey: string): Promise<FoundUtxo[]>;

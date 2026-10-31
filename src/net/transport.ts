@@ -1,6 +1,6 @@
 import { classifyHost, type HostClass, isValidOnionV3 } from "./hosts.ts";
 import { http1Exchange, type RawResponse } from "./http1.ts";
-import { socks5Handshake, SocksError } from "./socks5.ts";
+import { socks5Handshake } from "./socks5.ts";
 
 export type ProxySetting =
   | { kind: "tor" }
@@ -62,8 +62,13 @@ export function resolveRoute(
   } catch {
     throw new PolicyError(`Invalid URL: ${rawUrl}`);
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new PolicyError("Backend URLs must use http:// or https://");
+  if (!["http:", "https:", "ssl:", "tcp:"].includes(url.protocol)) {
+    throw new PolicyError(
+      "Backend URLs must use http:// or https:// (Esplora, RPC) or ssl:// or tcp:// (Electrum)",
+    );
+  }
+  if ((url.protocol === "ssl:" || url.protocol === "tcp:") && (!url.port || url.pathname)) {
+    throw new PolicyError("Electrum URLs look like ssl://host:50002 or tcp://host:50001");
   }
   if (url.username || url.password) {
     throw new PolicyError("Put credentials in the backend's auth settings, not in the URL");
@@ -93,10 +98,10 @@ export function resolveRoute(
     };
   }
   // Public host.
-  if (url.protocol !== "https:") {
+  if (!isEncryptedScheme(url.protocol)) {
     throw new PolicyError(
-      "Public backends must use https:// (plain http is allowed only for " +
-        "localhost, your local network, or .onion addresses)",
+      "Public backends must use https:// or ssl:// (plain http:// and tcp:// are allowed only " +
+        "for localhost, your local network, or .onion addresses)",
     );
   }
   if (proxy.kind === "tor") {
@@ -158,15 +163,80 @@ export const SESSION_ID: string = Array.from(
   (b) => b.toString(16).padStart(2, "0"),
 ).join("");
 
+export function isEncryptedScheme(protocol: string): boolean {
+  return protocol === "https:" || protocol === "ssl:";
+}
+
+export interface StreamTarget {
+  hostname: string;
+  port: number;
+  tls: boolean;
+  /** PEM certificates to trust instead of the system store (pinning self-signed servers). */
+  caCerts?: string[];
+  isolation: string;
+}
+
+/**
+ * Opens a byte stream along a route: SOCKS5 (Tor) with remote DNS and isolation credentials,
+ * or a direct TCP connection. TLS is layered on top when requested. This is the only function
+ * in the tool that opens network connections.
+ */
+export async function openStream(
+  route: Route,
+  target: StreamTarget,
+  sessionId: string = SESSION_ID,
+): Promise<Deno.Conn> {
+  const tlsOptions = { hostname: target.hostname, caCerts: target.caCerts };
+  if (route.via === "socks") {
+    const socks = route.socks;
+    let conn: Deno.Conn;
+    try {
+      conn = await Deno.connect({ hostname: socks.host, port: socks.port });
+    } catch (error) {
+      throw new TorUnavailableError(socks, error);
+    }
+    try {
+      await socks5Handshake(conn, {
+        proxyHost: socks.host,
+        proxyPort: socks.port,
+        destHost: target.hostname,
+        destPort: target.port,
+        username: `forksplit:${target.isolation}:${sessionId}`,
+        password: sessionId,
+      });
+      return target.tls ? await Deno.startTls(conn as Deno.TcpConn, tlsOptions) : conn;
+    } catch (error) {
+      try {
+        conn.close();
+      } catch { /* closed */ }
+      throw error;
+    }
+  }
+  return target.tls
+    ? await Deno.connectTls({ ...tlsOptions, port: target.port })
+    : await Deno.connect({ hostname: target.hostname, port: target.port });
+}
+
+export function urlTarget(rawUrl: string): { hostname: string; port: number; tls: boolean } {
+  const url = new URL(rawUrl);
+  const tls = isEncryptedScheme(url.protocol);
+  const defaultPort = url.protocol === "https:" ? 443 : url.protocol === "http:" ? 80 : NaN;
+  const port = url.port ? Number(url.port) : defaultPort;
+  if (!Number.isInteger(port)) throw new PolicyError(`No port in ${rawUrl}`);
+  return { hostname: url.hostname.replace(/^\[|\]$/gu, ""), port, tls };
+}
+
 export class RoutedTransport implements Transport {
-  constructor(readonly route: Route, private readonly sessionId: string = SESSION_ID) {}
+  constructor(
+    readonly route: Route,
+    private readonly sessionId: string = SESSION_ID,
+    private readonly caCerts?: string[],
+  ) {}
 
   async request(spec: RequestSpec): Promise<HttpResponse> {
     const url = new URL(spec.url);
-    const https = url.protocol === "https:";
-    const defaultPort = https ? 443 : 80;
-    const port = url.port ? Number(url.port) : defaultPort;
-    const hostname = url.hostname.replace(/^\[|\]$/gu, "");
+    const { hostname, port, tls } = urlTarget(spec.url);
+    const defaultPort = tls ? 443 : 80;
     const timeoutMs = spec.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const body = typeof spec.body === "string" ? new TextEncoder().encode(spec.body) : spec.body;
 
@@ -179,27 +249,13 @@ export class RoutedTransport implements Transport {
       } catch { /* already closed */ }
     }, timeoutMs);
     try {
-      if (this.route.via === "socks") {
-        const socks = this.route.socks;
-        try {
-          conn = await Deno.connect({ hostname: socks.host, port: socks.port });
-        } catch (error) {
-          throw new TorUnavailableError(socks, error);
-        }
-        await socks5Handshake(conn, {
-          proxyHost: socks.host,
-          proxyPort: socks.port,
-          destHost: hostname,
-          destPort: port,
-          username: `forksplit:${spec.isolation}:${this.sessionId}`,
-          password: this.sessionId,
-        });
-        if (https) conn = await Deno.startTls(conn as Deno.TcpConn, { hostname });
-      } else {
-        conn = https
-          ? await Deno.connectTls({ hostname, port })
-          : await Deno.connect({ hostname, port });
-      }
+      conn = await openStream(this.route, {
+        hostname,
+        port,
+        tls,
+        caCerts: this.caCerts,
+        isolation: spec.isolation,
+      }, this.sessionId);
       const raw = await http1Exchange(conn, {
         method: spec.method ?? "GET",
         host: hostname,
@@ -212,7 +268,6 @@ export class RoutedTransport implements Transport {
       return wrap(raw);
     } catch (error) {
       if (timedOut) throw new TimeoutError(spec.url, timeoutMs);
-      if (error instanceof SocksError || error instanceof TorUnavailableError) throw error;
       throw error;
     } finally {
       clearTimeout(timer);
