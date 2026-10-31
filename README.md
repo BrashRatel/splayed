@@ -460,10 +460,11 @@ deno task regtest ui                          # open the printed URL
 7. **`mine`** to confirm what you broadcast (`deno task regtest mine all 1`). `reorg ecx 2` undoes
    two ECX blocks so you can see what `track` reports.
 
-The node RPC ports bind to `127.0.0.1` by default. To reach them or the UI from another machine, use
-an SSH tunnel with the same port numbers (`ssh -L 18080:127.0.0.1:18080 host`), or pass
-`up --bind 0.0.0.0` on a network you trust: the RPC password (`regtest`) is public. The UI listens
-on `127.0.0.1:18080` only, and accepts `localhost:18080` too, so a tunnel works.
+The node RPC ports bind to `0.0.0.0` by default, so a wallet on another machine on your LAN can
+connect to `<this-host>:18443` (BTC), `18543` (XBT) and `18643` (ECX). The RPC password (`regtest`)
+is public: use a network you trust, or pass `up --bind 127.0.0.1` to keep the ports on this machine.
+The UI always listens on `127.0.0.1:18080` only (it holds the session token). From another machine,
+tunnel it with `ssh -L 18080:127.0.0.1:18080 host` and open `localhost:18080`.
 
 `stop` pauses the nodes, `up` resumes them with the same chains, and `down` deletes everything
 (containers, volumes and the playground's forksplit data under `.data/regtest/`).

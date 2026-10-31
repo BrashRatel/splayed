@@ -114,7 +114,7 @@ async function up(flags: Record<string, string>) {
     console.log("The environment was already set up; its nodes are running again.\n");
     return await status();
   }
-  const bind = flags.bind ?? "127.0.0.1";
+  const bind = flags.bind ?? "0.0.0.0";
   const ports: Record<ChainId, number> = {
     btc: Number(flags["btc-port"] ?? DEFAULT_PORTS.btc),
     xbt: Number(flags["xbt-port"] ?? DEFAULT_PORTS.xbt),
@@ -127,8 +127,9 @@ async function up(flags: Record<string, string>) {
   }
   if (bind !== "127.0.0.1") {
     console.log(
-      `WARNING: the node RPC ports will listen on ${bind} with the PUBLIC password ` +
-        `"${RPC_PASSWORD}". Only do this on a network you trust.\n`,
+      `WARNING: the node RPC ports listen on ${bind} with the PUBLIC password ` +
+        `"${RPC_PASSWORD}", so anyone on your network can use them. Use a network you trust, ` +
+        `or pass --bind 127.0.0.1 to keep them on this machine.\n`,
     );
   }
   console.log("Building the node images (the first build compiles eCash, about 5 minutes)...");
@@ -269,10 +270,11 @@ async function status() {
       console.log(`${labels[c]}  port ${s.ports[c]}  NOT RESPONDING: ${(error as Error).message}`);
     }
   }
+  const host = s.bind === "127.0.0.1" ? "127.0.0.1" : "<this machine's LAN address>";
   console.log(`
 Wallet setup (RPC user "${RPC_USER}", password "${RPC_PASSWORD}", network regtest):
-  Sparrow (BTC):          Server -> Bitcoin Core, host 127.0.0.1, port ${s.ports.btc}
-  Sparrow BLAKE2b (XBT):  Server -> Bitcoin Core, host 127.0.0.1, port ${s.ports.xbt}
+  Sparrow (BTC):          Server -> Bitcoin Core, host ${host}, port ${s.ports.btc}
+  Sparrow BLAKE2b (XBT):  Server -> Bitcoin Core, host ${host}, port ${s.ports.xbt}
   Shrike (XBT, 0x21):     point it at port ${s.ports.xbt}; ECX transactions sign with any wallet
   ECX node:               port ${s.ports.ecx}
   Your wallet and forksplit need the SAME coins: use \`fund\` with the wallet's descriptor.
@@ -400,7 +402,7 @@ async function down() {
 
 const HELP = `deno task regtest <command>
 
-  up [--bind ADDR] [--btc-port N --xbt-port N --ecx-port N]
+  up [--bind ADDR (default 0.0.0.0: reachable from the LAN)] [--btc-port N --xbt-port N --ecx-port N]
   fund <descriptor|address> [--coins N] [--btc AMOUNT]   (before fork)
   fork
   ui [--port N]
