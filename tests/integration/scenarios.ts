@@ -262,7 +262,7 @@ export async function donorScenario(
   const allKeys = new Map([...source.keys, ...donorWallet.keys]);
 
   await t.step("mine XBT-only coinbase donors, then let them mature", async () => {
-    for (const i of [0, 1]) await h.nodes.xbt.mine(1, await addrOf(i));
+    for (const i of [0, 1, 2]) await h.nodes.xbt.mine(1, await addrOf(i));
     await h.nodes.xbt.mine(100, await h.minerAddr("xbt"));
     assertEquals(await run("init", "--yes"), 0, text());
     for (const d of source.descriptors) assertEquals(await run("import", d), 0, text());
@@ -274,7 +274,7 @@ export async function donorScenario(
   await t.step("donor scan: coinbase donors are usable, the shared decoy is refused", async () => {
     assertEquals(await run("donor", "import", donorWallet.descriptors[0]), 0, text());
     assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
-    assert(text().includes("2 usable donor(s)"), text());
+    assert(text().includes("3 usable donor(s)"), text());
     assert(text().includes("exists on BTC"), text());
     assert(text().includes("coinbase"), text());
     assertEquals(await run("donor", "show"), 0, text());
@@ -290,7 +290,7 @@ export async function donorScenario(
   await t.step(
     "plan: without a signer or donor XBT is refused; a bad donor is refused",
     async () => {
-      assertEquals(good.length, 2);
+      assertEquals(good.length, 3);
       assertEquals(await run("plan", "--chains", "xbt", "--fee-rate", "xbt=2", "--yes"), 1, text());
       assert(text().includes("--donor"), text());
       assertEquals(
@@ -380,6 +380,81 @@ export async function donorScenario(
       }
     }
     assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
-    assert(text().includes("0 usable donor(s)"), text());
+    assert(text().includes("1 usable donor(s)"), text());
+  });
+
+  await t.step(
+    "fan-out refuses a donor that is not usable or an output count that is silly",
+    async () => {
+      assertEquals(
+        await run(
+          "donor",
+          "fanout",
+          "--donor",
+          `${decoy.txid}:${decoy.vout}`,
+          "--outputs",
+          "3",
+          "--fee-rate",
+          "xbt=2",
+          "--yes",
+        ),
+        1,
+        text(),
+      );
+      assert(text().includes("can't be used"), text());
+      assertEquals(
+        await run("donor", "fanout", "--donor", good[2], "--outputs", "1", "--yes"),
+        1,
+        text(),
+      );
+    },
+  );
+
+  let fanId = "";
+  await t.step("fan-out: one donor becomes three, signed with plain SIGHASH_ALL", async () => {
+    const before = await planIds(cli.dir);
+    assertEquals(
+      await run(
+        "donor",
+        "fanout",
+        "--donor",
+        good[2],
+        "--outputs",
+        "3",
+        "--value",
+        "1000000",
+        "--fee-rate",
+        "xbt=2",
+        "--yes",
+      ),
+      0,
+      text(),
+    );
+    fanId = (await planIds(cli.dir)).find((id) => !before.includes(id))!;
+    const { dir, plan } = await readPlan(cli.dir, fanId);
+    assertEquals(plan.route, "donor-fanout");
+    const [tx] = plan.transactions;
+    assertEquals(tx.inputs.length, 1);
+    assertEquals(tx.outputs!.length, 4); // three of 1,000,000 sats and the change
+    assertEquals(tx.sighashType, undefined);
+    const signed = stockSign(await Deno.readTextFile(join(dir, tx.file)), donorWallet.keys);
+    await Deno.writeTextFile(join(dir, tx.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+    assertEquals(await run("verify", fanId), 0, text());
+    assert(text().includes("BTC node: rejected (good)"), text());
+    assert(text().includes("ECX node: rejected (good)"), text());
+  });
+
+  await t.step("after the fan-out confirms, its outputs are usable donors", async () => {
+    assertEquals(await run("broadcast", fanId, "--yes"), 0, text());
+    await h.nodes.xbt.mine(2, await h.minerAddr("xbt"));
+    assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
+    // All three coinbase donors are spent now; the four new outputs are what is left.
+    assert(text().includes("4 usable donor(s)"), text());
+    assert(text().includes("protected-spend"), text());
+    // The fan-out outputs are fresh addresses of the donor wallet, past the ones already used.
+    const after = JSON.parse(await Deno.readTextFile(join(cli.dir, "watch-only.json"))) as {
+      donors: { nextIndex?: number }[];
+    };
+    assert((after.donors[0].nextIndex ?? 0) >= 10, JSON.stringify(after.donors)); // past the decoy at 5
   });
 }

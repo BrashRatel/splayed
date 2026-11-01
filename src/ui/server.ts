@@ -13,6 +13,7 @@ import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
+import { loadDonorScan } from "../core/donors.ts";
 import { loadScan } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { ensureDir } from "../core/store.ts";
@@ -240,6 +241,8 @@ async function plansView(dataDir: string) {
           fee: t.fee,
           feeRate: t.feeRate,
           output: t.output,
+          outputs: t.outputs?.length,
+          donor: t.donor,
           signedUpload: uploads.get(t.file),
           progress: {
             verified: progress.txs[t.file]?.verified
@@ -340,6 +343,17 @@ export function startUi(
       }
       if (req.method === "GET" && path === "/api/status") {
         return json(await statusView(options.dataDir, env));
+      }
+      if (req.method === "GET" && path === "/api/donors") {
+        const wallet = await loadWallet(options.dataDir);
+        return json({
+          descriptors: (wallet.donors ?? []).map((d) => ({
+            descriptor: d.descriptor,
+            label: d.label,
+            nextIndex: d.nextIndex ?? 0,
+          })),
+          scan: (await loadDonorScan(options.dataDir)) ?? null,
+        });
       }
       if (req.method === "GET" && path === "/api/plans") {
         return json(await plansView(options.dataDir));

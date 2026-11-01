@@ -308,11 +308,20 @@ Rules the tool enforces:
 - `verify` still asks your nodes: the XBT node must accept and BTC and ECX must reject. `broadcast`
   checks again that the donor is absent from BTC and ECX, and refuses if it can't ask.
 
+**Fan-out.** Donors are usually big (a coinbase is 50 BTC on regtest), and each XBT transaction uses
+one. `donor fanout --donor txid:vout --outputs 5 [--value SATS]` splits a donor into smaller donors
+paid back to the donor wallet, one transaction per donor so donors stay unlinked (`--value` sets the
+size of each new donor and returns the rest as change; without it the donor is split evenly). Sign
+it with the donor wallet using plain `SIGHASH_ALL`, verify and broadcast it like any plan, and scan
+again: its outputs are donors too, because the fan-out spends nothing but an XBT-only donor.
+
+**Web UI.** Switch on **Advanced** in the tab bar to get a Donors tab: import the donor wallet, scan
+it, tick one or more donors, then fan them out or plan the splits with them.
+
 The donor's value goes to your XBT destination with the rest. Every donor transaction publicly links
-the donor wallet to the coins it spends on XBT. Not done yet: making several small donors from one
-big one (fan-out), the BTC-first route, and checking a foreign funding transaction instead of
-refusing it. In the regtest playground, `deno task regtest donors '<descriptor>'` mines XBT-only
-donors for a wallet.
+the donor wallet to the coins it spends on XBT. Not done yet: the BTC-first route, and checking a
+foreign funding transaction instead of refusing it. In the regtest playground,
+`deno task regtest donors '<descriptor>'` mines XBT-only donors for a wallet.
 
 ### Reorgs
 

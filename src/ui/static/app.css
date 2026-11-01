@@ -358,6 +358,18 @@ details summary {
 .w90 {
   width: 90px;
 }
+.w60 {
+  width: 60px;
+}
+
+.w120 {
+  width: 120px;
+}
+
+#advanced-toggle {
+  margin-left: auto;
+}
+
 .w160 {
   width: 160px;
 }
@@ -399,6 +411,14 @@ input[type="file"]::file-selector-button {
 
 .flash.show {
   opacity: 1;
+}
+
+.hidden {
+  display: none;
+}
+
+.grow {
+  flex: 1 1 320px;
 }
 
 .alert {

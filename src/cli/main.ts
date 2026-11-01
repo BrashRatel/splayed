@@ -28,6 +28,7 @@ import {
   protectedXbtTxids,
   saveDonorScan,
 } from "../core/donors.ts";
+import { buildFanout, donorDescriptors } from "../core/fanout.ts";
 import { loadScan, runScan, saveScan, scanRegressions } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { defaultDataDir, ensureDir } from "../core/store.ts";
@@ -119,6 +120,9 @@ Splitting (guided route: forks first, BTC untouched):
                                   XBT signers: ${Object.keys(XBT_SIGNERS).join(", ")}
   donor import <descriptor> [--label L] | donor list | donor forget <number>
   donor scan [--rpc-range N] | donor show
+  donor fanout --donor txid:vout ... --outputs N [--value SATS] [--fee-rate xbt=N] [--yes]
+                                  Split each chosen donor into N smaller donors of your donor
+                                  wallet (one transaction per donor, so donors stay unlinked)
                                   Advanced XBT donor route (opt-in): a donor wallet of coins that
                                   exist on XBT only lets a stock hardware wallet make the XBT
                                   split with plain SIGHASH_ALL signatures. Donors are checked
@@ -207,6 +211,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         "start-index": { type: "string" },
         "xbt-signer": { type: "string" },
         donor: { type: "string", multiple: true },
+        outputs: { type: "string" },
+        value: { type: "string" },
         chains: { type: "string" },
         batch: { type: "string" },
         "fee-rate": { type: "string" },
@@ -271,7 +277,13 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
           yes: flags.yes === true,
         });
       case "donor":
-        return await cmdDonor(config, io, args, flags.label, flags["rpc-range"]);
+        return await cmdDonor(config, io, args, flags.label, flags["rpc-range"], {
+          donors: flags.donor as string[] | undefined,
+          outputs: flags.outputs,
+          value: flags.value,
+          feeRate: flags["fee-rate"],
+          yes: flags.yes === true,
+        });
       case "plans":
         return await cmdPlans(config, io);
       case "verify":
@@ -966,12 +978,16 @@ async function cmdDonor(
   args: string[],
   label: string | undefined,
   rpcRangeFlag: string | undefined,
+  fan: { donors?: string[]; outputs?: string; value?: string; feeRate?: string; yes: boolean } = {
+    yes: false,
+  },
 ) {
   const [action, arg] = args;
   const network = networkForProfile(config.profile);
   const wallet = await loadWallet(config.dataDir);
   const donors = wallet.donors ?? [];
-  const usage = "donor import <descriptor> | list | forget <number> | scan | show";
+  const usage =
+    "donor import <descriptor> | list | forget <number> | scan | show | fanout --donor txid:vout --outputs N";
   switch (action) {
     case "import": {
       await requireNetworkConfirmed(config);
@@ -1040,6 +1056,79 @@ async function cmdDonor(
         for (const b of Object.values(backends)) await b?.close?.();
       }
       return await cmdDonor(config, io, ["show"], undefined, undefined);
+    }
+    case "fanout": {
+      await requireNetworkConfirmed(config);
+      if (!fan.donors?.length || !fan.outputs) {
+        throw new UsageError(
+          "donor fanout --donor txid:vout [--donor ...] --outputs N [--value SATS]",
+        );
+      }
+      const scan = await loadDonorScan(config.dataDir);
+      if (!scan) throw new UsageError("Run `forksplit donor scan` first");
+      const outputCount = Number(fan.outputs);
+      if (!Number.isSafeInteger(outputCount) || outputCount < 2 || outputCount > 100) {
+        throw new PlanError("--outputs must be a whole number from 2 to 100");
+      }
+      const { backend, results } = await verifiedBackendsFor(config, "xbt", io, true);
+      if (!backend) {
+        throw new PlanError(`XBT: no backend passed: ${results.map((r) => r.detail).join("; ")}`);
+      }
+      try {
+        let feeRate = parseFeeRates(fan.feeRate).xbt;
+        if (feeRate === undefined) {
+          feeRate = await backend.feeRate?.(6).catch(() => undefined);
+          if (feeRate === undefined) {
+            throw new PlanError("No fee estimate from the XBT backend; pass --fee-rate xbt=N");
+          }
+          feeRate = Math.max(1, Math.ceil(feeRate * 100) / 100);
+        }
+        const value = fan.value === undefined ? undefined : Number(fan.value);
+        if (value !== undefined && !(Number.isSafeInteger(value) && value > 0)) {
+          throw new UsageError("--value is a whole number of sats");
+        }
+        const { plan, nextIndex } = await buildFanout(config, wallet, {
+          donors: fan.donors,
+          outputs: Number(fan.outputs),
+          value,
+          feeRate,
+        }, {
+          xbt: backend,
+          donors: { coins: scan.coins, descriptors: donorDescriptors(wallet, config) },
+        });
+        for (const w of plan.warnings) io.err(`Warning: ${w}`);
+        const rows = [["#", "Donor", "Value in", "New donors", "Fee", "sat/vB"]];
+        for (const tx of plan.transactions) {
+          rows.push([
+            String(tx.order),
+            shortOutpoint(tx.inputs[0].txid, tx.inputs[0].vout),
+            sats(tx.inputs[0].value),
+            `${tx.outputs!.length} × ${tx.outputs!.map((o) => o.value).join(", ")}`,
+            String(tx.fee),
+            String(tx.feeRate),
+          ]);
+        }
+        io.out(table(rows));
+        if (!fan.yes && !(await io.confirm("Write these fan-out PSBTs?"))) {
+          io.out("Nothing written.");
+          return 1;
+        }
+        const dir = await writePlan(config.dataDir, plan);
+        const fresh = await loadWallet(config.dataDir);
+        for (const [di, next] of nextIndex) {
+          const d = fresh.donors?.[di];
+          if (d && next > (d.nextIndex ?? 0)) d.nextIndex = next;
+        }
+        await saveWallet(config.dataDir, fresh);
+        io.out(`\nWrote ${plan.transactions.length} PSBT(s) to ${dir}`);
+        io.out(
+          "Sign with the donor wallet (plain SIGHASH_ALL), then verify and broadcast this plan. " +
+            "Once it is broadcast, run `donor scan` to see the new donors.",
+        );
+        return 0;
+      } finally {
+        await backend.close?.();
+      }
     }
     case "show": {
       const scan = await loadDonorScan(config.dataDir);

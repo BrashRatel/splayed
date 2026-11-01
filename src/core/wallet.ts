@@ -10,6 +10,8 @@ import { readJson, writeJsonAtomic } from "./store.ts";
 export const WALLET_FILE = "watch-only.json";
 
 export interface StoredDescriptor {
+  /** Donor wallets only: the next receive index not yet handed out by a fan-out. */
+  nextIndex?: number;
   descriptor: string;
   label?: string;
   addedAt: string;

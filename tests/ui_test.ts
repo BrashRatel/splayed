@@ -194,6 +194,15 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     // The plans view reports that the signed file arrived, before anything is verified.
     const seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
     assert(seen.signedUpload?.name.includes(".signed."), JSON.stringify(seen.signedUpload));
+    // The donor view starts empty, and a donor wallet imported from the UI shows up in it.
+    assertEquals(await (await api("/api/donors")).json(), { descriptors: [], scan: null });
+    // The main wallet's own descriptor is refused as a donor wallet.
+    const same = await runJob(["donor", "import", SRC_DESC]);
+    assertEquals(same.exitCode, 2, same.text);
+    const donorJob = await runJob(["donor", "import", ECX_DEST]);
+    assertEquals(donorJob.exitCode, 0, donorJob.text);
+    const donorView = await (await api("/api/donors")).json();
+    assertEquals(donorView.descriptors.length, 1);
     // The mining endpoints exist only in test environments.
     assertEquals(await (await api("/api/dev")).json(), { enabled: false });
     const noDev = await api("/api/dev/mine", {

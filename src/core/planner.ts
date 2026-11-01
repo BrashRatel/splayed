@@ -169,6 +169,8 @@ export interface PlannedTx {
   unsignedTxid: string;
   inputs: PlannedInput[];
   output: { address: string; value: number; destinationIndex: number };
+  /** Donor fan-out: every output (`output` is the first). Absent on ordinary one-output splits. */
+  outputs?: { address: string; value: number; destinationIndex: number }[];
   fee: number;
   feeRate: number;
   vsize: number;
@@ -190,7 +192,7 @@ export interface Plan {
   id: string;
   createdAt: string;
   profile: string;
-  route: "forks-first-0x21" | "forks-first-donor";
+  route: "forks-first-0x21" | "forks-first-donor" | "donor-fanout";
   xbtSigner?: string;
   scanAt: string;
   batch: BatchPolicy;
@@ -207,7 +209,7 @@ export interface PlanDeps {
   log?: (message: string) => void;
 }
 
-interface Candidate {
+export interface Candidate {
   coin: CoinRecord;
   derived: DerivedOutput;
   descriptor: ParsedDescriptor;
@@ -603,7 +605,7 @@ export async function buildPlan(
   };
 }
 
-function inputMap(c: Candidate, unified: boolean): KeyValue[] {
+export function inputMap(c: Candidate, unified: boolean): KeyValue[] {
   const map: KeyValue[] = [];
   const d = c.derived;
   const script = fromHex(c.coin.scriptPubKey);
@@ -630,7 +632,7 @@ function inputMap(c: Candidate, unified: boolean): KeyValue[] {
   return map;
 }
 
-function outputMap(d: DerivedOutput): KeyValue[] {
+export function outputMap(d: DerivedOutput): KeyValue[] {
   const map: KeyValue[] = [];
   if (d.redeemScript) map.push(kv(OUT_REDEEM_SCRIPT, new Uint8Array(), d.redeemScript));
   if (d.witnessScript) map.push(kv(OUT_WITNESS_SCRIPT, new Uint8Array(), d.witnessScript));
@@ -658,7 +660,12 @@ ecx/  ECX splits. nLockTime = 499999998 and nSequence = 0xfffffffd on every inpu
       Any signer can sign them. Your signer must keep those fields: check the signed transaction
       still shows locktime 499999998 before it goes anywhere.
 ${
-    plan.transactions.some((t) => t.donor)
+    plan.route === "donor-fanout"
+      ? `xbt/  DONOR FAN-OUT. Each transaction spends one XBT-only donor and pays several smaller donors
+      back to your donor wallet. Sign with the donor wallet using plain SIGHASH_ALL (not 0x21).
+      Check that every output address is one of your donor wallet's own.
+`
+      : plan.transactions.some((t) => t.donor)
       ? `xbt/  XBT splits, DONOR ROUTE. Each one also spends an XBT-only donor input, which BTC and ECX
       don't have, so these transactions can't be replayed there. Sign them with any wallet,
       hardware wallets included, using plain SIGHASH_ALL (not 0x21). The signer must sign the

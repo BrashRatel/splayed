@@ -29,7 +29,35 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
   } catch { /* not persisted */ }
 });
 
-const state = { tab: "network", overview: null, status: null, plans: null, job: null, after: 0 };
+const state = {
+  tab: "network",
+  overview: null,
+  status: null,
+  plans: null,
+  donors: null,
+  donorSel: new Set(),
+  job: null,
+  after: 0,
+};
+
+// Advanced routes (the donor wallet) are hidden until switched on; remembered in this browser only.
+let advanced = false;
+try {
+  advanced = localStorage.getItem("forksplit-advanced") === "on";
+} catch { /* storage unavailable: stay off */ }
+function applyAdvanced() {
+  document.getElementById("donors-tab").classList.toggle("hidden", !advanced);
+  document.getElementById("advanced-toggle").textContent = `Advanced: ${advanced ? "on" : "off"}`;
+  if (!advanced && state.tab === "donors") selectTab("plans");
+}
+document.getElementById("advanced-toggle").addEventListener("click", () => {
+  advanced = !advanced;
+  try {
+    localStorage.setItem("forksplit-advanced", advanced ? "on" : "off");
+  } catch { /* not persisted */ }
+  applyAdvanced();
+  render();
+});
 
 // ---------- helpers ----------
 
@@ -157,13 +185,14 @@ function flash(text) {
 
 async function refresh() {
   try {
-    const [overview, status, plans, dev] = await Promise.all([
+    const [overview, status, plans, dev, donors] = await Promise.all([
       api("/api/overview"),
       api("/api/status"),
       api("/api/plans"),
       api("/api/dev"),
+      api("/api/donors"),
     ]);
-    Object.assign(state, { overview, status, plans, dev });
+    Object.assign(state, { overview, status, plans, dev, donors });
   } catch (e) {
     logLine(`Couldn't load data: ${e.message}`, "err");
   }
@@ -758,6 +787,190 @@ function devCard() {
   );
 }
 
+function viewDonors() {
+  const d = state.donors ?? { descriptors: [], scan: null };
+  const desc = h("input", { placeholder: "donor wallet descriptor", class: "grow" });
+  const label = h("input", { placeholder: "label (optional)", class: "w160" });
+  const importIt = () => {
+    if (!desc.value.trim()) return alert("Paste the donor wallet descriptor first.");
+    const args = ["donor", "import", desc.value.trim()];
+    if (label.value.trim()) args.push("--label", label.value.trim());
+    run(args);
+  };
+  const coins = d.scan?.coins ?? [];
+  const selected = [...state.donorSel].filter((k) =>
+    coins.some((c) => `${c.txid}:${c.vout}` === k && c.eligible)
+  );
+  const rows = coins.map((c) => {
+    const key = `${c.txid}:${c.vout}`;
+    const box = h("input", {
+      type: "checkbox",
+      disabled: !c.eligible,
+      onchange: (e) => {
+        if (e.target.checked) state.donorSel.add(key);
+        else state.donorSel.delete(key);
+        render();
+      },
+    });
+    box.checked = state.donorSel.has(key) && c.eligible;
+    return h(
+      "tr",
+      {},
+      h("td", {}, box),
+      h("td", { class: "mono" }, short(c.txid, c.vout)),
+      h("td", {}, btc(c.value)),
+      h("td", { class: "mono" }, c.address ?? ""),
+      h("td", {}, c.provenance),
+      h(
+        "td",
+        {},
+        c.eligible ? badge("usable", "verified") : badge("not usable", "rejected"),
+        c.eligible ? null : h("div", { class: "muted" }, c.reasons.join("; ")),
+      ),
+    );
+  });
+
+  const outputs = h("input", { value: "3", class: "w60" });
+  const each = h("input", { placeholder: "even split", class: "w120" });
+  const feeXbt = h("input", { placeholder: "auto", class: "w80" });
+  const fanout = () => {
+    const args = ["donor", "fanout", "--outputs", outputs.value.trim() || "3"];
+    for (const k of selected) args.push("--donor", k);
+    if (each.value.trim()) args.push("--value", each.value.trim());
+    if (feeXbt.value.trim()) args.push("--fee-rate", `xbt=${feeXbt.value.trim()}`);
+    run(args);
+  };
+  const batch = h(
+    "select",
+    {},
+    ...[["coin", "one coin per transaction (needs one donor each)"], [
+      "all",
+      "all coins in one transaction (one donor, links the coins)",
+    ]].map(([v, t]) => h("option", { value: v }, t)),
+  );
+  const alsoEcx = h("input", { type: "checkbox" });
+  alsoEcx.checked = true;
+  const feeXbt2 = h("input", { placeholder: "auto", class: "w80" });
+  const planWith = () => {
+    const args = ["plan", "--chains", alsoEcx.checked ? "ecx,xbt" : "xbt", "--batch", batch.value];
+    for (const k of selected) args.push("--donor", k);
+    if (feeXbt2.value.trim()) args.push("--fee-rate", `xbt=${feeXbt2.value.trim()}`);
+    run(args);
+  };
+
+  return [
+    h(
+      "div",
+      { class: "card" },
+      h("h2", {}, "Advanced: XBT donor route"),
+      h(
+        "p",
+        { class: "note" },
+        "A donor is a coin that exists on XBT only. An XBT split that also spends a donor can't be valid on BTC or ECX, so your shared coin can be signed with a plain SIGHASH_ALL signature (stock hardware wallets can do that) instead of 0x21.",
+      ),
+      h(
+        "p",
+        { class: "note" },
+        "A donor must be absent from BTC and ECX, and be an XBT coinbase or an output of a split this tool verified. Every donor you spend publicly links the donor wallet to the coins it is spent with on XBT, and its value ends up at your XBT destination.",
+      ),
+    ),
+    h(
+      "div",
+      { class: "card" },
+      h("h2", {}, "Donor wallet"),
+      ...d.descriptors.map((x, i) =>
+        h(
+          "div",
+          { class: "row" },
+          h(
+            "span",
+            { class: "mono" },
+            `${i + 1}. ${x.label ? `[${x.label}] ` : ""}${x.descriptor}`,
+          ),
+          h("span", { class: "muted" }, `next fan-out index ${x.nextIndex}`),
+          h("button", {
+            class: "small secondary",
+            onclick: () =>
+              confirm("Remove this donor wallet?") && run(["donor", "forget", String(i + 1)]),
+          }, "Remove"),
+        )
+      ),
+      d.descriptors.length ? null : h("p", { class: "muted" }, "No donor wallet imported yet."),
+      h(
+        "div",
+        { class: "row" },
+        desc,
+        label,
+        h("button", { onclick: importIt }, "Import donor wallet"),
+        d.descriptors.length
+          ? h("button", { onclick: () => run(["donor", "scan"]) }, "Scan donors")
+          : null,
+      ),
+    ),
+    h(
+      "div",
+      { class: "card" },
+      h("h2", {}, "Donor coins"),
+      d.scan
+        ? h("p", { class: "note" }, `Scanned ${d.scan.scannedAt}. Tick the donors to use.`)
+        : h("p", { class: "muted" }, "Not scanned yet."),
+      ...(d.scan?.warnings ?? []).map((w) => h("div", { class: "note" }, `⚠ ${w}`)),
+      coins.length
+        ? h(
+          "table",
+          {},
+          h(
+            "tr",
+            {},
+            ...["", "Donor", "Value", "Address", "Origin", "Status"].map((x) => h("th", {}, x)),
+          ),
+          ...rows,
+        )
+        : null,
+      h("p", { class: "note" }, `${selected.length} donor(s) selected.`),
+    ),
+    h(
+      "div",
+      { class: "card" },
+      h("h2", {}, "Fan out the selected donors"),
+      h(
+        "p",
+        { class: "note" },
+        "Splits each selected donor into smaller donors of your donor wallet, one transaction per donor so donors stay unlinked. Sign the result with the donor wallet (plain SIGHASH_ALL), then verify and broadcast it in Plans, and scan donors again.",
+      ),
+      h(
+        "div",
+        { class: "row" },
+        h("label", {}, "New donors each", outputs),
+        h("label", {}, "Sats per new donor", each),
+        h("label", {}, "XBT fee (sat/vB)", feeXbt),
+        h("button", {
+          disabled: !selected.length,
+          onclick: fanout,
+        }, "Create fan-out PSBT(s)…"),
+      ),
+    ),
+    h(
+      "div",
+      { class: "card" },
+      h("h2", {}, "Plan the splits with the selected donors"),
+      h(
+        "p",
+        { class: "note" },
+        "Replaces the XBT signer: no 0x21 needed. Each XBT transaction uses one selected donor, so pick as many as the batching needs. Your signer must sign the donor input too.",
+      ),
+      h(
+        "div",
+        { class: "row" },
+        h("label", {}, "Batching", batch),
+        h("label", {}, "XBT fee (sat/vB)", feeXbt2),
+        h("label", {}, alsoEcx, " also plan ECX"),
+        h("button", { disabled: !selected.length, onclick: planWith }, "Create plan with donors"),
+      ),
+    ),
+  ];
+}
+
 function viewPlans() {
   const o = state.overview;
   const signer = h(
@@ -846,7 +1059,16 @@ function viewPlans() {
           `${t.inputs} in · ${btc(t.value)}`,
           h("div", { class: "muted" }, `fee ${t.fee} @ ${t.feeRate}`),
         ),
-        h("td", { class: "mono" }, t.output.address),
+        h(
+          "td",
+          { class: "mono" },
+          t.outputs > 1
+            ? `${t.outputs} donor outputs, first: ${t.output.address}`
+            : t.output.address,
+          t.donor
+            ? h("div", {}, badge("donor", "test"), ` ${short(t.donor.txid, t.donor.vout)}`)
+            : null,
+        ),
         h(
           "td",
           {},
@@ -993,20 +1215,23 @@ function render() {
     wallet: viewWallet,
     coins: viewCoins,
     plans: viewPlans,
+    donors: viewDonors,
   }[state.tab]();
   view.append(...[content].flat());
   setBusy(!!(state.job && !state.job.done));
 }
 
-for (const b of document.querySelectorAll("#tabs button")) {
-  b.addEventListener("click", () => {
-    state.tab = b.dataset.tab;
-    for (const x of document.querySelectorAll("#tabs button")) {
-      x.classList.toggle("active", x === b);
-    }
-    render();
-  });
+function selectTab(tab) {
+  state.tab = tab;
+  for (const x of document.querySelectorAll("#tabs button[data-tab]")) {
+    x.classList.toggle("active", x.dataset.tab === tab);
+  }
+  render();
 }
+for (const b of document.querySelectorAll("#tabs button[data-tab]")) {
+  b.addEventListener("click", () => selectTab(b.dataset.tab));
+}
+applyAdvanced();
 
 setInterval(async () => {
   if (!state.overview || !token) return;

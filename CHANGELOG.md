@@ -7,6 +7,14 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Donor fan-out** (`donor fanout --donor txid:vout --outputs N [--value SATS]`): splits each
+  chosen donor into smaller donors of the donor wallet, one transaction per donor. The new donors
+  count as XBT-only once the fan-out is verified and broadcast. Plan transactions can now have
+  several outputs (`outputs`). Tested against real nodes.
+- **Web UI: Advanced toggle and Donors tab.** Import and scan the donor wallet, see each donor
+  coin's origin and why it is or isn't usable, tick donors, and fan them out or plan the XBT splits
+  with them. The plans view marks donor transactions and fan-outs.
+
 - **Advanced XBT donor route.** `donor import|list|forget|scan|show` manage a donor wallet, and
   `plan --donor txid:vout` builds XBT splits that spend one XBT-only donor next to the shared coins,
   so they can be signed with plain `SIGHASH_ALL` by a stock hardware wallet. A donor must be absent
