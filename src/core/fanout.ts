@@ -36,7 +36,9 @@ export interface FanoutOptions {
 }
 
 export interface FanoutDeps {
-  xbt: ChainBackend;
+  /** The chain the donors live on, and its backend. */
+  chain: "xbt" | "btc";
+  backend: ChainBackend;
   donors: { coins: DonorCoin[]; descriptors: ParsedDescriptor[] };
   log?: (message: string) => void;
 }
@@ -47,7 +49,8 @@ export async function buildFanout(
   options: FanoutOptions,
   deps: FanoutDeps,
 ): Promise<{ plan: Plan; nextIndex: Map<number, number> }> {
-  const { xbt } = deps;
+  const { chain, backend: xbt } = deps;
+  const H = chain.toUpperCase();
   if (!options.donors.length) throw new PlanError("Choose at least one donor to fan out");
   if (!Number.isSafeInteger(options.outputs) || options.outputs < 2 || options.outputs > 100) {
     throw new PlanError("--outputs must be a whole number from 2 to 100");
@@ -65,6 +68,11 @@ export async function buildFanout(
     seen.add(key);
     const coin = deps.donors.coins.find((c) => `${c.txid}:${c.vout}` === key);
     if (!coin) throw new PlanError(`Donor ${key} isn't in the donor scan (run \`donor scan\`)`);
+    if ((coin.home ?? "xbt") !== chain) {
+      throw new PlanError(
+        `Donor ${key} is a ${(coin.home ?? "xbt").toUpperCase()} donor, not ${H}`,
+      );
+    }
     if (!coin.eligible) {
       throw new PlanError(`Donor ${key} can't be used: ${coin.reasons.join("; ")}`);
     }
@@ -81,10 +89,10 @@ export async function buildFanout(
       throw new PlanError("The donor wallet descriptor must be ranged (end in /*)");
     }
 
-    // Live re-check on XBT, and the previous transaction for signers that need it.
+    // Live re-check on the donor's chain, and the previous transaction for signers that need it.
     const obs = await xbt.observeOutput(coin.txid, coin.vout);
     if (obs.state !== "unspent" || obs.createdHeight === undefined) {
-      throw new PlanError(`Donor ${key} is now ${obs.state} on XBT; re-run \`donor scan\``);
+      throw new PlanError(`Donor ${key} is now ${obs.state} on ${H}; re-run \`donor scan\``);
     }
     if (obs.value !== coin.value) throw new PlanError(`Donor ${key}: value changed`);
     const cand: Candidate = { coin, derived, descriptor };
@@ -118,7 +126,7 @@ export async function buildFanout(
     nextIndex.set(di, next);
 
     const scriptLen = fromHex(outs[0].out.scriptPubKey).length;
-    if (scriptLen > 34) {
+    if (chain === "xbt" && scriptLen > 34) {
       throw new PlanError(
         "XBT (RDTS) rejects output scripts over 34 bytes; use another donor type",
       );
@@ -181,10 +189,10 @@ export async function buildFanout(
       destinationIndex: outs[i].index,
     }));
     transactions.push({
-      chain: "xbt",
+      chain,
       order: n + 1,
       testFirst: false,
-      file: `xbt/${String(n + 1).padStart(3, "0")}-${unsignedTxid.slice(0, 8)}.psbt`,
+      file: `${chain}/${String(n + 1).padStart(3, "0")}-${unsignedTxid.slice(0, 8)}.psbt`,
       unsignedTxid,
       inputs: [{
         txid: coin.txid,
@@ -216,7 +224,7 @@ export async function buildFanout(
   }`;
   warnings.push(
     "Donor fan-out: each transaction spends one donor and pays the new donors to your donor " +
-      "wallet. The new donors count as XBT-only once the fan-out is verified and broadcast.",
+      `wallet. The new donors count as ${H}-only once the fan-out is verified and broadcast.`,
   );
   return {
     plan: {

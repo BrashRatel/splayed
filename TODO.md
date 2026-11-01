@@ -120,7 +120,9 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
     - [x] A donor screen in the web UI, behind an Advanced toggle (import, scan, select, fan out,
           plan). Rendered only against a stub DOM so far; not looked at in a real browser.
     - [ ] Try it with a real stock hardware wallet signing both the shared and the donor input.
-  - [ ] BTC-first with a BTC donor.
+  - [x] BTC-first with a BTC donor (`plan --btc-first`): BTC with a donor, ECX, then a plain XBT
+        split that `broadcast` holds back until BTC and ECX are deep. Tested against real nodes. Not
+        done: fee bump of BTC transactions, a real hardware wallet run.
   - [ ] A donor pool that tracks where each donor came from (coinbase / protected-spend / derived).
   - [ ] A fan-out transaction to make several donors.
   - [ ] An opt-in screen explaining the donor rules and the on-chain linkage they create.

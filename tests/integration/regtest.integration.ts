@@ -25,7 +25,7 @@ import {
 import { makeCli } from "./cli_harness.ts";
 import { CHAINS, copyBlocks, docker, publishedPort, waitReady } from "./cluster.ts";
 import { RegtestRpcTransport, Rpc } from "./rpc.ts";
-import { donorScenario, rbfScenario, reorgScenario } from "./scenarios.ts";
+import { btcFirstScenario, donorScenario, rbfScenario, reorgScenario } from "./scenarios.ts";
 import { ignoresUnifiedSign, keyMap, stockSign, unifiedSign } from "./signers.ts";
 
 const seed = (words: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(words));
@@ -36,6 +36,9 @@ const ECX_DEST = `wpkh([${fp(OTHER)}/84h/0h/0h]${
 }/0/*)`;
 const XBT_DEST = `wpkh([${fp(OTHER)}/84h/0h/1h]${
   OTHER.derive("m/84'/0'/1'").publicExtendedKey
+}/0/*)`;
+const BTC_DEST = `wpkh([${fp(OTHER)}/84h/0h/2h]${
+  OTHER.derive("m/84'/0'/2'").publicExtendedKey
 }/0/*)`;
 
 /** Deterministic, valid mnemonics so each wallet group gets its own coins. */
@@ -134,6 +137,8 @@ const REORG_WALLET = makeWallet("reorg", [PART.wpkh(words(61))]);
 // Donor route: shared coins to split, and a separate donor wallet (its keys sign the donor inputs).
 const DONOR_SOURCE = makeWallet("donor-source", [PART.wpkh(words(62))]);
 const DONOR_WALLET = makeWallet("donor-wallet", [PART.wpkh(words(70))]);
+const BTC_SOURCE = makeWallet("btc-first-source", [PART.wpkh(words(63))]);
+const BTC_DONOR_WALLET = makeWallet("btc-donor-wallet", [PART.wpkh(words(71))]);
 
 const WALLETS: WalletSpec[] = [
   makeWallet("pkh", [PART.pkh()]),
@@ -179,7 +184,7 @@ Deno.test({
       // One funding transaction for every coin: a chain of single sends would trip the node's
       // ancestor limit, and the prefix has to stay below the fork height.
       const outputs: Record<string, number> = {};
-      for (const spec of [...WALLETS, RBF_WALLET, REORG_WALLET, DONOR_SOURCE]) {
+      for (const spec of [...WALLETS, RBF_WALLET, REORG_WALLET, DONOR_SOURCE, BTC_SOURCE]) {
         for (const descriptor of spec.descriptors) {
           const source = parseDescriptor(descriptor);
           for (let i = 0; i < COIN_VALUES.length; i++) {
@@ -417,6 +422,7 @@ Deno.test({
         minerAddr,
         ecxDest: ECX_DEST,
         xbtDest: XBT_DEST,
+        btcDest: BTC_DEST,
       };
       await t.step({
         name: "fee bump (RBF) replaces a stuck split",
@@ -435,6 +441,12 @@ Deno.test({
         sanitizeOps: false,
         sanitizeResources: false,
         fn: (t) => donorScenario(t, harness, DONOR_SOURCE, DONOR_WALLET),
+      });
+      await t.step({
+        name: "advanced BTC-first route: BTC donor, then ECX, then a plain XBT split",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => btcFirstScenario(t, harness, BTC_SOURCE, BTC_DONOR_WALLET),
       });
     } finally {
       await docker(project, ["down", "-v", "--remove-orphans"]).catch(() => {});

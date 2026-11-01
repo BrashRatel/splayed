@@ -28,6 +28,7 @@ export interface Harness {
   minerAddr: (chain: ChainId) => Promise<string>;
   ecxDest: string;
   xbtDest: string;
+  btcDest: string;
 }
 
 const mine = async (h: Harness, chain: ChainId, n: number) =>
@@ -456,5 +457,145 @@ export async function donorScenario(
       donors: { nextIndex?: number }[];
     };
     assert((after.donors[0].nextIndex ?? 0) >= 10, JSON.stringify(after.donors)); // past the decoy at 5
+  });
+}
+
+/**
+ * Advanced BTC-first route. `source` holds shared coins (two of them); `donorWallet` holds BTC-only
+ * coinbase donors mined here after the fork. BTC and ECX are split first, with plain signatures, and
+ * the XBT split (no replay protection of its own) is held back until both are confirmed.
+ */
+export async function btcFirstScenario(
+  t: Deno.TestContext,
+  h: Harness,
+  source: ScenarioWallet,
+  donorWallet: ScenarioWallet,
+) {
+  const cli = await makeCli(h.nodes);
+  const { run, text } = cli;
+  const donorDesc = parseDescriptor(donorWallet.descriptors[0]);
+  const allKeys = new Map([...source.keys, ...donorWallet.keys]);
+
+  await t.step("mine BTC-only coinbase donors, then let them mature", async () => {
+    for (const i of [0, 1]) {
+      const addr = (await h.nodes.btc.call<{ address: string }>(
+        "decodescript",
+        donorDesc.branches[0].derive(i).scriptPubKey,
+      )).address;
+      await h.nodes.btc.mine(1, addr);
+    }
+    await h.nodes.btc.mine(100, await h.minerAddr("btc"));
+    assertEquals(await run("init", "--yes"), 0, text());
+    for (const d of source.descriptors) assertEquals(await run("import", d), 0, text());
+    assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
+    for (const [chain, dest] of [["btc", h.btcDest], ["ecx", h.ecxDest], ["xbt", h.xbtDest]]) {
+      assertEquals(await run("dest", "set", chain, dest), 0, text());
+    }
+  });
+
+  await t.step("donor scan: the coinbase outputs are BTC donors", async () => {
+    assertEquals(await run("donor", "import", donorWallet.descriptors[0]), 0, text());
+    assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
+    assert(text().includes("2 usable donor(s)"), text());
+    assert(text().includes("BTC donor"), text());
+  });
+  const scan = JSON.parse(await Deno.readTextFile(join(cli.dir, "donor-scan.json"))) as {
+    coins: { txid: string; vout: number; eligible: boolean; home: string }[];
+  };
+  const good = scan.coins.filter((c) => c.eligible).map((c) => `${c.txid}:${c.vout}`);
+  assertEquals(good.length, 2);
+
+  await t.step("plan: refuses without a BTC donor, and an XBT donor on the BTC route", async () => {
+    assertEquals(await run("plan", "--btc-first", "--fee-rate", "btc=2,ecx=2,xbt=2", "--yes"), 1);
+    assert(text().includes("needs a BTC donor"), text());
+    assertEquals(
+      await run(
+        "plan",
+        "--btc-first",
+        "--donor",
+        good[0],
+        "--xbt-signer",
+        "knots",
+        "--fee-rate",
+        "btc=2,ecx=2,xbt=2",
+        "--yes",
+      ),
+      1,
+      text(),
+    );
+    assert(text().includes("no --xbt-signer"), text());
+  });
+
+  let planId = "";
+  await t.step("plan: BTC with a donor, ECX with the locktime, XBT plain and gated", async () => {
+    assertEquals(
+      await run(
+        "plan",
+        "--btc-first",
+        "--donor",
+        good[0],
+        "--donor",
+        good[1],
+        "--fee-rate",
+        "btc=2,ecx=2,xbt=2",
+        "--yes",
+      ),
+      0,
+      text(),
+    );
+    [planId] = await planIds(cli.dir);
+    const { plan } = await readPlan(cli.dir, planId);
+    assertEquals(plan.route, "btc-first-donor");
+    const by = (c: string) => plan.transactions.filter((x) => x.chain === c);
+    assertEquals([by("btc").length, by("ecx").length, by("xbt").length], [2, 2, 2]);
+    for (const x of by("btc")) assert(x.donor && x.inputs.length === 2 && !x.gate);
+    for (const x of by("xbt")) {
+      assert(x.gate && !x.donor && x.sighashType === undefined && x.inputs.length === 1);
+    }
+  });
+
+  await t.step("verify: stock signatures pass; BTC txs are rejected by XBT and ECX", async () => {
+    const { dir, plan } = await readPlan(cli.dir, planId);
+    for (const x of plan.transactions) {
+      const signed = stockSign(await Deno.readTextFile(join(dir, x.file)), allKeys);
+      await Deno.writeTextFile(join(dir, x.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+    }
+    assertEquals(await run("verify", planId), 0, text());
+    assert(text().includes("BTC-only donor"), text());
+    assert(text().includes("gated"), text());
+    assert(text().includes("accepts it for now"), text());
+  });
+
+  await t.step("broadcast: BTC and ECX go out, the plain XBT split is held back", async () => {
+    assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+    assert(text().includes("held back"), text());
+    const { dir, plan } = await readPlan(cli.dir, planId);
+    const progress = await readProgress(dir);
+    for (const x of plan.transactions) {
+      const sent = progress.txs[x.file].broadcast?.status === "accepted";
+      assertEquals(sent, x.chain !== "xbt", `${x.chain} ${x.file}`);
+    }
+    // Unconfirmed is not enough: still held back.
+    assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+    assert(text().includes("held back"), text());
+  });
+
+  await t.step("once BTC and ECX are confirmed, the XBT split is sent", async () => {
+    for (const c of ["btc", "ecx"] as const) await h.nodes[c].mine(2, await h.minerAddr(c));
+    assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+    const { dir, plan } = await readPlan(cli.dir, planId);
+    const progress = await readProgress(dir);
+    for (const x of plan.transactions.filter((x) => x.chain === "xbt")) {
+      assertEquals(progress.txs[x.file].broadcast?.status, "accepted", text());
+      // No other chain can take it any more: the coin is spent there.
+      for (const other of ["btc", "ecx"] as const) {
+        const [r] = await h.nodes[other].call<{ allowed: boolean }[]>("testmempoolaccept", [
+          progress.txs[x.file].verified!.finalHex,
+        ]);
+        assertEquals(r.allowed, false, `XBT split accepted by ${other}`);
+      }
+    }
+    await h.nodes.xbt.mine(2, await h.minerAddr("xbt"));
+    assertEquals(await run("track", planId), 0, text());
   });
 }

@@ -319,9 +319,34 @@ again: its outputs are donors too, because the fan-out spends nothing but an XBT
 it, tick one or more donors, then fan them out or plan the splits with them.
 
 The donor's value goes to your XBT destination with the rest. Every donor transaction publicly links
-the donor wallet to the coins it spends on XBT. Not done yet: the BTC-first route, and checking a
-foreign funding transaction instead of refusing it. In the regtest playground,
+the donor wallet to the coins it spends on XBT. In the regtest playground,
 `deno task regtest donors '<descriptor>'` mines XBT-only donors for a wallet.
+
+### Advanced: the BTC-first route
+
+If you want to move your BTC copy first (say, off an old wallet), a BTC transaction would normally
+replay onto XBT and ECX. A **BTC donor** prevents that the same way an XBT donor does: a coin that
+exists on BTC only (a BTC coinbase mined after the forks, or the output of a BTC transaction this
+tool verified and sent), spent in the same transaction, so XBT and ECX reject it.
+
+    forksplit dest set btc "wpkh([fp/84h/0h/2h]xpub.../0/*)"
+    forksplit donor import "<BTC donor wallet descriptor>"
+    forksplit donor scan                     # BTC donors are listed as "BTC donor"
+    forksplit plan --btc-first --donor txid:vout [--donor ...]
+
+The plan has three groups:
+
+- `btc/` the BTC copy, plus one BTC donor per transaction, signed with plain `SIGHASH_ALL` by any
+  wallet.
+- `ecx/` the ECX copy with its locktime marker, as always.
+- `xbt/` the XBT copy, signed with plain `SIGHASH_ALL` and **no replay protection of its own** (no
+  0x21 signer needed). It is safe only because the coin is gone from BTC and ECX by then, so
+  `broadcast` **holds it back** until the coin is spent and confirmed on both (it checks the plan's
+  own BTC and ECX transactions, or the backend's spend details) and your own nodes reject it. Send
+  BTC and ECX, wait for them, run `broadcast` again.
+
+`donor fanout` also works on BTC donors. Every BTC donor publicly links the donor wallet to the
+coins it is spent with. Fee bumps are not supported for BTC transactions yet.
 
 ### Reorgs
 

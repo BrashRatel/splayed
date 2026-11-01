@@ -534,43 +534,45 @@ function viewWallet() {
       }, "Import"),
     ),
   ));
-  const destCards = ["ecx", "xbt"].map((chain) => {
-    const d = o.destinations[chain];
-    const input = h("textarea", {
-      placeholder: chain === "xbt"
-        ? "tr([fp/86h/0h/0h]xpub…/0/*)"
-        : "wpkh([fp/84h/0h/0h]xpub…/0/*)",
-    });
-    const start = h("input", { type: "number", value: "0", class: "w90" });
-    return h(
-      "div",
-      { class: "card" },
-      h("h2", {}, `${chain.toUpperCase()} destination`),
-      d
-        ? h(
-          "div",
-          {},
-          h("div", { class: "mono" }, d.descriptor),
-          h("p", { class: "note" }, `Next address: ${d.nextAddress} (index ${d.nextIndex})`),
-        )
-        : h("p", { class: "muted" }, "Not set."),
-      h(
-        "p",
-        { class: "note" },
-        `Where split coins go on ${chain.toUpperCase()}. Best: a new seed used only for ${chain.toUpperCase()}.`,
-      ),
-      input,
-      h(
+  const destCards = ["ecx", "xbt", ...(advanced || o.destinations.btc ? ["btc"] : [])].map(
+    (chain) => {
+      const d = o.destinations[chain];
+      const input = h("textarea", {
+        placeholder: chain === "xbt"
+          ? "tr([fp/86h/0h/0h]xpub…/0/*)"
+          : "wpkh([fp/84h/0h/0h]xpub…/0/*)",
+      });
+      const start = h("input", { type: "number", value: "0", class: "w90" });
+      return h(
         "div",
-        { class: "row" },
-        h("label", {}, "Start index", start),
-        h("button", {
-          onclick: () =>
-            run(["dest", "set", chain, input.value.trim(), "--start-index", start.value || "0"]),
-        }, "Set destination"),
-      ),
-    );
-  });
+        { class: "card" },
+        h("h2", {}, `${chain.toUpperCase()} destination`),
+        d
+          ? h(
+            "div",
+            {},
+            h("div", { class: "mono" }, d.descriptor),
+            h("p", { class: "note" }, `Next address: ${d.nextAddress} (index ${d.nextIndex})`),
+          )
+          : h("p", { class: "muted" }, "Not set."),
+        h(
+          "p",
+          { class: "note" },
+          `Where split coins go on ${chain.toUpperCase()}. Best: a new seed used only for ${chain.toUpperCase()}.`,
+        ),
+        input,
+        h(
+          "div",
+          { class: "row" },
+          h("label", {}, "Start index", start),
+          h("button", {
+            onclick: () =>
+              run(["dest", "set", chain, input.value.trim(), "--start-index", start.value || "0"]),
+          }, "Set destination"),
+        ),
+      );
+    },
+  );
   view.push(h("div", { class: "grid2" }, ...destCards));
   return view;
 }
@@ -820,7 +822,7 @@ function viewDonors() {
       h("td", { class: "mono" }, short(c.txid, c.vout)),
       h("td", {}, btc(c.value)),
       h("td", { class: "mono" }, c.address ?? ""),
-      h("td", {}, c.provenance),
+      h("td", {}, `${(c.home ?? "xbt").toUpperCase()} · ${c.provenance}`),
       h(
         "td",
         {},
@@ -833,11 +835,16 @@ function viewDonors() {
   const outputs = h("input", { value: "3", class: "w60" });
   const each = h("input", { placeholder: "even split", class: "w120" });
   const feeXbt = h("input", { placeholder: "auto", class: "w80" });
+  const homes = new Set(
+    selected.map((k) => coins.find((c) => `${c.txid}:${c.vout}` === k).home ?? "xbt"),
+  );
+  const home = homes.size === 1 ? [...homes][0] : null;
   const fanout = () => {
+    if (!home) return alert("Fan out donors of one chain at a time (XBT donors, or BTC donors).");
     const args = ["donor", "fanout", "--outputs", outputs.value.trim() || "3"];
     for (const k of selected) args.push("--donor", k);
     if (each.value.trim()) args.push("--value", each.value.trim());
-    if (feeXbt.value.trim()) args.push("--fee-rate", `xbt=${feeXbt.value.trim()}`);
+    if (feeXbt.value.trim()) args.push("--fee-rate", `${home}=${feeXbt.value.trim()}`);
     run(args);
   };
   const batch = h(
@@ -852,9 +859,18 @@ function viewDonors() {
   alsoEcx.checked = true;
   const feeXbt2 = h("input", { placeholder: "auto", class: "w80" });
   const planWith = () => {
-    const args = ["plan", "--chains", alsoEcx.checked ? "ecx,xbt" : "xbt", "--batch", batch.value];
+    if (!home) return alert("Select donors of one chain: XBT donors, or BTC donors.");
+    const args = ["plan", "--batch", batch.value];
+    const rate = feeXbt2.value.trim();
+    if (home === "btc") {
+      // BTC-first: BTC with the donor, ECX with its locktime, then XBT plain and held back.
+      args.push("--btc-first", "--chains", alsoEcx.checked ? "btc,ecx,xbt" : "btc,xbt");
+      if (rate) args.push("--fee-rate", ["btc", "ecx", "xbt"].map((c) => `${c}=${rate}`).join(","));
+    } else {
+      args.push("--chains", alsoEcx.checked ? "ecx,xbt" : "xbt");
+      if (rate) args.push("--fee-rate", `xbt=${rate}`);
+    }
     for (const k of selected) args.push("--donor", k);
-    if (feeXbt2.value.trim()) args.push("--fee-rate", `xbt=${feeXbt2.value.trim()}`);
     run(args);
   };
 
@@ -957,7 +973,9 @@ function viewDonors() {
       h(
         "p",
         { class: "note" },
-        "Replaces the XBT signer: no 0x21 needed. Each XBT transaction uses one selected donor, so pick as many as the batching needs. Your signer must sign the donor input too.",
+        home === "btc"
+          ? "BTC-first route (BTC donors): your BTC copy is split first with a BTC-only donor, ECX with its locktime, and XBT last with a plain signature. The XBT files are held back until the coin is spent and confirmed on BTC and ECX. Set a BTC destination first (Destinations, in Advanced). Each BTC transaction uses one selected donor."
+          : "Replaces the XBT signer: no 0x21 needed. Each XBT transaction uses one selected donor, so pick as many as the batching needs. Your signer must sign the donor input too.",
       ),
       h(
         "div",
@@ -1068,6 +1086,7 @@ function viewPlans() {
           t.donor
             ? h("div", {}, badge("donor", "test"), ` ${short(t.donor.txid, t.donor.vout)}`)
             : null,
+          t.gate ? h("div", { class: "muted" }, "held back until BTC and ECX are confirmed") : null,
         ),
         h(
           "td",
@@ -1121,7 +1140,7 @@ function viewPlans() {
           pr.reorgs?.length
             ? h("div", { class: "muted" }, `${pr.reorgs.length} reorg alert(s), see above`)
             : null,
-          bumpable(pr)
+          t.chain !== "btc" && bumpable(pr)
             ? h("button", {
               class: "small secondary",
               onclick: () => bump(p.id, ["--chains", t.chain, "--tx", String(t.order)]),
@@ -1180,7 +1199,7 @@ function viewPlans() {
           { class: "secondary", onclick: () => run(["track", p.id]) },
           "Track confirmations",
         ),
-        p.transactions.some((t) => bumpable(t.progress))
+        p.transactions.some((t) => t.chain !== "btc" && bumpable(t.progress))
           ? h(
             "button",
             { class: "secondary", onclick: () => bump(p.id, []) },

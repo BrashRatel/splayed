@@ -148,7 +148,9 @@ export function verifySigned(
   }
   if (planTx.donor) {
     const d = planTx.donor;
-    if (planTx.chain !== "xbt") throw new SigCheckError("Only XBT transactions use a donor");
+    if (planTx.chain !== "xbt" && planTx.chain !== "btc") {
+      throw new SigCheckError("Only XBT and BTC transactions use a donor");
+    }
     if (!own.tx.inputs.some((i) => i.txid === d.txid && i.vout === d.vout)) {
       throw new SigCheckError(
         `The donor input ${d.txid}:${d.vout} is missing from the transaction`,
@@ -158,7 +160,16 @@ export function verifySigned(
       `donor input ${d.txid.slice(0, 8)}:${d.vout} (${d.provenance}) is part of the transaction`,
     );
   }
-  const unifiedMode = planTx.chain === "xbt" && !planTx.donor;
+  if (planTx.gate) {
+    if (planTx.chain !== "xbt" || planTx.donor) {
+      throw new SigCheckError("Only a plain XBT transaction can be gated");
+    }
+    checks.push(
+      "gated: no replay protection of its own; broadcast waits until its coins are spent and deep " +
+        `on ${planTx.gate.chains.map((c) => c.toUpperCase()).join(" and ")}`,
+    );
+  }
+  const unifiedMode = planTx.chain === "xbt" && !planTx.donor && !planTx.gate;
   const ctxs = inputContexts(own, planTx.inputs.map((i) => i.kind));
   const verdicts = verifyInputs(
     own.tx,
@@ -168,7 +179,9 @@ export function verifySigned(
   );
   checks.push(
     planTx.donor
-      ? "every signature is plain SIGHASH_ALL and verifies; each commits to the XBT-only donor input"
+      ? `every signature is plain SIGHASH_ALL and verifies; each commits to the ${planTx.chain.toUpperCase()}-only donor input`
+      : planTx.gate
+      ? "every signature is plain SIGHASH_ALL and verifies"
       : planTx.chain === "xbt"
       ? "every XBT signature is SIGHASH_ALL|UNIFIED (0x21) and verifies under the unified digest"
       : "every signature is SIGHASH_ALL/DEFAULT and verifies",
@@ -224,7 +237,7 @@ export async function matchArtifacts(
 /** Signed files the user saved inside the plan directory. */
 export async function findSignedFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for (const sub of ["ecx", "xbt", "uploads", "."]) {
+  for (const sub of ["btc", "ecx", "xbt", "uploads", "."]) {
     try {
       for await (const e of Deno.readDir(join(dir, sub))) {
         if (!e.isFile) continue;
@@ -251,6 +264,8 @@ export async function mempoolChecks(
   planTx: PlannedTx,
   hex: string,
   nodes: MempoolNode[],
+  /** Treat another chain accepting a gated transaction as fatal too (true right before sending). */
+  enforceGate = false,
 ): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
   for (const { chain, backend } of nodes) {
@@ -262,6 +277,12 @@ export async function mempoolChecks(
         throw new SigCheckError(`Your ${chain.toUpperCase()} node rejects it: ${r.reason}`);
       }
     } else {
+      if (r.allowed && planTx.gate && !enforceGate) {
+        results[chain] =
+          "accepts it for now (expected: its coin is not spent there yet); broadcast re-checks " +
+          "after BTC and ECX are deep";
+        continue;
+      }
       if (r.allowed) {
         throw new SigCheckError(
           `Your ${chain.toUpperCase()} node would ACCEPT this ${planTx.chain.toUpperCase()} transaction: ` +
@@ -391,4 +412,65 @@ export function assessReorg(
     case "unknown":
       return undefined;
   }
+}
+
+export interface GateCheck {
+  /** Inputs of the gated transaction, and what each gate chain's backend says about them. */
+  planTx: PlannedTx;
+  planDir: string;
+  plan: Plan;
+  progress: Progress;
+  /** Backends for the gate chains, with the confirmations each needs. */
+  chains: Partial<Record<"btc" | "ecx", { backend: ChainBackend; confirmations: number }>>;
+}
+
+/**
+ * BTC-first route: an XBT transaction with no replay protection may be sent only once every one of
+ * its inputs is spent, and deep, on BTC and on ECX. Returns the reasons it may not be sent yet.
+ * Depth comes from this plan's own BTC/ECX transaction when there is one (node RPC can say whether a
+ * known transaction is confirmed), otherwise from the backend's spend details (Esplora, Electrum).
+ */
+export async function gateProblems(g: GateCheck): Promise<string[]> {
+  const problems: string[] = [];
+  for (const chain of g.planTx.gate?.chains ?? []) {
+    const ours = g.chains[chain];
+    if (!ours) {
+      problems.push(`${chain.toUpperCase()}: no backend to check that the coin was spent there`);
+      continue;
+    }
+    const tip = await ours.backend.tipHeight();
+    for (const input of g.planTx.inputs) {
+      const label = `${chain.toUpperCase()} ${input.txid.slice(0, 8)}:${input.vout}`;
+      const obs = await ours.backend.observeOutput(input.txid, input.vout);
+      if (obs.state !== "spent") {
+        problems.push(`${label}: not spent on ${chain.toUpperCase()} yet (${obs.state})`);
+        continue;
+      }
+      // Prefer this plan's own transaction on that chain.
+      const sibling = g.plan.transactions.find((t) =>
+        t.chain === chain && t.inputs.some((i) => i.txid === input.txid && i.vout === input.vout)
+      );
+      const siblingTxid = sibling && g.progress.txs[sibling.file]?.verified?.txid;
+      let depth: number | undefined;
+      if (sibling && siblingTxid) {
+        const d = await confirmationDepth(ours.backend, sibling, siblingTxid, tip);
+        if (d.state === "confirmed") depth = d.depth;
+        else if (d.state === "conflict") {
+          problems.push(`${label}: spent by another transaction (${d.by ?? "unknown"})`);
+          continue;
+        }
+      } else if (obs.spendDetailKnown && obs.spendHeight !== undefined) {
+        depth = tip - obs.spendHeight + 1;
+      }
+      if (depth === undefined) {
+        problems.push(
+          `${label}: spent, but ${chain.toUpperCase()} can't show it is confirmed (not yet, or this ` +
+            "backend can't tell)",
+        );
+      } else if (depth < ours.confirmations) {
+        problems.push(`${label}: only ${depth} of ${ours.confirmations} confirmations`);
+      }
+    }
+  }
+  return problems;
 }

@@ -50,6 +50,8 @@ import { parseTx, type Tx, txid as computeTxid } from "./tx.ts";
 import type { WatchOnlyWallet } from "./wallet.ts";
 
 export type ForkChain = "xbt" | "ecx";
+/** A chain a plan can have transactions on: the forks, and BTC on the BTC-first route. */
+export type PlanChain = ForkChain | "btc";
 export const RBF_SEQUENCE = 0xffff_fffd;
 export const SIGHASH_ALL_UNIFIED = 0x01 | SIGHASH_UNIFIED;
 
@@ -138,16 +140,22 @@ export function dustLimit(script: Uint8Array): number {
 // ---- Planning ----
 
 export interface PlanOptions {
-  chains: ForkChain[];
+  chains: PlanChain[];
   batch: BatchPolicy;
-  feeRates: Partial<Record<ForkChain, number>>;
+  feeRates: Partial<Record<PlanChain, number>>;
   xbtSigner?: string;
+  /**
+   * Advanced BTC-first route: BTC is split first, protected by a BTC-only donor (`donors` are then
+   * BTC donors); ECX keeps its locktime; XBT is signed plainly and is held back (`gate`) until the
+   * coin is spent and deep on BTC and ECX, because by then there is nothing left for it to replay on.
+   */
+  btcFirst?: boolean;
   /** Restrict to these outpoints ("txid:vout"). */
   coins?: string[];
   maxFeeFraction?: number;
   /**
-   * Advanced XBT donor route: outpoints ("txid:vout") of XBT-only donors from the donor wallet,
-   * one per XBT transaction. Replaces the 0x21 signer.
+   * Advanced donor route: outpoints ("txid:vout") of donors from the donor wallet, one per protected
+   * transaction. XBT-only donors replace the 0x21 signer; with `btcFirst` they are BTC-only donors.
    */
   donors?: string[];
 }
@@ -161,7 +169,7 @@ export interface PlannedInput {
 }
 
 export interface PlannedTx {
-  chain: ForkChain;
+  chain: PlanChain;
   order: number;
   testFirst: boolean;
   file: string;
@@ -183,6 +191,11 @@ export interface PlannedTx {
    * by 0x21, so its signatures are plain SIGHASH_ALL.
    */
   donor?: { txid: string; vout: number; value: number; provenance: string };
+  /**
+   * BTC-first route, XBT only: signed with plain SIGHASH_ALL and no replay protection of its own.
+   * `broadcast` holds it back until its inputs are spent and deep on every chain listed here.
+   */
+  gate?: { chains: ("btc" | "ecx")[] };
   /** Set on a fee-bump replacement: the transaction of an earlier plan this one replaces. */
   replaces?: { plan: string; file: string; txid: string; fee: number; feeRate: number };
 }
@@ -192,18 +205,18 @@ export interface Plan {
   id: string;
   createdAt: string;
   profile: string;
-  route: "forks-first-0x21" | "forks-first-donor" | "donor-fanout";
+  route: "forks-first-0x21" | "forks-first-donor" | "donor-fanout" | "btc-first-donor";
   xbtSigner?: string;
   scanAt: string;
   batch: BatchPolicy;
   transactions: PlannedTx[];
   warnings: string[];
   /** Destination indexes this plan used, to be reserved in the wallet when written. */
-  reserved: Partial<Record<ForkChain, number>>;
+  reserved: Partial<Record<PlanChain, number>>;
 }
 
 export interface PlanDeps {
-  backends: Partial<Record<ForkChain, ChainBackend>>;
+  backends: Partial<Record<PlanChain, ChainBackend>>;
   /** Scanned donor wallet, needed for the donor route. */
   donors?: { coins: DonorCoin[]; descriptors: ParsedDescriptor[] };
   log?: (message: string) => void;
@@ -261,15 +274,38 @@ export async function buildPlan(
     parseDescriptor(d.descriptor, networkForProfile(config.profile))
   );
   const donorKeys = options.donors ?? [];
-  if (donorKeys.length && !options.chains.includes("xbt")) {
-    throw new PlanError("--donor only applies to XBT transactions: add xbt to --chains");
+  const btcFirst = options.btcFirst === true;
+  /** The chain the donors live on, and so the chain whose transactions they protect. */
+  const donorChain: "xbt" | "btc" = btcFirst ? "btc" : "xbt";
+  if (btcFirst) {
+    if (!options.chains.includes("btc")) {
+      throw new PlanError("The BTC-first route needs btc in --chains");
+    }
+    if (options.xbtSigner) {
+      throw new PlanError(
+        "The BTC-first route signs XBT plainly (after BTC and ECX are split): no --xbt-signer",
+      );
+    }
+    if (!donorKeys.length) {
+      throw new PlanError(
+        "The BTC-first route needs a BTC donor for each BTC transaction: `forksplit donor scan`, " +
+          "then --donor txid:vout",
+      );
+    }
+  } else if (options.chains.includes("btc")) {
+    throw new PlanError("BTC is only planned on the BTC-first route (--btc-first)");
+  }
+  if (donorKeys.length && !options.chains.includes(donorChain)) {
+    throw new PlanError(
+      `--donor only applies to ${donorChain.toUpperCase()} transactions: add ${donorChain} to --chains`,
+    );
   }
   if (donorKeys.length && options.xbtSigner) {
     throw new PlanError(
       "Choose one XBT route: --xbt-signer (0x21 signatures) or --donor (XBT-only donor inputs)",
     );
   }
-  if (options.chains.includes("xbt") && !donorKeys.length) {
+  if (options.chains.includes("xbt") && !donorKeys.length && !btcFirst) {
     if (!options.xbtSigner) {
       throw new PlanError(
         "Say what will sign the XBT transactions with --xbt-signer. They need SIGHASH_UNIFIED " +
@@ -304,7 +340,7 @@ export async function buildPlan(
   };
   const filter = options.coins ? new Set(options.coins) : undefined;
   const transactions: PlannedTx[] = [];
-  const reserved: Partial<Record<ForkChain, number>> = {};
+  const reserved: Partial<Record<PlanChain, number>> = {};
   const now = new Date();
   // Sortable to the millisecond, plus randomness so two plans never collide.
   const id = `${now.toISOString().replace(/[-:]/gu, "").replace(/\.(\d+)Z$/u, "$1")}-${
@@ -416,7 +452,8 @@ export async function buildPlan(
     }
 
     // 2b. XBT donor route: the chosen donors, re-checked the same way.
-    const donorRoute = chain === "xbt" && donorKeys.length > 0;
+    const donorRoute = chain === donorChain && donorKeys.length > 0;
+    const gated = btcFirst && chain === "xbt";
     const liveDonors: Candidate[] = [];
     if (donorRoute) {
       const pool = deps.donors;
@@ -424,6 +461,12 @@ export async function buildPlan(
       for (const key of donorKeys) {
         const coin = pool.coins.find((c) => `${c.txid}:${c.vout}` === key);
         if (!coin) throw new PlanError(`Donor ${key} isn't in the donor scan (run \`donor scan\`)`);
+        if ((coin.home ?? "xbt") !== donorChain) {
+          throw new PlanError(
+            `Donor ${key} is a ${(coin.home ?? "xbt").toUpperCase()} donor; this route needs ` +
+              `${donorChain.toUpperCase()} donors`,
+          );
+        }
         if (!coin.eligible) {
           throw new PlanError(`Donor ${key} can't be used: ${coin.reasons.join("; ")}`);
         }
@@ -470,7 +513,7 @@ export async function buildPlan(
       );
     if (donorRoute && batches.length > liveDonors.length) {
       throw new PlanError(
-        `XBT needs ${batches.length} transaction(s) with --batch ${
+        `${chain.toUpperCase()} needs ${batches.length} transaction(s) with --batch ${
           options.batch.kind === "size" ? options.batch.size : options.batch.kind
         }, and each needs its own donor, but ${liveDonors.length} donor(s) were given. ` +
           "Give more --donor, or a bigger --batch (--batch all uses one donor).",
@@ -478,9 +521,17 @@ export async function buildPlan(
     }
     if (donorRoute && batches.length) {
       warnings.push(
-        "XBT donor route: these transactions use plain SIGHASH_ALL signatures and are protected only " +
-          "because the donor input exists on XBT alone. Each one publicly links your donor wallet " +
-          "to the coins it spends on XBT, and the donor's value ends up at the XBT destination.",
+        `${chain.toUpperCase()} donor route: these transactions use plain SIGHASH_ALL signatures and ` +
+          `are protected only because the donor input exists on ${chain.toUpperCase()} alone. Each ` +
+          `one publicly links your donor wallet to the coins it spends on ${chain.toUpperCase()}, ` +
+          `and the donor's value ends up at the ${chain.toUpperCase()} destination.`,
+      );
+    }
+    if (gated && batches.length) {
+      warnings.push(
+        "BTC-first route: the XBT transactions carry no replay protection of their own. " +
+          "`broadcast` holds them back until their coins are spent and deep on BTC and ECX, " +
+          "and will refuse them if that can't be shown. Don't send them any other way.",
       );
     }
     for (const [n, batch] of batches.entries()) {
@@ -500,7 +551,7 @@ export async function buildPlan(
           "XBT (RDTS) rejects output scripts over 34 bytes; use another destination type",
         );
       }
-      const unified = chain === "xbt" && !donor;
+      const unified = chain === "xbt" && !donor && !gated;
       const inputs = [...batch, ...(donor ? [donor] : [])].sort((a, b) =>
         a.coin.txid.localeCompare(b.coin.txid) || a.coin.vout - b.coin.vout
       );
@@ -573,6 +624,7 @@ export async function buildPlan(
         lockTime,
         sequence: RBF_SEQUENCE,
         sighashType: unified ? SIGHASH_ALL_UNIFIED : undefined,
+        gate: gated ? { chains: ["btc", "ecx"] } : undefined,
         psbt,
         donor: donor
           ? {
@@ -595,7 +647,11 @@ export async function buildPlan(
     id,
     createdAt: now.toISOString(),
     profile: config.profile.id,
-    route: donorKeys.length ? "forks-first-donor" : "forks-first-0x21",
+    route: btcFirst
+      ? "btc-first-donor"
+      : donorKeys.length
+      ? "forks-first-donor"
+      : "forks-first-0x21",
     xbtSigner: options.xbtSigner,
     scanAt: scan.scannedAt,
     batch: options.batch,
@@ -653,14 +709,33 @@ export const PLANS_DIR = "plans";
 const SIGNING_README = (plan: Plan) =>
   `forksplit plan ${plan.id}
 
-These are UNSIGNED PSBTs for the guided route (forks-first + 0x21). Each one moves only a fork's
-copy of your coins to a fresh address; your BTC is not touched.
+${
+    plan.route === "btc-first-donor"
+      ? `These are UNSIGNED PSBTs for the advanced BTC-first route: your BTC copy is moved first,
+protected by a BTC-only donor, then ECX, then XBT.`
+      : `These are UNSIGNED PSBTs for the guided route (forks-first + 0x21). Each one moves only a fork's
+copy of your coins to a fresh address; your BTC is not touched.`
+  }
 
 ecx/  ECX splits. nLockTime = 499999998 and nSequence = 0xfffffffd on every input are already set.
       Any signer can sign them. Your signer must keep those fields: check the signed transaction
       still shows locktime 499999998 before it goes anywhere.
 ${
-    plan.route === "donor-fanout"
+    plan.route === "btc-first-donor"
+      ? `btc/  BTC splits, BTC-FIRST ROUTE. Each one also spends a BTC-only donor input, which XBT and
+      ECX don't have, so it can't be replayed there. Sign with any wallet using plain SIGHASH_ALL.
+      The signer must sign the donor input too (pass the PSBT between wallets if the keys differ).
+      Send these FIRST, with ECX, and wait for them to be deep: the XBT files below are held back
+      until then.
+`
+      : ""
+  }${
+    plan.route === "btc-first-donor"
+      ? `xbt/  XBT splits, signed with plain SIGHASH_ALL (no 0x21). They have no replay protection of
+      their own: once the coin is spent on BTC and ECX there is nothing left to replay on, and
+      \`broadcast\` refuses to send them until it has seen both spends confirmed deep.
+`
+      : plan.route === "donor-fanout"
       ? `xbt/  DONOR FAN-OUT. Each transaction spends one XBT-only donor and pays several smaller donors
       back to your donor wallet. Sign with the donor wallet using plain SIGHASH_ALL (not 0x21).
       Check that every output address is one of your donor wallet's own.
@@ -708,6 +783,7 @@ export async function writePlan(dataDir: string, plan: Plan): Promise<string> {
   const dir = join(dataDir, PLANS_DIR, plan.id);
   await ensureDir(join(dir, "ecx"));
   await ensureDir(join(dir, "xbt"));
+  await ensureDir(join(dir, "btc"));
   for (const tx of plan.transactions) await writeTextAtomic(join(dir, tx.file), tx.psbt + "\n");
   await writeJsonAtomic(join(dir, "plan.json"), plan);
   await writeTextAtomic(join(dir, "README.txt"), SIGNING_README(plan));

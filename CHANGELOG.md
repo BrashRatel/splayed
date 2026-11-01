@@ -7,6 +7,12 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Advanced BTC-first route** (`plan --btc-first --donor txid:vout`, `dest set btc`). The BTC copy
+  is split first, protected by a BTC-only donor; ECX keeps its locktime; XBT is signed with plain
+  `SIGHASH_ALL` and carries no replay protection, so `broadcast` holds it back until its coin is
+  spent and confirmed on BTC and ECX and the user's own nodes reject it. Donors now have a home
+  chain (XBT or BTC) and `donor scan`, `donor fanout` and the Donors tab handle both. Tested against
+  real nodes, including a check that turning the gate off breaks the scenario.
 - **Donor fan-out** (`donor fanout --donor txid:vout --outputs N [--value SATS]`): splits each
   chosen donor into smaller donors of the donor wallet, one transaction per donor. The new donors
   count as XBT-only once the fan-out is verified and broadcast. Plan transactions can now have

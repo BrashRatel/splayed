@@ -25,7 +25,7 @@ import {
   donorKey,
   evaluateDonors,
   loadDonorScan,
-  protectedXbtTxids,
+  protectedTxids,
   saveDonorScan,
 } from "../core/donors.ts";
 import { buildFanout, donorDescriptors } from "../core/fanout.ts";
@@ -49,8 +49,8 @@ import { torManager, TorStartError } from "../net/tor.ts";
 import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import {
   buildPlan,
-  type ForkChain,
   parseBatchPolicy,
+  type PlanChain,
   PlanError,
   type PlannedTx,
   PLANS_DIR,
@@ -65,6 +65,8 @@ import {
   type DepthResult,
   ExecuteError,
   findSignedFiles,
+  type GateCheck,
+  gateProblems,
   loadPlanDir,
   loadProgress,
   matchArtifacts,
@@ -221,6 +223,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         port: { type: "string" },
         open: { type: "boolean" },
         "no-mempool": { type: "boolean" },
+        "btc-first": { type: "boolean" },
         tx: { type: "string", multiple: true },
       },
     });
@@ -274,6 +277,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
           feeRate: flags["fee-rate"],
           coins: flags.coin as string[] | undefined,
           donors: flags.donor as string[] | undefined,
+          btcFirst: flags["btc-first"] === true,
           yes: flags.yes === true,
         });
       case "donor":
@@ -814,8 +818,9 @@ async function cmdDest(config: Config, args: string[], startIndex: string | unde
   const [action, chainArg, descriptor] = args;
   const wallet = await loadWallet(config.dataDir);
   if (action === "show" || !action) {
-    for (const chain of ["ecx", "xbt"] as const) {
+    for (const chain of ["btc", "ecx", "xbt"] as const) {
       const d = wallet.destinations?.[chain];
+      if (chain === "btc" && !d) continue; // only the BTC-first route uses a BTC destination
       io.out(
         `${chain.toUpperCase()}: ${
           d ? `${d.descriptor}\n     next index ${d.nextIndex}` : "(not set)"
@@ -824,12 +829,14 @@ async function cmdDest(config: Config, args: string[], startIndex: string | unde
     }
     return 0;
   }
-  if (action !== "set") throw new UsageError("dest set <xbt|ecx> <descriptor> | dest show");
+  if (action !== "set") throw new UsageError("dest set <xbt|ecx|btc> <descriptor> | dest show");
   await requireNetworkConfirmed(config);
-  if (chainArg !== "xbt" && chainArg !== "ecx") {
-    throw new UsageError("Destinations are per fork: xbt or ecx");
+  if (chainArg !== "xbt" && chainArg !== "ecx" && chainArg !== "btc") {
+    throw new UsageError(
+      "Destinations are per chain: xbt or ecx (btc only for the BTC-first route)",
+    );
   }
-  if (!descriptor) throw new UsageError("dest set <xbt|ecx> <descriptor>");
+  if (!descriptor) throw new UsageError("dest set <xbt|ecx|btc> <descriptor>");
   const parsed = parseDescriptor(descriptor, networkForProfile(config.profile));
   if (!parsed.branches[0].ranged) {
     throw new UsageError("Destination descriptor must be ranged (end in /*)");
@@ -850,14 +857,16 @@ async function cmdDest(config: Config, args: string[], startIndex: string | unde
   return 0;
 }
 
-function parseFeeRates(value: string | undefined): Partial<Record<ForkChain, number>> {
-  const out: Partial<Record<ForkChain, number>> = {};
+function parseFeeRates(value: string | undefined): Partial<Record<PlanChain, number>> {
+  const out: Partial<Record<PlanChain, number>> = {};
   if (!value) return out;
   for (const part of value.split(",")) {
     const [chain, rate] = part.split("=");
     const n = Number(rate);
-    if ((chain !== "ecx" && chain !== "xbt") || !(n > 0)) {
-      throw new UsageError("--fee-rate looks like ecx=2,xbt=3 (sat/vB)");
+    if ((chain !== "ecx" && chain !== "xbt" && chain !== "btc") || !(n > 0)) {
+      throw new UsageError(
+        "--fee-rate looks like ecx=2,xbt=3 (sat/vB; btc=N on the BTC-first route)",
+      );
     }
     out[chain] = n;
   }
@@ -874,21 +883,34 @@ async function cmdPlan(
     feeRate?: string;
     coins?: string[];
     donors?: string[];
+    btcFirst?: boolean;
     yes: boolean;
   },
 ) {
   await requireNetworkConfirmed(config);
   const scan = await loadScan(config.dataDir);
   if (!scan) throw new UsageError("Run `forksplit scan` first");
-  const chains = (opts.chains ?? "ecx,xbt").split(",").map((c) => c.trim());
-  if (!chains.every((c) => c === "ecx" || c === "xbt") || !chains.length) {
-    throw new UsageError("--chains takes ecx, xbt or ecx,xbt");
+  const chains = (opts.chains ?? (opts.btcFirst ? "btc,ecx,xbt" : "ecx,xbt")).split(",").map((c) =>
+    c.trim()
+  );
+  const allowed = opts.btcFirst ? ["btc", "ecx", "xbt"] : ["ecx", "xbt"];
+  if (!chains.every((c) => allowed.includes(c)) || !chains.length) {
+    throw new UsageError(
+      opts.btcFirst
+        ? "--chains takes btc, ecx, xbt (any of them)"
+        : "--chains takes ecx, xbt or ecx,xbt",
+    );
   }
+  if (opts.btcFirst && !chains.includes("btc")) {
+    throw new UsageError("The BTC-first route splits BTC: --chains must include btc");
+  }
+  // BTC first, then ECX, then XBT: the order the gate depends on.
+  chains.sort((a, b) => ["btc", "ecx", "xbt"].indexOf(a) - ["btc", "ecx", "xbt"].indexOf(b));
   const wallet = await loadWallet(config.dataDir);
-  const backends: Partial<Record<ForkChain, ChainBackend>> = {};
+  const backends: Partial<Record<PlanChain, ChainBackend>> = {};
   try {
     io.out("Re-checking backend identity…");
-    for (const chain of chains as ForkChain[]) {
+    for (const chain of chains as PlanChain[]) {
       const { backend, results } = await verifiedBackendsFor(config, chain, io, true);
       if (!backend) {
         throw new PlanError(
@@ -898,7 +920,8 @@ async function cmdPlan(
       backends[chain] = backend;
     }
     const plan = await buildPlan(config, scan, wallet, {
-      chains: chains as ForkChain[],
+      chains: chains as PlanChain[],
+      btcFirst: opts.btcFirst,
       batch: parseBatchPolicy(opts.batch),
       feeRates: parseFeeRates(opts.feeRate),
       xbtSigner: opts.xbtSigner,
@@ -935,7 +958,7 @@ async function cmdPlan(
       ]);
     }
     io.out(table(rows));
-    for (const chain of ["ecx", "xbt"] as const) {
+    for (const chain of ["btc", "ecx", "xbt"] as const) {
       const txs = plan.transactions.filter((t) => t.chain === chain);
       if (!txs.length) continue;
       const linked = txs.filter((t) => t.inputs.length > 1).length;
@@ -957,7 +980,7 @@ async function cmdPlan(
     }
     const dir = await writePlan(config.dataDir, plan);
     const fresh = await loadWallet(config.dataDir);
-    for (const [chain, next] of Object.entries(plan.reserved) as [ForkChain, number][]) {
+    for (const [chain, next] of Object.entries(plan.reserved) as [PlanChain, number][]) {
       const d = fresh.destinations?.[chain];
       if (d && next > d.nextIndex) d.nextIndex = next;
     }
@@ -1047,9 +1070,12 @@ async function cmdDonor(
         );
         const evaluated = await evaluateDonors(
           result,
-          backends.xbt,
-          config.chains.xbt.confirmations,
-          await protectedXbtTxids(config.dataDir),
+          { xbt: backends.xbt, btc: backends.btc },
+          { xbt: config.chains.xbt.confirmations, btc: config.chains.btc.confirmations },
+          {
+            xbt: await protectedTxids(config.dataDir, "xbt"),
+            btc: await protectedTxids(config.dataDir, "btc"),
+          },
         );
         await saveDonorScan(config.dataDir, evaluated);
       } finally {
@@ -1070,16 +1096,28 @@ async function cmdDonor(
       if (!Number.isSafeInteger(outputCount) || outputCount < 2 || outputCount > 100) {
         throw new PlanError("--outputs must be a whole number from 2 to 100");
       }
-      const { backend, results } = await verifiedBackendsFor(config, "xbt", io, true);
+      // The donors' chain: all must live on the same one.
+      const homes = new Set(fan.donors.map((key) => {
+        const coin = scan.coins.find((c) => donorKey(c) === key);
+        return (coin?.home ?? "xbt") as "xbt" | "btc";
+      }));
+      if (homes.size !== 1) {
+        throw new PlanError("Fan out donors of one chain at a time (XBT donors, or BTC donors)");
+      }
+      const chain = [...homes][0];
+      const H = chain.toUpperCase();
+      const { backend, results } = await verifiedBackendsFor(config, chain, io, true);
       if (!backend) {
-        throw new PlanError(`XBT: no backend passed: ${results.map((r) => r.detail).join("; ")}`);
+        throw new PlanError(`${H}: no backend passed: ${results.map((r) => r.detail).join("; ")}`);
       }
       try {
-        let feeRate = parseFeeRates(fan.feeRate).xbt;
+        let feeRate = parseFeeRates(fan.feeRate)[chain];
         if (feeRate === undefined) {
           feeRate = await backend.feeRate?.(6).catch(() => undefined);
           if (feeRate === undefined) {
-            throw new PlanError("No fee estimate from the XBT backend; pass --fee-rate xbt=N");
+            throw new PlanError(
+              `No fee estimate from the ${H} backend; pass --fee-rate ${chain}=N`,
+            );
           }
           feeRate = Math.max(1, Math.ceil(feeRate * 100) / 100);
         }
@@ -1093,7 +1131,8 @@ async function cmdDonor(
           value,
           feeRate,
         }, {
-          xbt: backend,
+          chain,
+          backend,
           donors: { coins: scan.coins, descriptors: donorDescriptors(wallet, config) },
         });
         for (const w of plan.warnings) io.err(`Warning: ${w}`);
@@ -1275,16 +1314,17 @@ async function cmdVerify(config: Config, io: CliIO, args: string[], noMempool: b
 }
 
 /**
- * A donor transaction is replay-protected only while its donor is absent from BTC and ECX. Ask both
- * again right before sending; refuse if either can't be asked or has the donor.
+ * A donor transaction is replay-protected only while its donor is absent from every other chain. Ask
+ * them again right before sending; refuse if any can't be asked or has the donor.
  */
 async function donorPreflight(
   config: Config,
   io: CliIO,
   donor: { txid: string; vout: number },
+  home: "xbt" | "btc",
   opened: ChainBackend[],
 ) {
-  for (const chain of ["btc", "ecx"] as const) {
+  for (const chain of (["btc", "xbt", "ecx"] as const).filter((c) => c !== home)) {
     const { backend, results } = await verifiedBackendsFor(config, chain, io, true);
     if (!backend) {
       throw new ExecuteError(
@@ -1297,7 +1337,7 @@ async function donorPreflight(
     if (obs.state !== "absent") {
       throw new ExecuteError(
         `The donor ${donor.txid}:${donor.vout} is ${obs.state} on ${chain.toUpperCase()}. It is ` +
-          "no longer XBT-only, so this transaction could replay there. Not broadcasting.",
+          `no longer ${home.toUpperCase()}-only, so this transaction could replay there. Not broadcasting.`,
       );
     }
   }
@@ -1322,7 +1362,7 @@ async function cmdBroadcast(
       txid: string;
       send: ChainBackend;
     }[] = [];
-    for (const chain of ["ecx", "xbt"] as const) {
+    for (const chain of ["btc", "ecx", "xbt"] as const) {
       const txs = plan.transactions.filter((t) =>
         t.chain === chain && progress.txs[t.file]?.verified
       );
@@ -1383,7 +1423,39 @@ async function cmdBroadcast(
         if (again.finalHex !== v.finalHex) {
           throw new ExecuteError(`${t.file}: stored transaction changed`);
         }
-        if (t.donor && !t.replaces) await donorPreflight(config, io, t.donor, opened);
+        if (t.donor && !t.replaces) {
+          await donorPreflight(config, io, t.donor, t.chain as "xbt" | "btc", opened);
+        }
+        if (t.gate) {
+          // No protection of its own: prove the coin is gone and deep everywhere else first.
+          const chains: GateCheck["chains"] = {};
+          for (const gc of t.gate.chains) {
+            const { backend: gb } = await verifiedBackendsFor(config, gc, io, true);
+            if (!gb) {
+              throw new ExecuteError(
+                `${t.file}: can't check ${gc.toUpperCase()} (no backend passed). Not broadcasting.`,
+              );
+            }
+            opened.push(gb);
+            chains[gc] = { backend: gb, confirmations: config.chains[gc].confirmations };
+          }
+          const problems = await gateProblems({ planTx: t, planDir: dir, plan, progress, chains });
+          if (problems.length) {
+            io.err(
+              `${t.file}: held back until the coin is spent and deep on BTC and ECX:\n  ${
+                problems.join("\n  ")
+              }`,
+            );
+            continue;
+          }
+          // Final replay check on the user's own nodes, now that BTC and ECX should reject it.
+          const nodes = await ownNodes(config, io);
+          try {
+            await mempoolChecks(t, v.finalHex, nodes, true);
+          } finally {
+            for (const n of nodes) await n.backend.close?.();
+          }
+        }
         if (t.replaces) {
           // A fee bump: its inputs are legitimately spent by the original while that one sits in
           // the mempool, so judge by the two transactions instead of the inputs.
@@ -1455,7 +1527,7 @@ async function cmdBroadcast(
       io.out("Nothing to broadcast right now.");
       return 0;
     }
-    for (const chain of ["ecx", "xbt"] as const) {
+    for (const chain of ["btc", "ecx", "xbt"] as const) {
       const items = queue.filter((q) => q.t.chain === chain);
       if (items.length) {
         io.out(
@@ -1547,7 +1619,7 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
   const progress = await loadProgress(dir);
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
   const alerts: string[] = [];
-  for (const chain of ["ecx", "xbt"] as const) {
+  for (const chain of ["btc", "ecx", "xbt"] as const) {
     const txs = plan.transactions.filter((t) =>
       t.chain === chain && progress.txs[t.file]?.broadcast
     );

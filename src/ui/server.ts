@@ -139,7 +139,7 @@ async function overview(dataDir: string, env: Record<string, string | undefined>
     };
   });
   const destinations: Record<string, unknown> = {};
-  for (const chain of ["ecx", "xbt"] as const) {
+  for (const chain of ["btc", "ecx", "xbt"] as const) {
     const d = wallet.destinations?.[chain];
     if (d) {
       destinations[chain] = {
@@ -243,6 +243,7 @@ async function plansView(dataDir: string) {
           output: t.output,
           outputs: t.outputs?.length,
           donor: t.donor,
+          gate: t.gate,
           signedUpload: uploads.get(t.file),
           progress: {
             verified: progress.txs[t.file]?.verified

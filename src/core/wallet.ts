@@ -30,7 +30,7 @@ export interface WatchOnlyWallet {
   /** Donor wallet (advanced XBT donor route): descriptors whose coins exist only on XBT. */
   donors?: StoredDescriptor[];
   /** Where split outputs go on each fork (ideally a new seed per fork). */
-  destinations?: Partial<Record<"xbt" | "ecx", Destination>>;
+  destinations?: Partial<Record<"btc" | "xbt" | "ecx", Destination>>;
 }
 
 export async function loadWallet(dataDir: string): Promise<WatchOnlyWallet> {

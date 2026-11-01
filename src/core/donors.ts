@@ -1,7 +1,11 @@
 /**
- * Advanced XBT donor route.
+ * Advanced donor routes (XBT donor, BTC donor).
  *
- * A donor is a coin that exists on XBT only. A transaction that spends a donor next to a shared coin
+ * A donor is a coin that exists on ONE chain only (its "home": XBT for the forks-first route, BTC for
+ * the BTC-first route). The text below is written for XBT; the BTC donor is the same with the chains
+ * swapped.
+ *
+ * A donor on XBT is a coin that exists on XBT only. A transaction that spends a donor next to a shared coin
  * can't be valid on BTC or ECX, because those chains have never heard of the donor input. The shared
  * coin can then be signed with an ordinary SIGHASH_ALL signature, which stock hardware wallets can
  * make, instead of the 0x21 signature only a few signers support.
@@ -30,8 +34,12 @@ export const DONOR_SCAN_FILE = "donor-scan.json";
 export const COINBASE_MATURITY = 100;
 
 export type DonorProvenance = "coinbase" | "protected-spend" | "unproven";
+/** The chain a donor lives on: the only chain that has it. */
+export type DonorHome = "xbt" | "btc";
 
 export interface DonorCoin extends CoinRecord {
+  /** Absent in scans written before the BTC-first route: those are XBT donors. */
+  home?: DonorHome;
   provenance: DonorProvenance;
   eligible: boolean;
   /** Why it is not eligible (empty when it is). */
@@ -49,15 +57,20 @@ export interface DonorScan {
 
 const NULL_TXID = "0".repeat(64);
 
-/** Txids of XBT transactions this tool verified: the outputs of those are XBT-only too. */
-export async function protectedXbtTxids(dataDir: string): Promise<Set<string>> {
+/**
+ * Txids of transactions this tool verified and sent on `home`: their outputs exist on that chain only
+ * (the transaction was protected, so it never reached the other chains).
+ */
+export async function protectedTxids(dataDir: string, home: DonorHome): Promise<Set<string>> {
   const out = new Set<string>();
   const root = join(dataDir, PLANS_DIR);
   try {
     for await (const e of Deno.readDir(root)) {
       if (!e.isDirectory) continue;
       const dir = join(root, e.name);
-      const plan = await readJson<{ transactions: { chain: string; file: string }[] }>(
+      const plan = await readJson<
+        { transactions: { chain: string; file: string; gate?: unknown }[] }
+      >(
         join(dir, "plan.json"),
       );
       if (!plan) continue;
@@ -65,7 +78,9 @@ export async function protectedXbtTxids(dataDir: string): Promise<Set<string>> {
       for (const t of plan.transactions) {
         const v = progress.txs[t.file]?.verified;
         const sent = progress.txs[t.file]?.broadcast?.status === "accepted";
-        if (t.chain === "xbt" && v && sent) out.add(v.txid);
+        // A gated transaction (plain signature, sent after the coin was spent everywhere else) is
+        // not protected: its outputs are ordinary shared-chain coins.
+        if (t.chain === home && v && sent && !t.gate) out.add(v.txid);
       }
     }
   } catch (error) {
@@ -74,10 +89,21 @@ export async function protectedXbtTxids(dataDir: string): Promise<Set<string>> {
   return out;
 }
 
+export const protectedXbtTxids = (dataDir: string) => protectedTxids(dataDir, "xbt");
+
 export interface DonorContext {
   tips: ScanResult["tips"];
   /** Confirmations XBT needs before a coin counts (config). */
   xbtConfirmations: number;
+  /** Same for BTC (defaults to the XBT figure). */
+  btcConfirmations?: number;
+}
+
+/** Which chain a scanned coin could be a donor on: where it is unspent, XBT if neither. */
+export function homeOf(coin: CoinRecord): DonorHome {
+  return coin.observations.btc.state === "unspent" && coin.observations.xbt.state !== "unspent"
+    ? "btc"
+    : "xbt";
 }
 
 /** Pure judgement of one scanned donor candidate. */
@@ -85,39 +111,44 @@ export function assessDonor(
   coin: CoinRecord,
   ctx: DonorContext,
   provenance: DonorProvenance,
+  home: DonorHome = "xbt",
 ): { eligible: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  const xbt = coin.observations.xbt;
-  if (xbt.state !== "unspent") {
-    reasons.push(`not unspent on XBT (${xbt.state})`);
-  } else if (xbt.createdHeight === undefined) {
-    reasons.push("its creating transaction is unconfirmed on XBT");
-  } else if (ctx.tips.xbt === undefined) {
-    reasons.push("XBT tip unknown");
+  const H = home.toUpperCase();
+  const here = coin.observations[home];
+  const needed = home === "btc"
+    ? ctx.btcConfirmations ?? ctx.xbtConfirmations
+    : ctx.xbtConfirmations;
+  if (here.state !== "unspent") {
+    reasons.push(`not unspent on ${H} (${here.state})`);
+  } else if (here.createdHeight === undefined) {
+    reasons.push(`its creating transaction is unconfirmed on ${H}`);
+  } else if (ctx.tips[home] === undefined) {
+    reasons.push(`${H} tip unknown`);
   } else {
-    const depth = ctx.tips.xbt - xbt.createdHeight + 1;
-    if (depth < ctx.xbtConfirmations) {
-      reasons.push(`only ${depth} of ${ctx.xbtConfirmations} confirmations on XBT`);
+    const depth = ctx.tips[home]! - here.createdHeight + 1;
+    if (depth < needed) {
+      reasons.push(`only ${depth} of ${needed} confirmations on ${H}`);
     }
     if (provenance === "coinbase" && depth < COINBASE_MATURITY) {
       reasons.push(`coinbase output is immature (${depth} of ${COINBASE_MATURITY} blocks)`);
     }
   }
-  for (const chain of ["btc", "ecx"] as const) {
+  for (const chain of (["btc", "xbt", "ecx"] as const).filter((c) => c !== home)) {
     const o = coin.observations[chain];
     if (o.state === "unknown") {
       reasons.push(`couldn't check ${chain.toUpperCase()} (${o.error})`);
     } else if (o.state !== "absent") {
       reasons.push(
-        `exists on ${chain.toUpperCase()} (${o.state}): it is a shared coin, not an XBT-only donor`,
+        `exists on ${chain.toUpperCase()} (${o.state}): it is a shared coin, not a ${H}-only donor`,
       );
     }
   }
   if (provenance === "unproven") {
     reasons.push(
-      "unproven origin: not an XBT coinbase and not made by a transaction this tool verified on " +
-        "XBT, so someone could still put its funding transaction on BTC. Make donors by mining, " +
-        "or by splitting to a donor address first with a 0x21 signer",
+      `unproven origin: not a ${H} coinbase and not made by a transaction this tool verified on ` +
+        `${H}, so someone could still put its funding transaction on another chain. Make donors by ` +
+        "mining, or by splitting to a donor address first with a protected transaction",
     );
   }
   return { eligible: reasons.length === 0, reasons };
@@ -132,21 +163,27 @@ export function isCoinbase(rawTx: string): boolean {
 /** Works out each donor's provenance and eligibility from a scan of the donor descriptors. */
 export async function evaluateDonors(
   scan: ScanResult,
-  xbt: ChainBackend | undefined,
-  xbtConfirmations: number,
-  protectedTxids: Set<string>,
+  backends: Partial<Record<DonorHome, ChainBackend>>,
+  confirmations: Record<DonorHome, number>,
+  protectedByHome: Record<DonorHome, Set<string>>,
 ): Promise<DonorScan> {
   const warnings = [...scan.warnings];
   const coins: DonorCoin[] = [];
-  const ctx = { tips: scan.tips, xbtConfirmations };
+  const ctx = {
+    tips: scan.tips,
+    xbtConfirmations: confirmations.xbt,
+    btcConfirmations: confirmations.btc,
+  };
   for (const coin of scan.coins) {
+    const home = homeOf(coin);
     let provenance: DonorProvenance = "unproven";
-    if (coin.observations.xbt.state === "unspent") {
-      if (protectedTxids.has(coin.txid)) {
+    if (coin.observations[home].state === "unspent") {
+      const backend = backends[home];
+      if (protectedByHome[home].has(coin.txid)) {
         provenance = "protected-spend";
-      } else if (xbt) {
+      } else if (backend) {
         try {
-          if (isCoinbase(await xbt.rawTransaction(coin.txid))) provenance = "coinbase";
+          if (isCoinbase(await backend.rawTransaction(coin.txid))) provenance = "coinbase";
         } catch (error) {
           warnings.push(
             `${coin.txid.slice(0, 8)}:${coin.vout}: couldn't read its creating transaction ` +
@@ -155,7 +192,7 @@ export async function evaluateDonors(
         }
       }
     }
-    coins.push({ ...coin, provenance, ...assessDonor(coin, ctx, provenance) });
+    coins.push({ ...coin, home, provenance, ...assessDonor(coin, ctx, provenance, home) });
   }
   return {
     version: 1,
@@ -179,5 +216,8 @@ export const donorKey = (c: { txid: string; vout: number }) => `${c.txid}:${c.vo
 
 /** The shortest summary of a donor for tables. */
 export function describeDonor(c: DonorCoin): string {
-  return c.eligible ? c.provenance : `${c.provenance} · NOT usable: ${c.reasons[0]}`;
+  const home = (c.home ?? "xbt").toUpperCase();
+  return c.eligible
+    ? `${home} donor · ${c.provenance}`
+    : `${home} · ${c.provenance} · NOT usable: ${c.reasons[0]}`;
 }
