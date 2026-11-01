@@ -129,8 +129,9 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
   - [x] BTC-first with a BTC donor (`plan --btc-first`): BTC with a donor, ECX, then a plain XBT
         split that `broadcast` holds back until BTC and ECX are deep. Tested against real nodes. Not
         done: fee bump of BTC transactions, a real hardware wallet run.
-  - [ ] A donor pool that tracks where each donor came from (coinbase / protected-spend / derived).
-  - [ ] A fan-out transaction to make several donors.
+  - [x] A donor pool that tracks where each donor came from: `donor scan` records the home chain
+        and the origin of each donor (coinbase / protected-spend / verified-funding / unproven).
+  - [x] A fan-out transaction to make several donors (`donor fanout`).
   - [ ] An opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Testnet profiles for rehearsals: testnet4 BLAKE2b (fork at 150,308) and ECX betanet (marker
       499,999,999). Each needs its own pinned checkpoints.
@@ -149,15 +150,12 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 
 ## 5. Project hygiene
 
-- [ ] **Regtest playground with real signers.** `deno task regtest` is built and was exercised end
-      to end through the UI's HTTP API with a stand-in wallet exporting `tpub` keys, but it has not
-      been tried with Sparrow, the Sparrow BLAKE2b build or Shrike yet. Things to confirm:
-  - [ ] Sparrow connects to the BTC node (Core 31.0, regtest) and shows the funded coins.
-  - [ ] The Sparrow BLAKE2b build connects to the Knots node, and Shrike produces 0x21 signatures
-        from the XBT PSBTs.
-  - [ ] Each signer accepts our PSBTs (BIP32 origins, previous transactions, multisig global xpubs)
-        and the signed files import back into the UI.
-  - [ ] Write the working signer steps into the README once confirmed.
+- [x] **Regtest playground with real signers.** `deno task regtest` was tried with real Sparrow and
+      Shrike wallets (reported by the project owner): both connected to their nodes, imported
+      descriptors, exported our PSBTs, signed them, and the signed files went through upload,
+      verify and broadcast in the UI. The steps are in the README ("Regtest playground").
+  - [ ] Still to try in the playground: the Sparrow BLAKE2b build on the Knots node by itself, and
+        multisig and Taproot PSBTs with real signers.
 
 - [x] CI: fmt, lint, type-check and tests on every push (`.github/workflows/ci.yml`).
 - [x] Regtest integration suite (`deno task test:integration`, `tests/integration/`): real Bitcoin
