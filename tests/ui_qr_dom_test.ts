@@ -30,11 +30,10 @@ class El {
   }
   remove() {}
   getContext() {
-    const self = this;
     return {
       fillStyle: "",
-      fillRect() {
-        self.fills++;
+      fillRect: () => {
+        this.fills++;
       },
     };
   }
