@@ -790,6 +790,18 @@ function devCard() {
   );
 }
 
+// Fee boxes: "auto" asks the backend for an estimate. A regtest node has none, so in the
+// playground they start at 2 sat/vB instead of failing with "No fee estimate".
+function feeInput() {
+  const dev = state.dev?.enabled;
+  return h("input", {
+    placeholder: "auto",
+    class: "w80",
+    value: dev ? "2" : undefined,
+    title: dev ? "Regtest nodes have no fee estimates, so this starts at 2 sat/vB" : undefined,
+  });
+}
+
 function viewDonors() {
   const d = state.donors ?? { descriptors: [], scan: null };
   const desc = h("input", { placeholder: "donor wallet descriptor", class: "grow" });
@@ -840,7 +852,7 @@ function viewDonors() {
 
   const outputs = h("input", { value: "3", class: "w60" });
   const each = h("input", { placeholder: "even split", class: "w120" });
-  const feeXbt = h("input", { placeholder: "auto", class: "w80" });
+  const feeXbt = feeInput();
   const homes = new Set(
     selected.map((k) => coins.find((c) => `${c.txid}:${c.vout}` === k).home ?? "xbt"),
   );
@@ -863,7 +875,7 @@ function viewDonors() {
   );
   const alsoEcx = h("input", { type: "checkbox" });
   alsoEcx.checked = true;
-  const feeXbt2 = h("input", { placeholder: "auto", class: "w80" });
+  const feeXbt2 = feeInput();
   const planWith = () => {
     if (!home) return alert("Select donors of one chain: XBT donors, or BTC donors.");
     const args = ["plan", "--batch", batch.value];
@@ -884,16 +896,26 @@ function viewDonors() {
     h(
       "div",
       { class: "card" },
-      h("h2", {}, "Advanced: XBT donor route"),
+      h("h2", {}, "Advanced: donor routes"),
       h(
         "p",
         { class: "note" },
-        "A donor is a coin that exists on XBT only. An XBT split that also spends a donor can't be valid on BTC or ECX, so your shared coin can be signed with a plain SIGHASH_ALL signature (stock hardware wallets can do that) instead of 0x21.",
+        "A donor is a coin that exists on ONE chain only, so a transaction that also spends it can't be valid on the others. That lets your shared coins be signed with a plain SIGHASH_ALL signature (stock hardware wallets can do that) instead of needing a special signer.",
       ),
       h(
         "p",
         { class: "note" },
-        "A donor must be absent from BTC and ECX, and be an XBT coinbase or an output of a split this tool verified. Every donor you spend publicly links the donor wallet to the coins it is spent with on XBT, and its value ends up at your XBT destination.",
+        "XBT donors (forks first): the XBT split spends an XBT-only donor, which replaces the 0x21 signer. ECX keeps its locktime and BTC is left alone until the forks are split.",
+      ),
+      h(
+        "p",
+        { class: "note" },
+        "BTC donors (BTC first): your BTC copy is moved first, with a BTC-only donor next to it. Then ECX, then XBT with a plain signature; the XBT files are held back until the coin is spent and confirmed on BTC and ECX. This needs a BTC destination: set it in Wallet. Tick BTC donors below and “Create plan with donors” builds this route.",
+      ),
+      h(
+        "p",
+        { class: "note" },
+        "A donor must be absent from the other chains and have a provable origin: a coinbase of its chain, an output of a split this tool verified, or a donor funded elsewhere whose funding transaction can be traced on chain. Every donor you spend publicly links the donor wallet to the coins it is spent with, and its value ends up at the destination on that chain.",
       ),
     ),
     h(
@@ -965,7 +987,7 @@ function viewDonors() {
         { class: "row" },
         h("label", {}, "New donors each", outputs),
         h("label", {}, "Sats per new donor", each),
-        h("label", {}, "XBT fee (sat/vB)", feeXbt),
+        h("label", {}, "Fee (sat/vB)", feeXbt),
         h("button", {
           disabled: !selected.length,
           onclick: fanout,
@@ -987,7 +1009,7 @@ function viewDonors() {
         "div",
         { class: "row" },
         h("label", {}, "Batching", batch),
-        h("label", {}, "XBT fee (sat/vB)", feeXbt2),
+        h("label", {}, "Fee (sat/vB)", feeXbt2),
         h("label", {}, alsoEcx, " also plan ECX"),
         h("button", { disabled: !selected.length, onclick: planWith }, "Create plan with donors"),
       ),
@@ -1013,8 +1035,8 @@ function viewPlans() {
       "all coins in one transaction (links them)",
     ]].map(([v, t]) => h("option", { value: v }, t)),
   );
-  const feeEcx = h("input", { placeholder: "auto", class: "w80" });
-  const feeXbt = h("input", { placeholder: "auto", class: "w80" });
+  const feeEcx = feeInput();
+  const feeXbt = feeInput();
   const create = () => {
     const chains = signer.value ? "ecx,xbt" : "ecx";
     const args = ["plan", "--chains", chains, "--batch", batch.value];
