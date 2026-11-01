@@ -18,7 +18,12 @@ The guided route is **forks first, BTC last**:
 
 ## Install and run
 
-Requires [Deno 2.x](https://deno.com).
+**Release binary** (Linux x86_64, bundles Tor, no install needed): download, verify and extract from
+the [releases page](https://github.com/BrashRatel/splayed/releases) as described in the
+[README](../../README.md#quick-start), then run `./splayed --help`. The commands below are the same
+either way: swap `deno task cli` for `./splayed`.
+
+**From source** (any platform Deno supports): requires [Deno 2.x](https://deno.com).
 
 ```sh
 deno install

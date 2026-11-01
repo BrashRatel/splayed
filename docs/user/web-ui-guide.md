@@ -28,7 +28,9 @@ them**.
 
 **You will need:**
 
-- [Deno 2.x](https://deno.com) installed, and a terminal for the one start-up command.
+- splayed itself: either the [release binary](https://github.com/BrashRatel/splayed/releases) (Linux
+  x86_64, bundles Tor, no install needed) or [Deno 2.x](https://deno.com) to run from source. A
+  terminal for the one start-up command either way.
 - Your wallet's **output descriptor** (an xpub-based, public-keys-only string). Export it from your
   wallet. Never paste a seed or private key; splayed refuses them.
 - **Two destination wallets**, one for ECX and one for XBT, where the separated coins will go. A new
@@ -36,14 +38,16 @@ them**.
 - A **signer** for each chain. ECX works with any wallet, including hardware wallets. XBT needs one
   that supports the `0x21` signature (see [Signers](signers.md)). If you only have a stock hardware
   wallet, see [Advanced](#advanced-stock-hardware-wallets-and-moving-btc-first).
-- Tor, if you use the default public servers. splayed starts its own if none is running.
+- Tor, if you use the default public servers. splayed starts its own if none is running (the release
+  binary bundles it; from source, run `deno task fetch-tor` first or install Tor yourself).
 
-> **Not yet tested against live networks or real signers** (see [TODO.md](../../TODO.md)). Start
-> with one small coin.
+> **Not security-reviewed** (see [TODO.md](../../TODO.md)). Start with one small coin.
 
 ## 1. Start the UI
 
-In a terminal in the splayed folder:
+**Release binary:** in the folder you extracted it to, run `./splayed ui`.
+
+**From source,** in a terminal in the splayed folder:
 
 ```sh
 deno install     # first time only

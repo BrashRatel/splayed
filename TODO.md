@@ -86,9 +86,16 @@ and XBT away from BTC, BTC confirmed untouched. Still only one coin, still early
 
 ### Packaging and project
 
-- [ ] **Release artifacts.** `deno task compile` for Linux x86_64 packaged with
-      `vendor/tor/<platform>/`, signed, with published checksums. Other platforms can follow
-      (section 2). A source-only release is acceptable if you'd rather not ship binaries yet.
+- [x] **Release artifacts.** `deno task compile` for Linux x86_64 packaged with
+      `vendor/tor/linux-x86_64/`, signed, with published checksums. Other platforms can follow
+      (section 2).
+  - Done (2026-11-01): tagged and published as
+    [`v0.1.0-pre-alpha.1`](https://github.com/BrashRatel/splayed/releases/tag/v0.1.0-pre-alpha.1).
+    Verified before publishing: the standalone binary ran from a directory with no source tree and
+    served its own embedded UI; a clean copy of the packaged layout found the bundled `tor` binary,
+    bootstrapped it to 100%, and passed real identity checks on all three chains over real Tor
+    circuits. `SHA256SUMS` signed with the `SECURITY.md` key; re-verified against a fresh download
+    from the published release, not just the local build.
 - [x] **`SECURITY.md`**: contact `brash@in-btc.com` with the PGP key (fingerprint
       `E6D1FC8869F4317E0AEFC58851E2C57C67FA2A4A`, checked against the Keybase key), a disclosure
       policy (7-day acknowledgement, 90-day coordinated disclosure), and an up-to-date known

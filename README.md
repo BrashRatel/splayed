@@ -34,6 +34,27 @@ last**:
 
 ## Quick start
 
+### Release binary (Linux x86_64)
+
+No Deno install needed; Tor is bundled. Download, verify, then run from the
+[releases page](https://github.com/BrashRatel/splayed/releases) (pre-alpha releases aren't marked
+"latest" on GitHub, so go there directly):
+
+```sh
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS.asc
+sha256sum -c SHA256SUMS                 # check the download
+gpg --verify SHA256SUMS.asc SHA256SUMS  # check it against the key in SECURITY.md
+tar xzf splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
+cd splayed-0.1.0-pre-alpha.1-linux-x86_64
+```
+
+Then run the same commands as below, with `./splayed` in place of `deno task cli` (and
+`./splayed ui` in place of `deno task ui`). Other platforms: run from source for now.
+
+### From source (any platform Deno supports)
+
 Requires [Deno 2.x](https://deno.com).
 
 ```sh
@@ -50,7 +71,8 @@ deno task cli broadcast <plan-id>
 deno task cli track <plan-id>
 ```
 
-Prefer a browser? `deno task ui` runs the same steps in a local web UI.
+Prefer a browser? `deno task ui` (or `./splayed ui` for the release binary) runs the same steps in a
+local web UI.
 
 ## Documentation
 

@@ -16,6 +16,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **First tagged release.** `v0.1.0-pre-alpha.1` is published with a Linux x86_64 binary
+  (`deno task compile`) bundled with the pinned Tor 0.4.9.15 binary at `vendor/tor/linux-x86_64/`, a
+  `SHA256SUMS` file and a detached signature from the `SECURITY.md` key. Verified standalone (no
+  source tree) before publishing, and re-verified against a fresh download afterward. Other
+  platforms and a CI release workflow are still open (`TODO.md`).
 - **First live mainnet run.** The full guided route (scan, plan, sign, verify, broadcast, track,
   rescan) split one real coin's ECX and XBT copies away from BTC, with BTC confirmed untouched at
   its original address and both forks confirmed at their new ones. ECX signed with stock SeedSigner
