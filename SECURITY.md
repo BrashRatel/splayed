@@ -16,7 +16,9 @@ The most sensitive parts:
 
 ## Known limitations
 
-See TODO.md, sections 1 and 2. In short:
+See [TODO.md](TODO.md). In short:
 
-- Nothing has been tested against live servers, real signers, or a real Tor circuit yet.
-- The bundled Tor isn't pinned yet.
+- Nothing has moved real coins on mainnet yet, and the code has not had an independent security
+  review.
+- Backends have been tested against regtest nodes and a few default servers, not against every kind
+  of real server.

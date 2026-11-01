@@ -31,6 +31,7 @@ your path.
 | [Testing](dev/testing.md)                       | Unit tests and the Docker regtest suite  |
 | [Architecture](dev/architecture.md)             | Project layout and modules               |
 | [Releasing](dev/releasing.md)                   | Bundling Tor, building a release         |
+| [Doc screenshots](dev/docs-screenshots.md)      | Regenerating the Web UI guide images     |
 
 ## Project files
 

@@ -13,5 +13,5 @@ deno task compile                      # dist/forksplit; ship it next to vendor/
 Browser 16.0 (tor 0.4.9.15). Re-pin with `update-tor-manifest` after checking the signature
 yourself.
 
-Before tagging a release, work through the release blockers in [TODO.md](../../TODO.md) and update
-[CHANGELOG.md](../../CHANGELOG.md).
+Before tagging a release, work through the release gates (section 1) in [TODO.md](../../TODO.md) and
+update [CHANGELOG.md](../../CHANGELOG.md).

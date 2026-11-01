@@ -1,180 +1,182 @@
 # forksplit TODO
 
-Status as of 2026-10-31: milestones 1–4 are done (see the README roadmap). Everything below is still
-open. The build environment couldn't reach live explorers, the Tor network, torproject.org or
-dl.deno.land, so **nothing has run against real servers, real signers or a real Tor circuit**.
+Target: a **pre-alpha** release, so more people can test. Section 1 is everything that has to be
+true before tagging it. Everything after that is follow-up work and does not block the release.
 
-## 1. Before anyone uses it with real coins (release blockers)
+What has been run so far: the full guided route, both donor routes, fee bumps and reorg handling
+against real Bitcoin Core, Knots and eCash nodes on regtest (`deno task test:integration`); Sparrow
+and Shrike signing our PSBTs on the regtest playground; a SeedSigner scanning the QR export; the
+default servers probed through Tor. **Nothing has moved real coins on mainnet.**
 
-- [ ] **Live test, one small coin per chain.**
-  1. Scan.
-  2. Plan with `--batch coin`.
-  3. Sign:
-     - ECX with an ordinary wallet: Sparrow, plus a hardware wallet (Coldcard, Trezor or Ledger) via
-       PSBT;
-     - XBT with the real 0x21 signer.
-  4. `verify`, `broadcast`, `track`, then rescan.
-  5. Confirm the coin's BTC copy is untouched and shows as separated.
-- [ ] **XBT signers and PSBT_IN_SIGHASH_TYPE = 0x21.** Check each one actually produces 0x21
-      signatures from our PSBTs:
-  - [ ] Bitcoin Knots `walletprocesspsbt` (does it need an explicit `sighashtype` argument, and with
-        what spelling?)
-  - [ ] Sparrow BLAKE2b build
-  - [ ] Shrike
-  - [ ] embit
-  - [ ] privkeyio firmware forks (experimental)
+## 1. Pre-alpha release gates
 
-  Write the working steps for each signer into the README.
-- [ ] **ECX signers.** Confirm hardware wallets sign locktime 499,999,998 without complaint, and
-      that the signed transaction keeps the locktime and sequences (`verify` checks this, but we
-      should know which devices warn or refuse).
-- [ ] **Default endpoints.** Probed through Tor on 2026-10-31.
-  - [x] mempool.space onion matches the `Onion-Location` header mempool.space serves.
-  - [x] mempool.guide onion matches the `Onion-Location` header mempool.guide serves.
-  - [x] Both onions serve the REST API under `/api` (`/blocks/tip/height` answered 200).
-  - [ ] explorer.ecash.com answered through a Tor exit with no Cloudflare challenge on one request.
-        Repeat from several exits and under scan load before ticking.
-  - [x] esplora.ecash.ninja answers as the ECX fallback.
-- [ ] **Checkpoint hashes** in `src/core/profiles.ts`.
+### Identity and endpoints (wrong here means wrong chain)
+
+- [ ] **Checkpoint hashes** in `src/core/profiles.ts`:
   - [ ] Re-verify every hash from two independent sources.
-  - [ ] ECX 974,017 in particular came from one explorer (via the user) and needs a second source,
-        such as an eCash node (v1.2.0 is what the pinned commit reports).
-  - [ ] Make sure it's buried deep enough that a reorg can't replace it.
-- [x] **Pin a Tor release.** Pinned Tor Browser 16.0, which bundles tor 0.4.9.15 (checked by running
-      the fetched Linux binary). The signing-key fingerprint
-      (`EF6E286DDA85EA2A4BA7DE684E2C6E8793298290`) was confirmed independently, and
-      `update-tor-manifest` verified the release signature against it.
-  - [ ] Run `deno task fetch-tor --all` and smoke-test the macOS and Windows bundles. Only the Linux
-        x86_64 bundle has been fetched and run so far.
-- [ ] **Real Tor run.**
-  - [ ] Confirm managed Tor bootstraps on Linux, macOS and Windows.
-  - [ ] Confirm per-chain and per-broadcast circuits really differ: check Tor's control port, or
-        that exit IPs differ.
-- [ ] **Release builds.**
-  - [ ] Get `deno task compile` working for each platform.
-  - [ ] Package each build with `vendor/tor/<platform>/`.
-  - [ ] Sign the release artifacts.
-  - [ ] Publish checksums.
-- [ ] **Security review.** Get an independent review of `src/core/sigcheck.ts`,
-      `src/core/planner.ts`, `src/core/psbt.ts`, `src/net/*` and `src/ui/server.ts` before a public
-      release.
+  - [ ] ECX 974,017 came from one explorer and needs a second source, such as an eCash node (v1.2.0
+        is what the pinned commit reports).
+  - [ ] Confirm it's buried deep enough that a reorg can't replace it.
+- [ ] **ECX default endpoint.** `explorer.ecash.com` answered through a Tor exit with no Cloudflare
+      challenge on one request. Repeat from several exits and under scan load. If it fails, decide
+      on a different default or ship with the fallback (`esplora.ecash.ninja`).
 
-## 2. Backends against real servers
+### One real run
 
-- [ ] Node RPC against real Bitcoin Core 31.x, Knots 29.4.x (XBT) and eCash v1.2.0 (the version the
-      pinned `ecash-com/bitcoin` commit reports):
-  - [x] `scantxoutset` with ranged descriptors: every regtest wallet scan uses it on all three
-        nodes.
-  - [x] `testmempoolaccept` reject reasons, checked on all three nodes: `missing-inputs`,
-        `txn-already-known`, `insufficient fee` (a lower-fee conflict; all three run full RBF, so
-        this is what a conflict looks like) are tolerated on the target chain, and
-        `mempool-script-verify-flag-failed` stops everything. "insufficient fee" was added to the
-        tolerated list.
-  - [x] Knots `getdeploymentinfo`: reports `blake2b` at the top level of the result, not under
-        `deployments` (confirmed on a Knots 29.4.1 regtest node; the check was wrong and is fixed).
-- [ ] Electrum against Fulcrum and electrs:
-  - [ ] an XBT server patched for 164-byte headers;
-  - [ ] the "transaction not found" error text for each implementation (`isNotFound`);
-  - [ ] large-history scripts.
-- [ ] Esplora/mempool:
-  - [ ] the `/fee-estimates` format on each default server;
-  - [ ] the `POST /tx` error format;
-  - [ ] rate limits (HTTP 429 handling and backoff).
+- [ ] **One live end-to-end run on mainnet with one small coin**, ECX and XBT only: scan, plan
+      `--batch coin`, sign ECX with an ordinary wallet and XBT with a real 0x21 signer, `verify`,
+      `broadcast`, `track`, rescan. Confirm the BTC copy is untouched and shows as separated.
+- [ ] **Working XBT signer steps in the docs** for at least one signer (Sparrow BLAKE2b build or
+      Shrike are the candidates; both already signed our PSBTs on regtest). Cover Knots
+      `walletprocesspsbt` (does it need an explicit `sighashtype`, and with what spelling?) only if
+      Knots is the one you pick. Put the steps in `docs/user/signers.md`.
+
+### Tor (Linux first)
+
+- [ ] Managed Tor bootstraps on Linux from the bundled binary (Tor Browser 16.0 / tor 0.4.9.15,
+      already pinned and signature-checked).
+- [ ] Per-chain and per-broadcast circuits really differ (Tor control port, or distinct exit IPs).
+      The docs claim this, so verify it.
+
+### Packaging and project
+
+- [ ] **Release artifacts.** `deno task compile` for Linux x86_64 packaged with
+      `vendor/tor/<platform>/`, signed, with published checksums. Other platforms can follow
+      (section 2). A source-only release is acceptable if you'd rather not ship binaries yet.
+- [ ] **`SECURITY.md`**: set the disclosure contact (it still says TBD) and the disclosure policy.
+      Its "known limitations" list is out of date: it says Tor isn't pinned, and it points at the
+      old TODO sections.
+- [ ] **Name and license.** Decide before going public. The license is MIT today, to match the
+      vendored smolcars code.
+- [ ] **Pre-alpha messaging.**
+  - [ ] README status line says pre-alpha and no longer says "milestone 4".
+  - [ ] Release notes state plainly: not security-reviewed, never run on mainnet beyond the one
+        small-coin test, start with one small coin.
+  - [ ] Known limitations are listed in the release notes: inputs with script timelocks (CLTV) are
+        unsupported; Taproot script trees, miniscript and `combo()` are unsupported; fee bumps for
+        BTC and fan-out transactions are unsupported; PSBT v2 input is unsupported.
+  - [ ] Move `CHANGELOG.md` "Unreleased" under the version heading and bump `deno.json` from
+        `0.1.0-dev`.
+  - [ ] An issue template for tester reports (wallet, signer, chain, backend, what was verified).
+
+## 2. Before beta (verification and hardening)
+
+Wanted, but this is the work pre-alpha testers help with.
+
+### Review
+
+- [ ] Independent review of `src/core/sigcheck.ts`, `src/core/planner.ts`, `src/core/psbt.ts`,
+      `src/net/*` and `src/ui/server.ts`.
+
+### Signers
+
+- [ ] Each remaining XBT signer produces 0x21 from our PSBTs, with steps written down: Bitcoin
+      Knots, Sparrow BLAKE2b build (alone on the Knots node), Shrike, embit, privkeyio firmware
+      forks (experimental).
+- [ ] ECX hardware wallets (Coldcard, Trezor, Ledger) sign locktime 499,999,998 without complaint
+      and keep the locktime and sequences. Record which devices warn or refuse.
+- [ ] A real stock hardware wallet signing both the shared and the donor input (XBT donor route).
+- [ ] **Scan signed** with a real camera, and a Jade, Keystone and Passport. The export was only
+      tried on a SeedSigner; the UR coding is checked against the reference implementation, but the
+      scanning UI has not been in front of a camera.
+- [ ] Multisig and Taproot PSBTs with real signers.
+
+### Backends against real servers
+
+- [ ] Node RPC against mainnet Core 31.x, Knots 29.4.x and eCash v1.2.0. Only regtest so far.
+- [ ] Electrum against Fulcrum and electrs: an XBT server patched for 164-byte headers, the
+      "transaction not found" text per implementation (`isNotFound`), large-history scripts, and
+      reorg status per transaction (unit-tested against a fake server only).
+- [ ] Esplora/mempool: `/fee-estimates` format on each default server, the `POST /tx` error format,
+      HTTP 429 handling and backoff.
 - [ ] Remote node RPC over an onion address, end to end.
 
-## 3. Safety and correctness follow-ups
+### Platforms
 
-- [x] **Reorg handling.** `track` records each split's block and reports a split that was re-mined
-      in another block, went back to the mempool, left the chain, or had its input spent by a
-      different transaction; `scan` warns when a spend disappears or is replaced. Tested against
-      real nodes with `invalidateblock`.
-  - [x] The "left the chain and the mempool, input unspent" case, against a real node: reorg the
-        split out, move the node's clock past the 14-day expiry, and let the mempool trim. `track`
-        reports it and `broadcast` sends it again.
-  - [x] Electrum per-transaction status (from the history of the transaction's first output script).
-        Unit-tested against a fake server only; try it against Fulcrum and electrs.
-  - [x] Reorg alerts in the web UI plans view. Not yet looked at in a real browser.
-- [x] **Stuck splits.** `bump` writes a BIP125 replacement plan (same inputs and destination, higher
-      fee) that is signed, verified and broadcast like any plan. Tested against real nodes.
-  - [x] CPFP (`bump --cpfp`) for the case where the original can't be replaced. Tested on ECX and
-        XBT against real nodes (package rate checked in the node's mempool). Not done: CPFP of a
-        donor transaction or a multi-output one.
-  - [x] Fee bump buttons in the web UI (per split and for the whole plan). Not yet looked at in a
-        real browser.
-  - [x] Bump one transaction of a batch without some of its coins (`bump --tx N --drop txid:vout`).
-- [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins. Guidance in the UI,
-      not just the CLI.
-- [ ] **Chain upgrades.** Watch for:
-  - eCash node upgrades after v1.2.0, which may need new checkpoints;
-  - XBT Knots changes: coinbase maturity ends at block 979,920, RDTS expires 2027-09-01.
+- [ ] `deno task fetch-tor --all` and smoke-test the macOS and Windows Tor bundles (only Linux
+      x86_64 has been fetched and run), then `compile` and package each platform.
+- [ ] Managed Tor bootstraps on macOS and Windows.
+
+### Browser checks
+
+- [ ] Look at these in a real browser: reorg alerts, fee bump buttons, and the donor screen (these
+      were rendered only against a stub DOM or not looked at).
+
+### Safety follow-ups
+
+- [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins, with guidance in the
+      UI and not just the CLI.
+- [ ] **Chain upgrades.** Watch for eCash node upgrades after v1.2.0 (may need new checkpoints) and
+      XBT Knots changes: coinbase maturity ends at block 979,920, RDTS expires 2027-09-01.
 - [ ] **Explicit chain-specific coins.** Detect coins that are already chain-specific because their
-      creating transaction is protected, rather than only "absent elsewhere". Feeds the donor work
-      in section 4.
-- [ ] **Locked inputs.** Decide how to handle inputs with script timelocks (CLTV breaks the ECX
-      marker): today they're simply not supported.
+      creating transaction is protected, rather than only "absent elsewhere". Feeds the donor work.
+- [ ] **Locked inputs.** Decide how to handle script timelocks (CLTV breaks the ECX marker). Today
+      they're unsupported; make sure the tool says so clearly instead of failing obscurely.
 
-## 4. Features
+## 3. Features and nice-to-have
 
-- [ ] **Advanced donor-input routes** (spec §4, opt-in):
-  - [x] Forks-first with an XBT donor, so stock hardware wallets can do the XBT step. Donor wallet,
-        `donor scan`, `plan --donor`, verify, broadcast preflight, tested against real nodes.
-    - [x] Donor fan-out (`donor fanout`): one transaction per donor, many outputs back to the donor
-          wallet. Tested against real nodes. A fan-out can't be fee-bumped yet (`bump` handles
-          single-output transactions only).
-    - [x] Accept a donor whose funding transaction was made elsewhere (`verified-funding`): traced
-          on chain to a 0x21 signature or back to a coinbase / a split this tool verified.
-    - [x] A donor screen in the web UI, behind an Advanced toggle (import, scan, select, fan out,
-          plan). Rendered only against a stub DOM so far; not looked at in a real browser.
-    - [ ] Try it with a real stock hardware wallet signing both the shared and the donor input.
-  - [x] BTC-first with a BTC donor (`plan --btc-first`): BTC with a donor, ECX, then a plain XBT
-        split that `broadcast` holds back until BTC and ECX are deep. Tested against real nodes. Not
-        done: fee bump of BTC transactions, a real hardware wallet run.
-  - [x] A donor pool that tracks where each donor came from: `donor scan` records the home chain and
-        the origin of each donor (coinbase / protected-spend / verified-funding / unproven).
-  - [x] A fan-out transaction to make several donors (`donor fanout`).
-  - [ ] An opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Testnet profiles for rehearsals: testnet4 BLAKE2b (fork at 150,308) and ECX betanet (marker
-      499,999,999). Each needs its own pinned checkpoints.
+      499,999,999), each with its own pinned checkpoints.
 - [ ] PSBT v2 (BIP370) input, for signers that only emit v2.
 - [ ] Descriptors: Taproot script trees, miniscript, `combo()`.
-- [x] Air-gapped signers: animated QR (BC-UR `crypto-psbt`) export and import of PSBTs in the UI.
-  - [ ] Try it with a real signer and a real camera (Keystone, Passport, Jade, SeedSigner). Nothing
-        here has been in front of a camera: the UR coding is checked against the reference
-        implementation and the drawn QR codes against the vendored reader, but not the scanning UI.
-  - [ ] BBQr (Coldcard Q) and plain base64 QR codes; the `ur:psbt` type is read but not written.
+- [ ] Fee bump for BTC transactions, fan-out transactions, and CPFP of donor or multi-output
+      transactions.
+- [ ] Air-gapped QR: BBQr (Coldcard Q) and plain base64 QR codes (the `ur:psbt` type is read but not
+      written).
 - [ ] UI:
+  - [ ] guided first-run wizard;
   - [ ] live Tor bootstrap progress;
   - [ ] edit scan gap limit and jitter;
   - [ ] archive or delete plans;
   - [ ] show the per-coin plan, verify and broadcast state on the Coins tab;
-  - [ ] a guided first-run wizard.
-- [ ] Batch policy improvements, for example clustering coins already linked on-chain (common-input
-      heuristics) rather than just by address.
+  - [ ] an opt-in screen explaining the donor rules and the on-chain linkage they create.
+- [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just
+      by address.
 - [ ] `status --json` and `plan --json` output for scripting.
 
-## 5. Project hygiene
+## 4. Project hygiene
 
-- [x] **Regtest playground with real signers.** `deno task regtest` was tried with real Sparrow and
-      Shrike wallets (reported by the project owner): both connected to their nodes, imported
-      descriptors, exported our PSBTs, signed them, and the signed files went through upload, verify
-      and broadcast in the UI. The steps are in the README ("Regtest playground").
-  - [ ] Still to try in the playground: the Sparrow BLAKE2b build on the Knots node by itself, and
-        multisig and Taproot PSBTs with real signers.
+- [ ] Fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its only
+      coverage today).
+- [ ] Regtest suite coverage still missing: other m-of-n shapes, reorgs, RBF fee bump, a
+      hardware-wallet-style signer, and a CI job (needs Docker and a ~5 minute first build).
+- [ ] Contributor docs: how to add a chain profile (the `src/` layout is in
+      `docs/dev/architecture.md`).
+- [ ] Keep `docs/images/web-ui/` current when the UI changes (`docs/dev/docs-screenshots.md`).
 
-- [x] CI: fmt, lint, type-check and tests on every push (`.github/workflows/ci.yml`).
-- [x] Regtest integration suite (`deno task test:integration`, `tests/integration/`): real Bitcoin
-      Core 31.0, Knots 29.4.1 (BLAKE2b at regtest height 110) and eCash (built from the pinned
-      commit, which reports v1.2.0) in Docker. Drives the real CLI through init, import, scan, plan,
-      verify, broadcast, track and rescan, and checks replay rejection on the other nodes.
-  - [x] Covers `pkh`, `wpkh`, `sh(wpkh)`, `tr` key path and 2-of-3 `sh`, `wsh` and `sh(wsh)`
-        `sortedmulti`, including a multisig input below its threshold being refused.
-  - [x] Mixed batch: one `--batch all` transaction per fork spending all seven script types.
-  - [ ] Still to cover: other m-of-n shapes, Taproot with script trees or miniscript (not supported
-        yet), reorgs, RBF fee bump, a hardware-wallet-style signer, a CI job (needs Docker and a ~5
-        minute first build).
-  - [ ] Add a fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its
-        only coverage today).
-- [ ] `SECURITY.md` contact address; decide on a disclosure policy.
-- [ ] Decide on the project name and license before going public. The current license is MIT, to
-      match the vendored smolcars code.
-- [ ] Contributor docs: architecture overview (`src/` layout), how to add a chain profile.
+## Done
+
+Kept for reference; not open work.
+
+- **Core:** profiles with pinned constants, Tor transport and manager, Esplora, Electrum and
+  node-RPC backends, descriptors, scan and status, `plan`, `verify`, `broadcast`, `track`, local web
+  UI.
+- **Tor pinned:** Tor Browser 16.0 (tor 0.4.9.15), checked by running the fetched Linux binary. The
+  signing-key fingerprint (`EF6E286DDA85EA2A4BA7DE684E2C6E8793298290`) was confirmed independently
+  and `update-tor-manifest` verified the release signature against it.
+- **Default endpoints (probed through Tor on 2026-10-31):** the mempool.space and mempool.guide
+  onions match each site's `Onion-Location` header and serve the REST API under `/api`;
+  `esplora.ecash.ninja` answers as the ECX fallback.
+- **Real-node behavior confirmed on regtest:** `scantxoutset` with ranged descriptors on all three
+  nodes; `testmempoolaccept` reject reasons (`missing-inputs`, `txn-already-known` and
+  `insufficient fee` are tolerated on the target chain; `mempool-script-verify-flag-failed` stops
+  everything; all three run full RBF); Knots `getdeploymentinfo` reports `blake2b` at the top level
+  of the result, not under `deployments`.
+- **Reorgs:** `track` records each split's block and reports re-mined, back-in-mempool,
+  gone-from-chain and conflicting-spend cases (tested with `invalidateblock`, including the 14-day
+  mempool expiry case); `scan` warns when a spend disappears or is replaced; alerts appear in the UI
+  plans view.
+- **Stuck splits:** `bump` (BIP125 RBF), `--cpfp` (tested on ECX and XBT), `--drop` for batches, and
+  fee-bump buttons in the UI.
+- **Donor routes:** XBT donor route (donor wallet, `donor scan`, `plan --donor`), fan-out, donors
+  funded elsewhere (`verified-funding`), origin tracking, BTC-first (`plan --btc-first`, XBT held
+  back until BTC and ECX are deep), and a Donors tab in the UI behind Advanced. All tested against
+  real nodes on regtest.
+- **Air-gapped signing:** animated QR export and camera import (UR `crypto-psbt`).
+- **Regtest:** `deno task regtest` playground tried with real Sparrow and Shrike wallets; the
+  integration suite runs real Core 31.0, Knots 29.4.1 and eCash (pinned commit, v1.2.0) in Docker
+  and covers `pkh`, `wpkh`, `sh(wpkh)`, `tr` key path, 2-of-3 `sh`/`wsh`/`sh(wsh)` `sortedmulti`
+  (including a multisig input below its threshold being refused) and a mixed batch spending all
+  seven script types.
+- **CI:** fmt, lint, type-check and tests on every push (`.github/workflows/ci.yml`).
+- **Docs:** role-based `docs/`, the CLI reference and the screenshot Web UI guide.
