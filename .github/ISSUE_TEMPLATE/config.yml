@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/BrashRatel/forksplit/blob/main/SECURITY.md
+    url: https://github.com/BrashRatel/splayed/blob/main/SECURITY.md
     about: Report vulnerabilities privately (email, PGP preferred). Do not open a public issue.

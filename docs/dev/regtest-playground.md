@@ -32,7 +32,7 @@ deno task regtest ui                          # open the printed URL
    upload button. Then verify, broadcast and track.
 6. **`verify` asks all three nodes.** The target chain must accept the transaction and the other two
    must reject it. `deno task regtest check <plan-id>` asks them again directly, independent of
-   forksplit's own checks, and prints a table of what each node said.
+   Splayed's own checks, and prints a table of what each node said.
 7. **`mine`** to confirm what you broadcast (`deno task regtest mine all 1`). `reorg ecx 2` undoes
    two ECX blocks so you can see what `track` reports.
 
@@ -49,12 +49,11 @@ The node RPC ports bind to `0.0.0.0` by default, so a wallet on another machine 
 connect to `<this-host>:18443` (BTC), `18543` (XBT) and `18643` (ECX). The RPC password (`regtest`)
 is public: use a network you trust, or pass `up --bind 127.0.0.1` to keep the ports on this machine.
 
-`ui` listens on all interfaces too (test environment only: the real `forksplit ui` is
-loopback-only). Open `http://<this-host>:18080/#token=...` from the LAN, using the token it prints;
-it is plain HTTP. `ui --bind 127.0.0.1` keeps it local, and then `ssh -L 18080:127.0.0.1:18080 host`
-works.
+`ui` listens on all interfaces too (test environment only: the real `splayed ui` is loopback-only).
+Open `http://<this-host>:18080/#token=...` from the LAN, using the token it prints; it is plain
+HTTP. `ui --bind 127.0.0.1` keeps it local, and then `ssh -L 18080:127.0.0.1:18080 host` works.
 
 ## Lifecycle
 
 `stop` pauses the nodes, `up` resumes them with the same chains, and `down` deletes everything
-(containers, volumes and the playground's forksplit data under `.data/regtest/`).
+(containers, volumes and the playground's Splayed data under `.data/regtest/`).

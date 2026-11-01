@@ -1,15 +1,15 @@
 import { scanSignedPsbt, showPsbtQr } from "./qr.js";
-// forksplit web UI. Every action runs a forksplit CLI command on the local server (same checks,
+// splayed web UI. Every action runs a splayed CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
 const token = (() => {
   const m = /token=([\w-]+)/.exec(location.hash);
   if (m) {
-    sessionStorage.setItem("forksplit-token", m[1]);
+    sessionStorage.setItem("splayed-token", m[1]);
     history.replaceState(null, "", location.pathname);
     return m[1];
   }
-  return sessionStorage.getItem("forksplit-token");
+  return sessionStorage.getItem("splayed-token");
 })();
 
 // Theme: dark by default; "light" is remembered in this browser only.
@@ -19,14 +19,14 @@ function applyTheme(light) {
 }
 let lightTheme = false;
 try {
-  lightTheme = localStorage.getItem("forksplit-theme") === "light";
+  lightTheme = localStorage.getItem("splayed-theme") === "light";
 } catch { /* storage unavailable: stay dark */ }
 applyTheme(lightTheme);
 document.getElementById("theme-toggle").addEventListener("click", () => {
   lightTheme = !lightTheme;
   applyTheme(lightTheme);
   try {
-    localStorage.setItem("forksplit-theme", lightTheme ? "light" : "dark");
+    localStorage.setItem("splayed-theme", lightTheme ? "light" : "dark");
   } catch { /* not persisted */ }
 });
 
@@ -44,7 +44,7 @@ const state = {
 // Advanced routes (the donor wallet) are hidden until switched on; remembered in this browser only.
 let advanced = false;
 try {
-  advanced = localStorage.getItem("forksplit-advanced") === "on";
+  advanced = localStorage.getItem("splayed-advanced") === "on";
 } catch { /* storage unavailable: stay off */ }
 function applyAdvanced() {
   document.getElementById("donors-tab").classList.toggle("hidden", !advanced);
@@ -54,7 +54,7 @@ function applyAdvanced() {
 document.getElementById("advanced-toggle").addEventListener("click", () => {
   advanced = !advanced;
   try {
-    localStorage.setItem("forksplit-advanced", advanced ? "on" : "off");
+    localStorage.setItem("splayed-advanced", advanced ? "on" : "off");
   } catch { /* not persisted */ }
   applyAdvanced();
   render();
@@ -115,7 +115,7 @@ async function run(args) {
     return;
   }
   logLine(
-    `$ forksplit ${args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ")}`,
+    `$ splayed ${args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ")}`,
     "cmd",
   );
   try {
@@ -263,7 +263,7 @@ function viewNetwork() {
     h(
       "p",
       { class: "note" },
-      "auto: use a Tor already running (or the Tor Browser), else start forksplit's own. managed: always start our own. system: only a Tor you run, never start one.",
+      "auto: use a Tor already running (or the Tor Browser), else start Splayed's own. managed: always start our own. system: only a Tor you run, never start one.",
     ),
     h(
       "div",
@@ -1291,7 +1291,7 @@ function render() {
       h(
         "div",
         { class: "banner bad" },
-        "No access token. Open the exact URL printed by `forksplit ui`.",
+        "No access token. Open the exact URL printed by `splayed ui`.",
       ),
     );
     return;

@@ -27,7 +27,7 @@ spendReal(ecx, ids[2], 0, 974_000, 51);
 spendReal(ecx, ids[3], 0, 974_490, 52);
 const chains = { btc, xbt, ecx } as const;
 const dir = await Deno.makeTempDir();
-await Deno.writeTextFile(`${dir}/forksplit.toml`, "[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n");
+await Deno.writeTextFile(`${dir}/splayed.toml`, "[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n");
 const io: CliIO = {
   out: () => {},
   err: () => {},

@@ -7,8 +7,8 @@ the UI's security properties.
 deno task ui        # or: deno task cli ui [--port N] [--open]
 ```
 
-The UI runs the same `forksplit` commands as the CLI, with the same checks. Their confirmation
-prompts appear as dialogs in the browser.
+The UI runs the same `splayed` commands as the CLI, with the same checks. Their confirmation prompts
+appear as dialogs in the browser.
 
 ## Tabs
 

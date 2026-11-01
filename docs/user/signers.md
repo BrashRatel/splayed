@@ -1,7 +1,7 @@
 # Signers
 
-forksplit never holds keys. Your wallet signs the PSBTs it writes. Which wallet you can use depends
-on the chain.
+Splayed never holds keys. Your wallet signs the PSBTs it writes. Which wallet you can use depends on
+the chain.
 
 | Chain | Needs                                                      | Works with                                                                                        |
 | ----- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |

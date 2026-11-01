@@ -9,7 +9,7 @@ import { REGTEST_PROFILE_ID } from "./regtest_profile.ts";
 import { RegtestRpcTransport, type Rpc } from "./rpc.ts";
 import { stockSign, unifiedSign } from "./signers.ts";
 
-/** forksplit's real CLI, in a fresh data dir, with the three regtest nodes as its only backends. */
+/** Splayed's real CLI, in a fresh data dir, with the three regtest nodes as its only backends. */
 export interface Cli {
   dir: string;
   io: CliIO;
@@ -21,7 +21,7 @@ export interface Cli {
 }
 
 export async function makeCli(nodes: Record<ChainId, Rpc>): Promise<Cli> {
-  const dir = await Deno.makeTempDir({ prefix: "forksplit-it-" });
+  const dir = await Deno.makeTempDir({ prefix: "splayed-it-" });
   const toml = ["[scan]", "jitter_min_ms = 0", "jitter_max_ms = 0", ""];
   for (const c of CHAINS) {
     toml.push(
@@ -31,18 +31,18 @@ export async function makeCli(nodes: Record<ChainId, Rpc>): Promise<Cli> {
       `kind = "rpc"`,
       `url = "http://127.0.0.1:${nodes[c].port}"`,
       `user = "regtest"`,
-      `password_env = "FSPLIT_RPC_PW"`,
+      `password_env = "SPLAYED_RPC_PW"`,
       "",
     );
   }
-  await Deno.writeTextFile(join(dir, "forksplit.toml"), toml.join("\n"));
+  await Deno.writeTextFile(join(dir, "splayed.toml"), toml.join("\n"));
   const out: string[] = [];
   const err: string[] = [];
   const io: CliIO = {
     out: (s) => out.push(s),
     err: (s) => err.push(s),
     confirm: () => true,
-    env: { FSPLIT_RPC_PW: "regtest" },
+    env: { SPLAYED_RPC_PW: "regtest" },
     tor: () => Promise.reject(new Error("regtest must never start or use Tor")),
     transportFactory: (_config, chain) => new RegtestRpcTransport(nodes[chain]),
   };

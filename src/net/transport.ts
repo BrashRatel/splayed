@@ -29,7 +29,7 @@ export class TorUnavailableError extends Error {
     super(
       `Tor SOCKS proxy at ${socks.host}:${socks.port} is not reachable. ` +
         "Refusing to fall back to clearnet. Start Tor, or if you use the Tor Browser run " +
-        "`forksplit config tor 127.0.0.1:9150`, then `forksplit init` again.",
+        "`splayed config tor 127.0.0.1:9150`, then `splayed init` again.",
       { cause },
     );
     this.name = "TorUnavailableError";
@@ -201,7 +201,7 @@ export async function openStream(
         proxyPort: socks.port,
         destHost: target.hostname,
         destPort: target.port,
-        username: `forksplit:${target.isolation}:${sessionId}`,
+        username: `splayed:${target.isolation}:${sessionId}`,
         password: sessionId,
       });
       return target.tls ? await Deno.startTls(conn as Deno.TcpConn, tlsOptions) : conn;

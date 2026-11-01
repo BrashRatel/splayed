@@ -39,7 +39,7 @@ third_party/            licenses for adapted code
 `src/backends/` has Esplora, Electrum and node-RPC clients behind one interface. `src/net/` routes
 every connection: Tor for public hosts, direct for local and LAN, no clearnet fallback, and an
 HTTP/1.1 client written on raw connections so proxy environment variables don't apply. The Tor
-manager starts and supervises forksplit's own Tor.
+manager starts and supervises Splayed's own Tor.
 
 ## Web UI
 

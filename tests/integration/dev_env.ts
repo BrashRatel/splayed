@@ -1,12 +1,12 @@
 /**
- * A long-lived regtest environment for trying forksplit by hand: real Bitcoin Core (BTC), Knots
- * with BLAKE2b (XBT) and eCash (ECX) in Docker, forksplit's web UI wired to them, and your own
+ * A long-lived regtest environment for trying splayed by hand: real Bitcoin Core (BTC), Knots
+ * with BLAKE2b (XBT) and eCash (ECX) in Docker, Splayed's web UI wired to them, and your own
  * regtest wallets (Sparrow, Shrike, ...) for signing.
  *
  *   deno task regtest up                      start the three nodes, mine the shared history
  *   deno task regtest fund <descriptor|addr>  put coins on your wallet, on ALL THREE chains
  *   deno task regtest fork                    split the chains apart (no more shared coins after)
- *   deno task regtest ui                      run the forksplit web UI against the nodes
+ *   deno task regtest ui                      run the splayed web UI against the nodes
  *   deno task regtest mine <chain|all> [n]    confirm what you broadcast
  *   deno task regtest check <plan>            ask every node about a plan's signed transactions
  *   deno task regtest reorg <chain> [depth]   force a reorg, to see what `track` reports
@@ -31,8 +31,8 @@ import { RegtestRpcTransport, type Rpc } from "./rpc.ts";
 const ROOT = new URL("../../", import.meta.url).pathname;
 const STATE_DIR = join(ROOT, ".data", "regtest");
 const STATE_FILE = join(STATE_DIR, "env.json");
-const APP_DIR = join(STATE_DIR, "forksplit");
-const PROJECT = "forksplit-regtest";
+const APP_DIR = join(STATE_DIR, "splayed");
+const PROJECT = "splayed-regtest";
 const DEFAULT_PORTS: Record<ChainId, number> = { btc: 18443, xbt: 18543, ecx: 18643 };
 const RPC_USER = "regtest";
 const RPC_PASSWORD = "regtest";
@@ -53,11 +53,11 @@ interface EnvState {
 class UserError extends Error {}
 
 const composeEnv = (s: Pick<EnvState, "bind" | "ports">): Record<string, string> => ({
-  FSPLIT_BIND: s.bind,
-  FSPLIT_BTC_PORT: String(s.ports.btc),
-  FSPLIT_XBT_PORT: String(s.ports.xbt),
-  FSPLIT_ECX_PORT: String(s.ports.ecx),
-  FSPLIT_RESTART: "unless-stopped",
+  SPLAYED_BIND: s.bind,
+  SPLAYED_BTC_PORT: String(s.ports.btc),
+  SPLAYED_XBT_PORT: String(s.ports.xbt),
+  SPLAYED_ECX_PORT: String(s.ports.ecx),
+  SPLAYED_RESTART: "unless-stopped",
 });
 
 async function readState(): Promise<EnvState | undefined> {
@@ -223,9 +223,9 @@ async function donors(positional: string[], flags: Record<string, string>) {
   for (const a of addresses) console.log(`  ${a}   (50 BTC coinbase, ${name} only)`);
   console.log(
     chain === "xbt"
-      ? "\nThese coins do not exist on BTC or ECX. In forksplit: `donor import <descriptor>`, " +
+      ? "\nThese coins do not exist on BTC or ECX. In splayed: `donor import <descriptor>`, " +
         "`donor scan`, then `plan --donor txid:vout` (one donor per XBT transaction)."
-      : "\nThese coins do not exist on XBT or ECX. In forksplit: `dest set btc <descriptor>`, " +
+      : "\nThese coins do not exist on XBT or ECX. In splayed: `dest set btc <descriptor>`, " +
         "`donor import <descriptor>`, `donor scan`, then `plan --btc-first --donor txid:vout` " +
         "(one donor per BTC transaction). Use a donor wallet other than your source wallet.",
   );
@@ -318,7 +318,7 @@ Wallet setup (RPC user "${RPC_USER}", password "${RPC_PASSWORD}", network regtes
   Sparrow BLAKE2b (XBT):  Server -> Bitcoin Core, host ${host}, port ${s.ports.xbt}
   Shrike (XBT, 0x21):     point it at port ${s.ports.xbt}; ECX transactions sign with any wallet
   ECX node:               port ${s.ports.ecx}
-  Your wallet and forksplit need the SAME coins: use \`fund\` with the wallet's descriptor.
+  Your wallet and splayed need the SAME coins: use \`fund\` with the wallet's descriptor.
 ${
     s.bind === "127.0.0.1"
       ? "  (The ports listen on this machine only. From another machine, tunnel them with ssh -L.)\n"
@@ -329,11 +329,11 @@ ${
 async function ui(flags: Record<string, string>) {
   const s = await requireState();
   if (s.phase !== "forked" || !s.checkpoints) {
-    throw new UserError("Run `fork` first: forksplit needs the chains to have diverged.");
+    throw new UserError("Run `fork` first: splayed needs the chains to have diverged.");
   }
   makeRegtestProfile(s.checkpoints);
   await Deno.mkdir(APP_DIR, { recursive: true });
-  const configPath = join(APP_DIR, "forksplit.toml");
+  const configPath = join(APP_DIR, "splayed.toml");
   try {
     await Deno.stat(configPath);
   } catch {
@@ -346,7 +346,7 @@ async function ui(flags: Record<string, string>) {
         `kind = "rpc"`,
         `url = "http://127.0.0.1:${s.ports[c]}"`,
         `user = "${RPC_USER}"`,
-        `password_env = "FSPLIT_RPC_PW"`,
+        `password_env = "SPLAYED_RPC_PW"`,
         `label = "regtest ${c.toUpperCase()} node"`,
         "",
       );
@@ -355,7 +355,7 @@ async function ui(flags: Record<string, string>) {
   }
   const nodes = nodesFor(s);
   const baseIO: Omit<CliIO, "out" | "err" | "confirm"> = {
-    env: { FORKSPLIT_PROFILE: REGTEST_PROFILE_ID, FSPLIT_RPC_PW: RPC_PASSWORD },
+    env: { SPLAYED_PROFILE: REGTEST_PROFILE_ID, SPLAYED_RPC_PW: RPC_PASSWORD },
     tor: () => Promise.reject(new Error("The regtest environment never uses Tor")),
     transportFactory: (_config, chain) => new RegtestRpcTransport(nodes[chain]),
   };
@@ -385,7 +385,7 @@ async function ui(flags: Record<string, string>) {
       },
     },
   });
-  console.log(`forksplit UI (regtest profile): ${server.url}\n`);
+  console.log(`splayed UI (regtest profile): ${server.url}\n`);
   console.log("Open that exact URL: it carries the access token. Ctrl+C to stop.");
   console.log(
     lan
@@ -399,7 +399,7 @@ async function ui(flags: Record<string, string>) {
   await server.server.finished;
 }
 
-/** Asks every node about each signed transaction of a plan, independently of forksplit's checks. */
+/** Asks every node about each signed transaction of a plan, independently of Splayed's checks. */
 async function check(positional: string[]) {
   const s = await requireState();
   const id = positional[0];

@@ -1,16 +1,16 @@
 import { join } from "node:path";
 
 export function defaultDataDir(): string {
-  const env = Deno.env.get("FORKSPLIT_DATA_DIR");
+  const env = Deno.env.get("SPLAYED_DATA_DIR");
   if (env) return env;
   const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? ".";
   switch (Deno.build.os) {
     case "windows":
-      return join(Deno.env.get("APPDATA") ?? home, "forksplit");
+      return join(Deno.env.get("APPDATA") ?? home, "splayed");
     case "darwin":
-      return join(home, "Library", "Application Support", "forksplit");
+      return join(home, "Library", "Application Support", "splayed");
     default:
-      return join(Deno.env.get("XDG_DATA_HOME") ?? join(home, ".local", "share"), "forksplit");
+      return join(Deno.env.get("XDG_DATA_HOME") ?? join(home, ".local", "share"), "splayed");
   }
 }
 

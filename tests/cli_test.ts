@@ -57,7 +57,7 @@ function scenario() {
 }
 
 async function freshDir() {
-  return await Deno.makeTempDir({ prefix: "forksplit-cli-" });
+  return await Deno.makeTempDir({ prefix: "splayed-cli-" });
 }
 
 Deno.test("gate: nothing coin-related is allowed before init", async () => {
@@ -65,7 +65,7 @@ Deno.test("gate: nothing coin-related is allowed before init", async () => {
   const h = harness(chains);
   const dir = await freshDir();
   assertEquals(await main(["--data-dir", dir, "import", DESC], h.io), 1);
-  assert(h.errors().includes("forksplit init"));
+  assert(h.errors().includes("splayed init"));
   assertEquals(await main(["--data-dir", dir, "scan"], h.io), 1);
   // No request touched any chain before init.
   assertEquals(
@@ -107,7 +107,7 @@ Deno.test("end to end: import, scan and status classify every coin", async () =>
   assert(h.text().includes("bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"));
   // Fast test: no jitter.
   const cfg = `[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n`;
-  await Deno.writeTextFile(`${dir}/forksplit.toml`, cfg);
+  await Deno.writeTextFile(`${dir}/splayed.toml`, cfg);
   // Changing the config closes the gate...
   assertEquals(await main(["--data-dir", dir, "scan"], h.io), 1);
   // ...until it is confirmed again.
@@ -169,7 +169,7 @@ Deno.test("config edits validate before saving and re-gate", async () => {
     ], h.io),
     1,
   );
-  assertEquals(await Deno.stat(`${dir}/forksplit.toml`).then(() => true).catch(() => false), false);
+  assertEquals(await Deno.stat(`${dir}/splayed.toml`).then(() => true).catch(() => false), false);
   // A local node is accepted and keeps the default as a second backend.
   assertEquals(
     await main([

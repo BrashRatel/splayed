@@ -1,12 +1,12 @@
 name: Tester report
-description: Tell us what you tried with forksplit and what happened (worked or not).
+description: Tell us what you tried with splayed and what happened (worked or not).
 title: "[test] "
 labels: ["tester-report"]
 body:
   - type: markdown
     attributes:
       value: |
-        forksplit is **pre-alpha**. Reports of what worked are as useful as bugs.
+        splayed is **pre-alpha**. Reports of what worked are as useful as bugs.
 
         **Do not paste descriptors, xpubs, addresses or txids for wallets you use with real coins.** They
         reveal every address you own. Redact them (for example `xpub6...REDACTED`), or reproduce on the
@@ -14,7 +14,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: forksplit version or commit
+      label: splayed version or commit
       placeholder: "0.1.0-pre-alpha.1, or the output of `git rev-parse --short HEAD`"
     validations:
       required: true

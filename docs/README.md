@@ -1,7 +1,7 @@
-# forksplit documentation
+# Splayed documentation
 
-Start with the [project README](../README.md) for what forksplit is and a quick start. Then pick
-your path.
+Start with the [project README](../README.md) for what Splayed is and a quick start. Then pick your
+path.
 
 ## I want to separate my coins
 

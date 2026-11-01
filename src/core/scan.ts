@@ -242,7 +242,7 @@ export function scanRegressions(prev: ScanResult | undefined, next: ScanResult):
       if (was.state === "spent" && now.state === "unspent") {
         warnings.push(
           `REORG? ${label} was spent at the last scan and is unspent again. A spend can leave ` +
-            "the chain in a reorg or be dropped. Do not spend the BTC copy; run `forksplit track`.",
+            "the chain in a reorg or be dropped. Do not spend the BTC copy; run `splayed track`.",
         );
       } else if (
         was.state === "spent" && now.state === "spent" && was.spendTxid && now.spendTxid &&

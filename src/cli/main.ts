@@ -83,9 +83,9 @@ import { BackendError } from "../backends/types.ts";
 import { observationCell, privacyLevel, sats, shortOutpoint, table } from "./format.ts";
 
 const USAGE =
-  `forksplit - separate BTC, XBT and ECX copies of the same coins (keyless: your wallet signs)
+  `splayed - separate BTC, XBT and ECX copies of the same coins (keyless: your wallet signs)
 
-Usage: forksplit [global options] <command> [args]
+Usage: splayed [global options] <command> [args]
 
 Setup (nothing about your coins is sent anywhere until you confirm):
   init [--yes]                    Review network settings, check each backend is on the right
@@ -101,9 +101,9 @@ Setup (nothing about your coins is sent anywhere until you confirm):
   config backend fallback <chain> Add the profile's fallback backend to the list
   config clearnet <chain> on|off  Allow direct (non-Tor) connections to public hosts
   config tor auto|managed|system [host:port]
-                                  auto (default): use a running Tor, else start forksplit's own.
+                                  auto (default): use a running Tor, else start Splayed's own.
                                   system: only a Tor you run (e.g. 127.0.0.1:9150 for Tor
-                                  Browser). managed: always start forksplit's own Tor.
+                                  Browser). managed: always start Splayed's own Tor.
   config confirmations <chain> N  Depth required before a spend counts as final
 
 Coins:
@@ -162,8 +162,8 @@ Web UI:
                                   commands, prompts included
 
 Global options:
-  --data-dir DIR    (env FORKSPLIT_DATA_DIR)   --tor-socks HOST:PORT (env FORKSPLIT_TOR_SOCKS)
-  --profile ID      (env FORKSPLIT_PROFILE)    --json   -h, --help
+  --data-dir DIR    (env SPLAYED_DATA_DIR)   --tor-socks HOST:PORT (env SPLAYED_TOR_SOCKS)
+  --profile ID      (env SPLAYED_PROFILE)    --json   -h, --help
 `;
 
 export interface CliIO {
@@ -247,12 +247,12 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
     io.out(USAGE);
     return command || flags.help ? 0 : 2;
   }
-  const dataDir = flags["data-dir"] ?? io.env.FORKSPLIT_DATA_DIR ?? defaultDataDir();
+  const dataDir = flags["data-dir"] ?? io.env.SPLAYED_DATA_DIR ?? defaultDataDir();
   try {
     await ensureDir(dataDir);
     if (command === "config" && args[0] !== "show") {
       await editConfig(dataDir, args, flags, io);
-      io.out("Saved. Network settings changed: run `forksplit init` to review and confirm them.");
+      io.out("Saved. Network settings changed: run `splayed init` to review and confirm them.");
       return 0;
     }
     const config = await loadConfig({
@@ -346,11 +346,11 @@ export function describeTor(config: Config): string {
   const where = t.socks ? `${t.socks.host}:${t.socks.port}` : "127.0.0.1:9050 or :9150";
   switch (t.mode) {
     case "auto":
-      return `auto (use a running Tor at ${where}, else start forksplit's own)`;
+      return `auto (use a running Tor at ${where}, else start Splayed's own)`;
     case "system":
       return `system (only the Tor running at ${t.socks ? where : "127.0.0.1:9050"})`;
     case "managed":
-      return `managed (forksplit starts its own Tor${t.binary ? `: ${t.binary}` : ""})`;
+      return `managed (splayed starts its own Tor${t.binary ? `: ${t.binary}` : ""})`;
   }
 }
 
@@ -360,7 +360,7 @@ function showConfig(config: Config, io: CliIO, confirmed: boolean): void {
   );
   io.out(`Data directory: ${config.dataDir}`);
   io.out(`Tor: ${describeTor(config)}`);
-  io.out(`Network settings confirmed: ${confirmed ? "yes" : "NO (run `forksplit init`)"}\n`);
+  io.out(`Network settings confirmed: ${confirmed ? "yes" : "NO (run `splayed init`)"}\n`);
   for (const chain of CHAIN_IDS) {
     const cc = config.chains[chain];
     io.out(
@@ -608,7 +608,7 @@ async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number>
     !yes && !(await io.confirm("Contact these servers now? (Answer no to change settings first.)"))
   ) {
     io.out(
-      "Nothing was contacted. Change settings with `forksplit config ...`, then run init again.",
+      "Nothing was contacted. Change settings with `splayed config ...`, then run init again.",
     );
     return 1;
   }
@@ -625,7 +625,7 @@ async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number>
   if (!allChainsOk) {
     io.err(
       "At least one chain has no backend that passed. Nothing was confirmed.\n" +
-        "Fix the settings (`forksplit config ...`) or start Tor, then run `forksplit init` again.",
+        "Fix the settings (`splayed config ...`) or start Tor, then run `splayed init` again.",
     );
     return 1;
   }
@@ -637,7 +637,7 @@ async function cmdInit(config: Config, io: CliIO, yes: boolean): Promise<number>
   }
   await writeGate(config, identity);
   io.out(
-    "Network settings confirmed. Next: `forksplit import '<descriptor>'`, then `forksplit scan`.",
+    "Network settings confirmed. Next: `splayed import '<descriptor>'`, then `splayed scan`.",
   );
   return 0;
 }
@@ -682,7 +682,7 @@ async function cmdForget(config: Config, args: string[], io: CliIO) {
   const n = Number(args[0]);
   const wallet = await loadWallet(config.dataDir);
   if (!Number.isInteger(n) || n < 1 || n > wallet.descriptors.length) {
-    throw new UsageError("forget <number from `forksplit descriptors`>");
+    throw new UsageError("forget <number from `splayed descriptors`>");
   }
   const [removed] = wallet.descriptors.splice(n - 1, 1);
   await saveWallet(config.dataDir, wallet);
@@ -749,7 +749,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
 async function cmdStatus(config: Config, io: CliIO, json: boolean) {
   const result = await loadScan(config.dataDir);
   if (!result) {
-    io.out("No scan yet. Run `forksplit scan`.");
+    io.out("No scan yet. Run `splayed scan`.");
     return 0;
   }
   if (json) {
@@ -901,7 +901,7 @@ async function cmdPlan(
 ) {
   await requireNetworkConfirmed(config);
   const scan = await loadScan(config.dataDir);
-  if (!scan) throw new UsageError("Run `forksplit scan` first");
+  if (!scan) throw new UsageError("Run `splayed scan` first");
   const chains = (opts.chains ?? (opts.btcFirst ? "btc,ecx,xbt" : "ecx,xbt")).split(",").map((c) =>
     c.trim()
   );
@@ -1047,7 +1047,7 @@ async function cmdDonor(
     case "list":
     case undefined: {
       if (!donors.length) {
-        io.out("No donor wallets imported. `forksplit donor import <descriptor>`");
+        io.out("No donor wallets imported. `splayed donor import <descriptor>`");
       }
       donors.forEach((d, i) =>
         io.out(`${i + 1}. ${d.label ? `[${d.label}] ` : ""}${d.descriptor}`)
@@ -1103,7 +1103,7 @@ async function cmdDonor(
         );
       }
       const scan = await loadDonorScan(config.dataDir);
-      if (!scan) throw new UsageError("Run `forksplit donor scan` first");
+      if (!scan) throw new UsageError("Run `splayed donor scan` first");
       const outputCount = Number(fan.outputs);
       if (!Number.isSafeInteger(outputCount) || outputCount < 2 || outputCount > 100) {
         throw new PlanError("--outputs must be a whole number from 2 to 100");
@@ -1184,7 +1184,7 @@ async function cmdDonor(
     case "show": {
       const scan = await loadDonorScan(config.dataDir);
       if (!scan) {
-        io.out("No donor scan yet. Run `forksplit donor scan`.");
+        io.out("No donor scan yet. Run `splayed donor scan`.");
         return 0;
       }
       for (const w of scan.warnings) io.err(`Warning: ${w}`);
@@ -1422,7 +1422,7 @@ async function cmdBroadcast(
           if (d.state !== "confirmed") {
             io.out(
               `${chain.toUpperCase()}: waiting for the TEST FIRST transaction to confirm (${d.state}). ` +
-                "Run `forksplit track` and try again, or pass --all.",
+                "Run `splayed track` and try again, or pass --all.",
             );
             allowed = [];
           }
@@ -1583,7 +1583,7 @@ async function cmdBroadcast(
       }
       await saveProgress(dir, progress);
     }
-    io.out("Run `forksplit track <plan>` to follow confirmations.");
+    io.out("Run `splayed track <plan>` to follow confirmations.");
     return failed ? 1 : 0;
   } finally {
     for (const b of opened) await b.close?.();
@@ -1667,7 +1667,7 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
               alerts.push(
                 `${chain.toUpperCase()} ${t.file}: plan ${p.replacedBy.plan} replaced this ` +
                   "transaction but the replacement is no longer on the network either. " +
-                  "Run `forksplit broadcast` for whichever plan you want to go through.",
+                  "Run `splayed broadcast` for whichever plan you want to go through.",
               );
             }
           } else {
@@ -1721,7 +1721,7 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
     return 1;
   }
   io.out(
-    "When every split is deep enough, run `forksplit scan`: those coins' BTC copies then show as separated.",
+    "When every split is deep enough, run `splayed scan`: those coins' BTC copies then show as separated.",
   );
   return 0;
 }
@@ -1860,7 +1860,7 @@ async function cmdBump(
   io.out(`\nWrote ${replacements.length} replacement PSBT(s) to ${newDir}`);
   io.out(
     `Sign them in your wallet exactly like the originals, then:\n` +
-      `  forksplit verify ${bumped.id}\n  forksplit broadcast ${bumped.id}\n  forksplit track ${bumped.id}\n` +
+      `  splayed verify ${bumped.id}\n  splayed broadcast ${bumped.id}\n  splayed track ${bumped.id}\n` +
       "If the original confirms first, the replacement is simply refused.",
   );
   return refused ? 1 : 0;
@@ -2022,11 +2022,11 @@ async function cmdUi(
   const { startUi } = await import("../ui/server.ts");
   const { out: _o, err: _e, confirm: _c, ...baseIO } = io;
   const ui = startUi({ dataDir, port, run: main, baseIO });
-  io.out(`forksplit UI: ${ui.url}`);
+  io.out(`splayed UI: ${ui.url}`);
   io.out(
     "Open that exact URL (it carries a one-time access token). Only this machine can reach it.",
   );
-  io.out("Press Ctrl+C to stop; a Tor started by forksplit stops with it.");
+  io.out("Press Ctrl+C to stop; a Tor started by splayed stops with it.");
   if (open) {
     const opener = Deno.build.os === "darwin"
       ? "open"

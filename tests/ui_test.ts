@@ -41,9 +41,9 @@ async function withUi(
   const a = parseDescriptor(SRC_DESC).branches[0].derive(0);
   fund([btc, xbt, ecx], [{ ...a, value: 100_000 }], 900_000, 1);
   const chains = { btc, xbt, ecx };
-  const dataDir = await Deno.makeTempDir({ prefix: "forksplit-ui-" });
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-ui-" });
   await Deno.writeTextFile(
-    `${dataDir}/forksplit.toml`,
+    `${dataDir}/splayed.toml`,
     "[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n",
   );
   const ui = startUi({
@@ -105,7 +105,7 @@ Deno.test("UI security: token, host, content type, origin, static headers", asyn
     assert(page.headers.get("content-security-policy")?.includes("script-src 'self'"));
     assertEquals(page.headers.get("x-frame-options"), "DENY");
     await page.body?.cancel();
-    const missing = await fetch(`${base}/../forksplit.toml`);
+    const missing = await fetch(`${base}/../splayed.toml`);
     assertEquals(missing.status, 404);
     await missing.body?.cancel();
     const textPost = await api("/api/run", {
@@ -223,7 +223,7 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     await bad.body?.cancel();
     // Only files that belong to the plan can be downloaded.
     const escape = await api(
-      `/api/plans/${p.id}/download?file=${encodeURIComponent("../../forksplit.toml")}`,
+      `/api/plans/${p.id}/download?file=${encodeURIComponent("../../splayed.toml")}`,
     );
     assertEquals(escape.status, 404);
     await escape.body?.cancel();

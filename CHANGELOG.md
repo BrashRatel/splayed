@@ -1,9 +1,19 @@
 # Changelog
 
-All notable changes to forksplit. The first release will be `0.1.0-pre-alpha.1` (not yet tagged);
-see [TODO.md](TODO.md) for what gates it. Newest first.
+All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (not yet tagged); see
+[TODO.md](TODO.md) for what gates it. Newest first.
 
 ## 0.1.0-pre-alpha.1 (not yet tagged)
+
+### Changed
+
+- **Renamed from forksplit to Splayed.** The command is `splayed`, the config file is
+  `splayed.toml`, the data directory is `splayed` (`~/.local/share/splayed` on Linux), and the
+  environment variables are now `SPLAYED_DATA_DIR`, `SPLAYED_PROFILE`, `SPLAYED_TOR_SOCKS` and
+  `SPLAYED_TOR_BINARY`. Nothing was released under the old name, so there is no migration: move the
+  old data directory by hand if you have one. The regtest playground project is now
+  `splayed-regtest`, so run `deno task regtest down` on the old checkout first to remove its
+  containers.
 
 ### Added
 
@@ -68,7 +78,7 @@ see [TODO.md](TODO.md) for what gates it. Newest first.
 
 - **Regtest playground UI: mining buttons.** The plans page shows the three chains' heights and
   "Mine 1 / Mine 6" per chain or for all, then tracks the newest broadcast plan. The endpoints exist
-  only when the playground starts the UI; the real `forksplit ui` does not have them.
+  only when the playground starts the UI; the real `splayed ui` does not have them.
 - **Web UI: an uploaded signed file is now visible** in the plan table ("✓ received", the file name,
   and "signed file uploaded: press Verify") and in a short message at the top of the page.
 
@@ -79,17 +89,17 @@ see [TODO.md](TODO.md) for what gates it. Newest first.
   history of the transaction's first output script.
 
 - **Regtest playground** (`deno task regtest`): a long-lived environment with stable ports for
-  trying forksplit by hand. `up` starts the three nodes and mines the shared history, `fund` puts
+  trying Splayed by hand. `up` starts the three nodes and mines the shared history, `fund` puts
   coins on your own wallet (a descriptor or an address) on all three chains before the fork, `fork`
   separates the chains, and `ui` runs the web UI against them. `mine`, `reorg`, `check` (asks every
-  node about a plan's signed transactions, independent of forksplit), `status`, `stop` and `down`
+  node about a plan's signed transactions, independent of Splayed), `status`, `stop` and `down`
   complete it. It was exercised end to end through the UI's HTTP API; Sparrow and Shrike themselves
   have not been tried yet.
 - **Regtest address network for test profiles.** A regtest profile accepts the `tpub`, `upub` and
   `vpub` keys wallets export and shows `bcrt1` addresses, so addresses can be compared with a
   regtest wallet. Mainnet is unchanged and still refuses testnet keys. `import` says when it stores
   a key as the equivalent xpub.
-- **`bump`: RBF fee bump.** `forksplit bump <plan>` writes a replacement plan that spends the same
+- **`bump`: RBF fee bump.** `splayed bump <plan>` writes a replacement plan that spends the same
   inputs to the same destination at a higher fee, built from the original's own unsigned PSBT so the
   ECX marker and the 0x21 request carry over. It enforces BIP125 (old fee plus 1 sat/vB for the new
   size), refuses confirmed, conflicting and already-replaced transactions, and the result is
@@ -106,7 +116,7 @@ see [TODO.md](TODO.md) for what gates it. Newest first.
   Unit tests cover the replacement rules, the reorg classification and the scan comparison.
 - **Regtest integration suite** (`deno task test:integration`, `tests/integration/`). Real Bitcoin
   Core 31.0, Bitcoin Knots 29.4.1 (BLAKE2b from regtest height 110) and an eCash node built from
-  `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. forksplit's CLI runs
+  `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. Splayed's CLI runs
   against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan, for eight
   wallets (`pkh`, `wpkh`, `sh(wpkh)`, `tr` key path, 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`,
   and a mixed wallet whose single `--batch all` transaction per fork spends all seven script types).
@@ -159,7 +169,7 @@ see [TODO.md](TODO.md) for what gates it. Newest first.
 
 ## Docs and UI polish (2026-10-31)
 
-- Describe forksplit as keyless (your wallet signs) rather than watch-only.
+- Describe Splayed as keyless (your wallet signs) rather than watch-only.
 - TODO.md with release blockers and open work, SECURITY.md, project layout in the README, and a CI
   workflow (fmt, lint, type-check, tests).
 - UI: dark mode by default, with a light toggle that is remembered per browser.
@@ -167,9 +177,9 @@ see [TODO.md](TODO.md) for what gates it. Newest first.
 
 ## Milestone 4: managed Tor and local web UI (2026-10-31)
 
-- Tor manager with `auto`, `managed` and `system` modes. forksplit's own Tor uses
-  `IsolateSOCKSAuth`, `SafeSocks 1` and `__OwningControllerProcess`, and starts only when a backend
-  about to be contacted needs it.
+- Tor manager with `auto`, `managed` and `system` modes. Splayed's own Tor uses `IsolateSOCKSAuth`,
+  `SafeSocks 1` and `__OwningControllerProcess`, and starts only when a backend about to be
+  contacted needs it.
 - `fetch-tor` and `update-tor-manifest`: GPG-verified, SHA-256-pinned Tor Expert Bundles.
 - Local web UI: loopback only, token in the URL fragment, Host, Origin and Content-Type checks,
   strict CSP. It runs the same CLI commands, with prompts shown as dialogs, and supports PSBT

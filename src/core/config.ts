@@ -81,7 +81,7 @@ export class ConfigError extends Error {
   }
 }
 
-export const CONFIG_FILE = "forksplit.toml";
+export const CONFIG_FILE = "splayed.toml";
 export const GATE_FILE = "network-confirmation.json";
 export const DEFAULT_TOR_SOCKS: SocksEndpoint = { host: "127.0.0.1", port: 9050 };
 
@@ -212,7 +212,7 @@ export async function loadConfig(options: LoadOptions): Promise<Config> {
       throw new ConfigError(`${CONFIG_FILE}: unknown top-level key "${key}"`);
     }
   }
-  const profileId = options.profile ?? env.FORKSPLIT_PROFILE ??
+  const profileId = options.profile ?? env.SPLAYED_PROFILE ??
     (typeof file.profile === "string" ? file.profile : "mainnet");
   const profile = getProfile(profileId);
 
@@ -222,13 +222,13 @@ export async function loadConfig(options: LoadOptions): Promise<Config> {
       throw new ConfigError(`[tor]: unknown key "${key}"`);
     }
   }
-  const socksText = options.torSocks ?? env.FORKSPLIT_TOR_SOCKS ??
+  const socksText = options.torSocks ?? env.SPLAYED_TOR_SOCKS ??
     (typeof tor.socks === "string" ? tor.socks : undefined);
   const mode = tor.mode ?? "auto";
   if (mode !== "auto" && mode !== "system" && mode !== "managed") {
     throw new ConfigError('tor.mode must be "auto", "system" or "managed"');
   }
-  const binary = env.FORKSPLIT_TOR_BINARY ??
+  const binary = env.SPLAYED_TOR_BINARY ??
     (typeof tor.binary === "string" ? tor.binary : undefined);
   const torSettings: TorSettings = {
     mode,
@@ -406,7 +406,7 @@ export class GateClosedError extends Error {
   constructor() {
     super(
       "Network settings have not been confirmed (or changed since they were). Run " +
-        "`forksplit init` to review where queries will go before importing or scanning anything.",
+        "`splayed init` to review where queries will go before importing or scanning anything.",
     );
     this.name = "GateClosedError";
   }
@@ -416,7 +416,7 @@ export async function requireNetworkConfirmed(config: Config): Promise<void> {
   if (!(await networkConfirmed(config))) throw new GateClosedError();
 }
 
-// ---- Editing the config file (used by `forksplit config ...`) ----
+// ---- Editing the config file (used by `splayed config ...`) ----
 
 export async function readConfigFile(dataDir: string): Promise<Record<string, unknown>> {
   const text = await readTextIfExists(join(dataDir, CONFIG_FILE));
@@ -427,8 +427,8 @@ export async function writeConfigFile(
   dataDir: string,
   data: Record<string, unknown>,
 ): Promise<void> {
-  const header = "# forksplit configuration. Changing anything here requires re-confirming with\n" +
-    "# `forksplit init` before the tool will query any backend.\n\n";
+  const header = "# splayed configuration. Changing anything here requires re-confirming with\n" +
+    "# `splayed init` before the tool will query any backend.\n\n";
   await writeTextAtomic(join(dataDir, CONFIG_FILE), header + stringifyToml(data) + "\n");
 }
 

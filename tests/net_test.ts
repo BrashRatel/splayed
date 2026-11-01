@@ -168,8 +168,8 @@ Deno.test("SOCKS5: remote DNS (domain ATYP) and per-isolation credentials", asyn
     assertEquals(seen.length, 2);
     assertEquals(seen[0].atyp, 3);
     assertEquals(seen[0].host, XBT_ONION);
-    assertEquals(seen[0].user, "forksplit:xbt:session1");
-    assertEquals(seen[1].user, "forksplit:broadcast:abc:session1");
+    assertEquals(seen[0].user, "splayed:xbt:session1");
+    assertEquals(seen[1].user, "splayed:broadcast:abc:session1");
   });
 });
 

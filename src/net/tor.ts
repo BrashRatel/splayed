@@ -6,10 +6,10 @@
  * system:  only use a running Tor at the configured address (default 127.0.0.1:9050).
  * managed: always start our own Tor.
  *
- * A managed Tor is a child process with its own data directory under the forksplit data dir,
+ * A managed Tor is a child process with its own data directory under the splayed data dir,
  * SOCKS on a random loopback port with IsolateSOCKSAuth (per-chain / per-broadcast circuits) and
  * SafeSocks (no IP-address requests: all names resolve inside Tor). It's tied to this process with
- * __OwningControllerProcess so it exits if forksplit dies, and stopped explicitly on normal exit.
+ * __OwningControllerProcess so it exits if splayed dies, and stopped explicitly on normal exit.
  */
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,7 +117,7 @@ function freeLoopbackPort(): number {
 
 export function torrc(dataDir: string, socksPort: number, ownerPid: number): string {
   return [
-    "# Written by forksplit. Client-only Tor for this tool; do not edit.",
+    "# Written by splayed. Client-only Tor for this tool; do not edit.",
     `SocksPort 127.0.0.1:${socksPort} IsolateSOCKSAuth`,
     "SafeSocks 1",
     "ClientOnly 1",
@@ -217,7 +217,7 @@ export class TorManager {
       throw new TorStartError(
         "No Tor found: nothing is listening on 127.0.0.1:9050/9150 and there's no bundled or " +
           "installed tor binary. Install Tor (or the Tor Browser and keep it open), or build " +
-          "forksplit with the bundled Tor (`deno task fetch-tor`).",
+          "splayed with the bundled Tor (`deno task fetch-tor`).",
       );
     }
     const torDir = join(appDataDir, "tor");
@@ -344,5 +344,5 @@ export class TorManager {
   }
 }
 
-/** One Tor per forksplit process (the web UI keeps it running between commands). */
+/** One Tor per splayed process (the web UI keeps it running between commands). */
 export const torManager = new TorManager();

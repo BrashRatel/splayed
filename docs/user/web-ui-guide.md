@@ -18,32 +18,32 @@ command-line knowledge is needed beyond the one command that starts it.
 
 **The problem.** Coins that existed before the 2026 forks exist on three chains: **BTC**, **XBT**
 (Bitcoin BLAKE2b) and **ECX** (eCash). An ordinary spend on one chain can be copied ("replayed")
-onto the others and move coins you meant to keep. forksplit prepares transactions that can only be
+onto the others and move coins you meant to keep. Splayed prepares transactions that can only be
 valid on one chain, in this order:
 
 1. **ECX** first, 2. **XBT** second, 3. **BTC** last, once the other two are safely confirmed.
 
-forksplit never sees your private keys. It builds unsigned transactions; **your own wallet signs
+Splayed never sees your private keys. It builds unsigned transactions; **your own wallet signs
 them**.
 
 **You will need:**
 
 - [Deno 2.x](https://deno.com) installed, and a terminal for the one start-up command.
 - Your wallet's **output descriptor** (an xpub-based, public-keys-only string). Export it from your
-  wallet. Never paste a seed or private key; forksplit refuses them.
+  wallet. Never paste a seed or private key; Splayed refuses them.
 - **Two destination wallets**, one for ECX and one for XBT, where the separated coins will go. A new
   seed for each is best. You need their descriptors too (ending in `/*`).
 - A **signer** for each chain. ECX works with any wallet, including hardware wallets. XBT needs one
   that supports the `0x21` signature (see [Signers](signers.md)). If you only have a stock hardware
   wallet, see [Advanced](#advanced-stock-hardware-wallets-and-moving-btc-first).
-- Tor, if you use the default public servers. forksplit starts its own if none is running.
+- Tor, if you use the default public servers. Splayed starts its own if none is running.
 
 > **Not yet tested against live networks or real signers** (see [TODO.md](../../TODO.md)). Start
 > with one small coin.
 
 ## 1. Start the UI
 
-In a terminal in the forksplit folder:
+In a terminal in the Splayed folder:
 
 ```sh
 deno install     # first time only
@@ -54,14 +54,14 @@ Your browser opens the interface. It only listens on your own computer, and the 
 random access token, so open it from that terminal output if it doesn't open automatically.
 
 The header always shows two status pills: whether **Tor** is running, and whether your **network
-settings are confirmed**. The **Activity** panel on the right shows what forksplit is doing, in
-plain text. Use the **Light mode** button if you prefer a light theme.
+settings are confirmed**. The **Activity** panel on the right shows what Splayed is doing, in plain
+text. Use the **Light mode** button if you prefer a light theme.
 
 ## 2. Network: decide where queries go
 
 ![Network tab before confirming](../images/web-ui/01-network.png)
 
-The **Network** tab shows where forksplit will ask about your coins, per chain. By default it uses
+The **Network** tab shows where Splayed will ask about your coins, per chain. By default it uses
 public servers **over Tor**, and it will never fall back to a direct connection. The pill at top
 right says **network not confirmed**, and nothing about your coins is sent until you confirm.
 
@@ -76,9 +76,8 @@ When you're happy, press **Check servers & confirm**.
 
 ![Confirmation dialog](../images/web-ui/02-network-confirm.png)
 
-forksplit asks before contacting the servers. Answer **Yes**. It then checks each server is really
-on the right chain, sending only the chain tip and a few fixed block hashes, nothing about your
-coins.
+Splayed asks before contacting the servers. Answer **Yes**. It then checks each server is really on
+the right chain, sending only the chain tip and a few fixed block hashes, nothing about your coins.
 
 ![Network confirmed](../images/web-ui/03-network-confirmed.png)
 
@@ -95,7 +94,7 @@ Open the **Wallet** tab.
 
 ![Wallet imported](../images/web-ui/04-wallet-imported.png)
 
-forksplit lists the first addresses of the wallet. **Check that they match what your wallet shows**
+Splayed lists the first addresses of the wallet. **Check that they match what your wallet shows**
 before going on. If they don't, press **Forget** and re-check the descriptor.
 
 Supported wallet types: single-key (`pkh`, `wpkh`, `sh(wpkh)`, Taproot `tr`) and multisig
@@ -141,8 +140,8 @@ Choose:
   options combine coins into fewer transactions, which publicly links their addresses.
 - **Fees (sat/vB):** leave blank for an automatic estimate, or set your own per chain.
 
-Press **Create plan**. forksplit re-checks each coin, fetches its previous transaction, and writes
-one unsigned file (PSBT) per transaction.
+Press **Create plan**. Splayed re-checks each coin, fetches its previous transaction, and writes one
+unsigned file (PSBT) per transaction.
 
 ![Plan created](../images/web-ui/08-plan-created.png)
 
@@ -186,7 +185,7 @@ Press **Verify signed files**.
 
 ![Verified](../images/web-ui/11-verified.png)
 
-forksplit checks, for every transaction, that:
+Splayed checks, for every transaction, that:
 
 - it is exactly the transaction that was planned (nothing swapped or re-fee'd by the signer);
 - the chain's replay protection is intact;
@@ -199,7 +198,7 @@ file again. Nothing is sent until you move on.
 
 ## 8. Broadcast
 
-Press **Broadcast verified**. forksplit asks for confirmation:
+Press **Broadcast verified**. Splayed asks for confirmation:
 
 ![Broadcast confirmation](../images/web-ui/12-broadcast-confirm.png)
 

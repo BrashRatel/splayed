@@ -164,7 +164,7 @@ async function setup(opts: { nodes?: boolean; brokenBtcNode?: boolean } = {}) {
   const chains: Record<ChainId, FakeChain> = { btc, xbt, ecx };
   const contacted: string[] = [];
   const rpc: Record<string, FakeRpcTransport> = {};
-  const dir = await Deno.makeTempDir({ prefix: "forksplit-exec-" });
+  const dir = await Deno.makeTempDir({ prefix: "splayed-exec-" });
   // Every chain uses the user's own backends: a "self-hosted" Esplora, plus node RPC if asked.
   const lines = ["[scan]", "jitter_min_ms = 0", "jitter_max_ms = 0", ""];
   for (const c of ["btc", "xbt", "ecx"] as ChainId[]) {
@@ -186,7 +186,7 @@ async function setup(opts: { nodes?: boolean; brokenBtcNode?: boolean } = {}) {
       );
     }
   }
-  await Deno.writeTextFile(join(dir, "forksplit.toml"), lines.join("\n"));
+  await Deno.writeTextFile(join(dir, "splayed.toml"), lines.join("\n"));
   await Deno.writeTextFile(join(dir, ".cookie"), "__cookie__:x");
   const out: string[] = [];
   const err: string[] = [];

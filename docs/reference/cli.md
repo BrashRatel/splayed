@@ -1,19 +1,19 @@
 # CLI reference
 
-Run commands as `deno task cli <command>` (or `forksplit <command>` from a compiled build). Run with
+Run commands as `deno task cli <command>` (or `splayed <command>` from a compiled build). Run with
 `--help` for the same summary. The workflow is in the [User guide](../user/guide.md).
 
 ## Global options
 
-| Option                  | Env                   | Meaning                                 |
-| ----------------------- | --------------------- | --------------------------------------- |
-| `--data-dir DIR`        | `FORKSPLIT_DATA_DIR`  | Where config, wallet and plans live     |
-| `--tor-socks HOST:PORT` | `FORKSPLIT_TOR_SOCKS` | Use this Tor SOCKS endpoint             |
-| `--profile ID`          | `FORKSPLIT_PROFILE`   | Network profile                         |
-| `--json`                |                       | Machine-readable output where supported |
-| `-h`, `--help`          |                       | Show help                               |
+| Option                  | Env                 | Meaning                                 |
+| ----------------------- | ------------------- | --------------------------------------- |
+| `--data-dir DIR`        | `SPLAYED_DATA_DIR`  | Where config, wallet and plans live     |
+| `--tor-socks HOST:PORT` | `SPLAYED_TOR_SOCKS` | Use this Tor SOCKS endpoint             |
+| `--profile ID`          | `SPLAYED_PROFILE`   | Network profile                         |
+| `--json`                |                     | Machine-readable output where supported |
+| `-h`, `--help`          |                     | Show help                               |
 
-`FORKSPLIT_TOR_BINARY` selects the Tor binary (see
+`SPLAYED_TOR_BINARY` selects the Tor binary (see
 [Network and privacy](../user/network-and-privacy.md#tor)).
 
 ## Setup

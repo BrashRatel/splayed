@@ -1,11 +1,11 @@
-# forksplit
+# Splayed
 
 Keyless tool for separating the **BTC**, **XBT** (Bitcoin BLAKE2b) and **ECX** (eCash) copies of the
-same coins after the 2026 forks: forksplit builds replay-protected PSBTs, your (cold) wallet signs
-them, and forksplit verifies and broadcasts each split only to its own chain, over Tor.
+same coins after the 2026 forks: Splayed builds replay-protected PSBTs, your (cold) wallet signs
+them, and Splayed verifies and broadcasts each split only to its own chain, over Tor.
 
 Coins that existed before a fork exist on both chains at the same outpoint. An ordinary spend on one
-chain can be **replayed** on the others, moving the copies you meant to keep. forksplit finds your
+chain can be **replayed** on the others, moving the copies you meant to keep. Splayed finds your
 coins on all three chains, tells you which ones are still shared, and walks each shared coin through
 plan → sign (in your wallet) → verify → broadcast. Your keys never leave your wallet.
 
@@ -13,7 +13,7 @@ plan → sign (in your wallet) → verify → broadcast. Your keys never leave y
 > eCash nodes on regtest. It is **not security-reviewed** and has **not been run on mainnet**: start
 > with one small coin, and read the [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and
 > [TODO.md](TODO.md) first. Testers wanted: please file a
-> [tester report](https://github.com/BrashRatel/forksplit/issues/new/choose).
+> [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
 ## How it works
 

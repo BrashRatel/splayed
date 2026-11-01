@@ -1,4 +1,4 @@
-# eCash (ECX) full node, built from source at the commit forksplit's ECX rule is pinned to
+# eCash (ECX) full node, built from source at the commit splayed's ECX rule is pinned to
 # (IsFinalTx exempts nLockTime 499,999,998). Regtest only. Slow first build (C++), then cached.
 FROM debian:bookworm-slim AS builder
 ARG ECX_COMMIT=c8474e0b4f2be9b470c46598a5a6a3e55a85b765

@@ -1,6 +1,6 @@
 /**
  * Regtest integration: real Bitcoin Core (BTC), Bitcoin Knots with BLAKE2b (XBT) and an eCash node
- * (ECX) in Docker. forksplit's own CLI runs end to end against their JSON-RPC:
+ * (ECX) in Docker. Splayed's own CLI runs end to end against their JSON-RPC:
  * init -> import -> scan -> dest -> plan -> (sign in test code) -> verify -> broadcast -> track.
  *
  *   deno task test:integration
@@ -186,7 +186,7 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   fn: async (t) => {
-    const project = `fsplit-it-${crypto.randomUUID().slice(0, 8)}`;
+    const project = `splayed-it-${crypto.randomUUID().slice(0, 8)}`;
     try {
       const nodes = await startNodes(project);
       for (const c of CHAINS) await nodes[c].call("createwallet", "miner");
@@ -256,7 +256,7 @@ Deno.test({
             const sources = spec.descriptors.map((d) => parseDescriptor(d));
             const coinCount = spec.descriptors.length * COIN_VALUES.length;
             const batchAll = spec.batch === "all";
-            // forksplit, driven through its real CLI with real node RPC as the only backends.
+            // splayed, driven through its real CLI with real node RPC as the only backends.
             const { dir, io, run, text, stdout } = await makeCli(nodes);
 
             await t.step("init: identity checks pass on all three real nodes", async () => {
@@ -269,8 +269,8 @@ Deno.test({
                 transportFactory: (_c, chain) =>
                   new RegtestRpcTransport(nodes[chain === "ecx" ? "btc" : chain]),
               };
-              const other = await Deno.makeTempDir({ prefix: "forksplit-it-wrong-" });
-              await Deno.copyFile(join(dir, "forksplit.toml"), join(other, "forksplit.toml"));
+              const other = await Deno.makeTempDir({ prefix: "splayed-it-wrong-" });
+              await Deno.copyFile(join(dir, "splayed.toml"), join(other, "splayed.toml"));
               const code = await main(
                 ["--data-dir", other, "--profile", REGTEST_PROFILE_ID, "init", "--yes"],
                 wrong,

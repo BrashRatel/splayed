@@ -15,7 +15,7 @@ import { MAINNET } from "../src/core/profiles.ts";
 import { classify, type CoinRecord } from "../src/core/state.ts";
 import { addOutput, fakeChain, FakeEsploraTransport, txid } from "./fakes.ts";
 
-const tmp = () => Deno.makeTempDir({ prefix: "forksplit-test-" });
+const tmp = () => Deno.makeTempDir({ prefix: "splayed-test-" });
 
 Deno.test("defaults: primary onion/Tor endpoints only, fallbacks not enabled", async () => {
   const config = await loadConfig({ dataDir: await tmp(), env: {} });
@@ -34,14 +34,14 @@ Deno.test("precedence: flag > env > file", async () => {
   await writeConfigFile(dir, { tor: { socks: "127.0.0.1:9150" } });
   assertEquals((await loadConfig({ dataDir: dir, env: {} })).torSocks.port, 9150);
   assertEquals(
-    (await loadConfig({ dataDir: dir, env: { FORKSPLIT_TOR_SOCKS: "127.0.0.1:9250" } })).torSocks
+    (await loadConfig({ dataDir: dir, env: { SPLAYED_TOR_SOCKS: "127.0.0.1:9250" } })).torSocks
       .port,
     9250,
   );
   assertEquals(
     (await loadConfig({
       dataDir: dir,
-      env: { FORKSPLIT_TOR_SOCKS: "127.0.0.1:9250" },
+      env: { SPLAYED_TOR_SOCKS: "127.0.0.1:9250" },
       torSocks: "127.0.0.1:9350",
     })).torSocks.port,
     9350,

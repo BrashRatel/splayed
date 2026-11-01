@@ -7,14 +7,14 @@ body:
     attributes:
       value: |
         If this could let someone lose coins or reveal private data, **do not file it here**: see
-        [SECURITY.md](https://github.com/BrashRatel/forksplit/blob/main/SECURITY.md).
+        [SECURITY.md](https://github.com/BrashRatel/splayed/blob/main/SECURITY.md).
 
         **Do not paste descriptors, xpubs, addresses or txids for wallets you use with real coins.**
         Redact them, or reproduce on the regtest playground.
   - type: input
     id: version
     attributes:
-      label: forksplit version or commit
+      label: splayed version or commit
     validations:
       required: true
   - type: input

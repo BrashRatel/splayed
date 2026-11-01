@@ -70,7 +70,7 @@ export async function loadPlanDir(
     const plan = await readJson<Plan>(join(dir, "plan.json")).catch(() => undefined);
     if (plan) return { dir, plan };
   }
-  throw new ExecuteError(`No plan "${idOrPath}". See \`forksplit plans\`.`);
+  throw new ExecuteError(`No plan "${idOrPath}". See \`splayed plans\`.`);
 }
 
 export async function loadProgress(dir: string): Promise<Progress> {
@@ -407,7 +407,7 @@ export function assessReorg(
           detail: `${label}: REORG. This split was confirmed (${prev.depth} deep) and has left ` +
             `the chain; it is not in the mempool and its input is unspent again, so the coin is ` +
             `back on ${label} and still shared with BTC. Do NOT spend the BTC copy. Run ` +
-            "`forksplit broadcast` to send it again, or `forksplit bump` to replace it.",
+            "`splayed broadcast` to send it again, or `splayed bump` to replace it.",
         }
         : undefined;
     case "unknown":

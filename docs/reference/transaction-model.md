@@ -1,6 +1,6 @@
 # Transaction model
 
-How forksplit makes a coin that exists on several chains spendable on exactly one of them. Audience:
+How Splayed makes a coin that exists on several chains spendable on exactly one of them. Audience:
 advanced users and auditors. Pinned constants live in `src/core/profiles.ts`; the planner is
 `src/core/planner.ts`, the PSBT encoder `src/core/psbt.ts`, and signature checks
 `src/core/sigcheck.ts`.

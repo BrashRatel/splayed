@@ -131,7 +131,7 @@ export async function scanSignedPsbt({ api, h, planId, file, label, onSaved }) {
     h(
       "p",
       { class: "note" },
-      "On the signer, choose to export the signed transaction as a QR code, then hold it in front of the camera. Frames are read here in your browser; only their text goes to forksplit on this machine.",
+      "On the signer, choose to export the signed transaction as a QR code, then hold it in front of the camera. Frames are read here in your browser; only their text goes to splayed on this machine.",
     ),
     video,
     bar,

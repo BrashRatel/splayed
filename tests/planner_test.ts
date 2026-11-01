@@ -59,9 +59,9 @@ async function setup() {
   spendReal(xbt, c, 0, 965_000, 4);
   spendReal(ecx, c, 0, 974_000, 5);
   const chains = { btc, xbt, ecx };
-  const dir = await Deno.makeTempDir({ prefix: "forksplit-plan-" });
+  const dir = await Deno.makeTempDir({ prefix: "splayed-plan-" });
   await Deno.writeTextFile(
-    join(dir, "forksplit.toml"),
+    join(dir, "splayed.toml"),
     "[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n",
   );
   const h = harness(chains);

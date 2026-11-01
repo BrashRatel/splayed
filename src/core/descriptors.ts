@@ -114,7 +114,7 @@ export const REGTEST_NETWORK: AddressNetwork = {
   convertible: new Set([0x043587cf, 0x044a5262, 0x045f1cf6, 0x024289ef, 0x02575483]),
   privateVersions: [0x04358394, 0x044a4e28, 0x045f18bc, 0x0488ade4],
   keyHint:
-    "Only regtest extended public keys (tpub/upub/vpub, or the xpub forksplit stores) are supported",
+    "Only regtest extended public keys (tpub/upub/vpub, or the xpub splayed stores) are supported",
 };
 
 /** The descriptor network a profile uses (mainnet unless the profile says otherwise). */
@@ -141,7 +141,7 @@ function normalizeXpub(text: string, network: AddressNetwork): string {
   }
   if (network.privateVersions.includes(version)) {
     throw new DescriptorError(
-      "That is a PRIVATE extended key. forksplit is keyless: give it the xpub and sign in your own wallet",
+      "That is a PRIVATE extended key. splayed is keyless: give it the xpub and sign in your own wallet",
     );
   }
   throw new DescriptorError(network.keyHint);
@@ -263,7 +263,7 @@ class Parser {
     }
     if (/^[xyztuvYZUV]prv/u.test(token)) {
       throw new DescriptorError(
-        "That is a PRIVATE extended key. forksplit is keyless: give it the xpub and sign in your own wallet",
+        "That is a PRIVATE extended key. splayed is keyless: give it the xpub and sign in your own wallet",
       );
     }
     key.xpub = normalizeXpub(token, this.network);

@@ -296,7 +296,7 @@ export async function buildPlan(
     }
     if (!donorKeys.length) {
       throw new PlanError(
-        "The BTC-first route needs a BTC donor for each BTC transaction: `forksplit donor scan`, " +
+        "The BTC-first route needs a BTC donor for each BTC transaction: `splayed donor scan`, " +
           "then --donor txid:vout",
       );
     }
@@ -321,7 +321,7 @@ export async function buildPlan(
           "BitBox) can't make. Supported: " +
           Object.entries(XBT_SIGNERS).map(([k, v]) => `${k} (${v.label})`).join("; ") +
           ". If you only have a stock hardware wallet, plan ECX now (--chains ecx), or use the " +
-          "advanced donor route: `forksplit donor import`, `donor scan`, then `plan --donor txid:vout`.",
+          "advanced donor route: `splayed donor import`, `donor scan`, then `plan --donor txid:vout`.",
       );
     }
     const signer = XBT_SIGNERS[options.xbtSigner];
@@ -362,7 +362,7 @@ export async function buildPlan(
     if (!destination) {
       throw new PlanError(
         `No ${chain.toUpperCase()} destination. Set one with ` +
-          `\`forksplit dest set ${chain} '<descriptor>'\` (ideally from a new seed for ${chain.toUpperCase()}).`,
+          `\`splayed dest set ${chain} '<descriptor>'\` (ideally from a new seed for ${chain.toUpperCase()}).`,
       );
     }
     const dest = parseDescriptor(destination.descriptor, networkForProfile(config.profile));
@@ -465,7 +465,7 @@ export async function buildPlan(
     const liveDonors: Candidate[] = [];
     if (donorRoute) {
       const pool = deps.donors;
-      if (!pool) throw new PlanError("Scan the donor wallet first: `forksplit donor scan`");
+      if (!pool) throw new PlanError("Scan the donor wallet first: `splayed donor scan`");
       for (const key of donorKeys) {
         const coin = pool.coins.find((c) => `${c.txid}:${c.vout}` === key);
         if (!coin) throw new PlanError(`Donor ${key} isn't in the donor scan (run \`donor scan\`)`);
@@ -715,7 +715,7 @@ export function outputMap(d: DerivedOutput): KeyValue[] {
 export const PLANS_DIR = "plans";
 
 const SIGNING_README = (plan: Plan) =>
-  `forksplit plan ${plan.id}
+  `splayed plan ${plan.id}
 
 ${
     plan.route === "btc-first-donor"
@@ -777,9 +777,9 @@ broadcast this plan as usual.
 Save each signed PSBT next to its original as <name>.signed.psbt (raw hex as <name>.signed.hex
 also works), then:
 
-  forksplit verify ${plan.id}
-  forksplit broadcast ${plan.id}
-  forksplit track ${plan.id}
+  splayed verify ${plan.id}
+  splayed broadcast ${plan.id}
+  splayed track ${plan.id}
 
 verify checks every signature and replay marker against this plan. broadcast sends each
 transaction only to its own chain, TEST FIRST transactions first. Don't broadcast these files

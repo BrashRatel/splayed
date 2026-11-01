@@ -1,6 +1,6 @@
 # Network and privacy
 
-How forksplit talks to the chains, what it reveals, and how to point it at your own nodes.
+How Splayed talks to the chains, what it reveals, and how to point it at your own nodes.
 
 ## Defaults
 
@@ -29,14 +29,14 @@ any network setting closes the gate again.
 
 ## Tor
 
-forksplit finds or starts Tor for you, but only when a backend that's about to be contacted needs
-it. Local and LAN backends never start Tor.
+Splayed finds or starts Tor for you, but only when a backend that's about to be contacted needs it.
+Local and LAN backends never start Tor.
 
-| Mode             | What it does                                                                                                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auto` (default) | Uses a Tor that's already running: the configured address, then `127.0.0.1:9050` (tor daemon), then `127.0.0.1:9150` (Tor Browser). If none is running, it starts forksplit's own. |
-| `managed`        | Always starts forksplit's own Tor.                                                                                                                                                 |
-| `system`         | Only uses a Tor you run, and never starts one. Fails closed if it isn't there.                                                                                                     |
+| Mode             | What it does                                                                                                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto` (default) | Uses a Tor that's already running: the configured address, then `127.0.0.1:9050` (tor daemon), then `127.0.0.1:9150` (Tor Browser). If none is running, it starts Splayed's own. |
+| `managed`        | Always starts Splayed's own Tor.                                                                                                                                                 |
+| `system`         | Only uses a Tor you run, and never starts one. Fails closed if it isn't there.                                                                                                   |
 
 ```sh
 deno task cli config tor auto
@@ -44,18 +44,18 @@ deno task cli config tor system 127.0.0.1:9150   # Tor Browser
 deno task cli config tor managed
 ```
 
-forksplit's own Tor:
+Splayed's own Tor:
 
-- runs as a child process, with its own data directory under the forksplit data dir;
+- runs as a child process, with its own data directory under the Splayed data dir;
 - uses SOCKS on a random loopback port with `IsolateSOCKSAuth`, so each chain and each broadcast
   gets its own circuit;
 - sets `SafeSocks 1`, so every name is resolved inside Tor;
-- is tied to forksplit with `__OwningControllerProcess`, so it exits if forksplit dies, and is
-  stopped on normal exit or Ctrl+C.
+- is tied to Splayed with `__OwningControllerProcess`, so it exits if Splayed dies, and is stopped
+  on normal exit or Ctrl+C.
 
 The binary comes from, in order:
 
-1. `tor.binary` in the config, or `FORKSPLIT_TOR_BINARY`;
+1. `tor.binary` in the config, or `SPLAYED_TOR_BINARY`;
 2. the bundled copy in `vendor/tor/<os>-<arch>/`;
 3. `tor` on `PATH`.
 
@@ -88,8 +88,8 @@ deno task cli init
   never contacted. `config backend fallback` and `config backend reset` bring defaults back.
 - Backends are tried in priority order and the tool stops at the first that passes its identity
   check; lower ones are contacted only if every backend above them failed.
-- With node RPC, `txindex=1` lets forksplit report how deep a spend is and fetch previous
-  transactions for PSBTs. Without it, a spent coin shows as "spent/absent ?" and stays **pending**.
+- With node RPC, `txindex=1` lets Splayed report how deep a spend is and fetch previous transactions
+  for PSBTs. Without it, a spent coin shows as "spent/absent ?" and stays **pending**.
 - Configuring your own node-RPC backends also lets `verify` ask `testmempoolaccept` on every chain.
 - RPC passwords are never stored, only the name of the environment variable that holds them, or a
   cookie file path.
@@ -102,6 +102,6 @@ This also stops a BTC explorer being used as the XBT backend. The checkpoints ar
 
 ## Data directory
 
-`~/.local/share/forksplit` (Linux), `~/Library/Application Support/forksplit` (macOS) or
-`%APPDATA%\forksplit` (Windows). Override with `--data-dir` or `FORKSPLIT_DATA_DIR`. Files are
-written atomically with `0600` permissions.
+`~/.local/share/splayed` (Linux), `~/Library/Application Support/splayed` (macOS) or
+`%APPDATA%\splayed` (Windows). Override with `--data-dir` or `SPLAYED_DATA_DIR`. Files are written
+atomically with `0600` permissions.

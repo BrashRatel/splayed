@@ -11,7 +11,7 @@
     "fetch-tor": "deno run --allow-net=archive.torproject.org --allow-read --allow-write --allow-run=tar scripts/fetch_tor.ts",
     "update-tor-manifest": "deno run --allow-net=archive.torproject.org --allow-read --allow-write --allow-run=gpg scripts/update_tor_manifest.ts",
     "ui": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts ui --open",
-    "compile": "deno compile --allow-net --allow-read --allow-write --allow-env --allow-run --include src/ui/static -o dist/forksplit main.ts",
+    "compile": "deno compile --allow-net --allow-read --allow-write --allow-env --allow-run --include src/ui/static -o dist/splayed main.ts",
     "demo-ui": "deno run -A tests/demo_ui.ts"
   },
   "fmt": {

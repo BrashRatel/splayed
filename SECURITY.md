@@ -1,6 +1,6 @@
 # Security
 
-forksplit builds and broadcasts transactions that move real coins. Please report vulnerabilities
+Splayed builds and broadcasts transactions that move real coins. Please report vulnerabilities
 **privately**, not in a public issue.
 
 ## Reporting
@@ -18,7 +18,7 @@ private keys or descriptors (xpubs) for coins you care about; use regtest or a t
 
 ## What to expect
 
-forksplit is **pre-alpha** and maintained by one person, so these are goals, not guarantees:
+Splayed is **pre-alpha** and maintained by one person, so these are goals, not guarantees:
 
 - an acknowledgement within 7 days;
 - a fix or a mitigation plan within 90 days, with coordinated disclosure: please don't publish
@@ -26,7 +26,7 @@ forksplit is **pre-alpha** and maintained by one person, so these are goals, not
 - credit in the changelog if you want it.
 
 Bugs that are not security issues (wrong output, crashes, a signer that doesn't work) belong in a
-normal [issue](https://github.com/BrashRatel/forksplit/issues/new/choose).
+normal [issue](https://github.com/BrashRatel/splayed/issues/new/choose).
 
 ## Scope
 

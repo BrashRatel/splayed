@@ -1,4 +1,4 @@
-# forksplit TODO
+# Splayed TODO
 
 Target: a **pre-alpha** release, so more people can test. Section 1 is everything that has to be
 true before tagging it. Everything after that is follow-up work and does not block the release.
@@ -51,8 +51,12 @@ default servers probed through Tor. **Nothing has moved real coins on mainnet.**
       `E6D1FC8869F4317E0AEFC58851E2C57C67FA2A4A`, checked against the Keybase key), a disclosure
       policy (7-day acknowledgement, 90-day coordinated disclosure), and an up-to-date known
       limitations list.
-- [ ] **Name and license.** Decide before going public. The license is MIT today, to match the
-      vendored smolcars code.
+- [x] **Name:** renamed to **Splayed** (checked for conflicts: npm, PyPI, crates.io, jsr and
+      RubyGems are free, no product or company found, and `splayed.com` is a parked domain).
+  - [x] GitHub repo renamed to `BrashRatel/splayed`; links and the git remote updated.
+  - [ ] Search USPTO, UK IPO and EUIPO for the name before going public.
+  - [ ] Register a domain if you want one (`.io`, `.dev`, `.app` and others looked unregistered).
+- [ ] **License.** MIT today, to match the vendored smolcars code. Confirm before going public.
 - [x] **Pre-alpha messaging.**
   - [x] README status line says pre-alpha and no longer says "milestone 4".
   - [x] Release notes (`docs/release-notes/0.1.0-pre-alpha.1.md`) state plainly: not

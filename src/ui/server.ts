@@ -302,7 +302,7 @@ export interface UiOptions {
   /**
    * TEST ENVIRONMENTS ONLY (the regtest playground). Listens on every interface and answers any
    * Host name on our port, so another machine on the LAN can open it. The token is still required
-   * and is sent over plain HTTP. The real `forksplit ui` never sets this.
+   * and is sent over plain HTTP. The real `splayed ui` never sets this.
    */
   listenOnAllInterfaces?: boolean;
   /** TEST ENVIRONMENTS ONLY: lets the page mine blocks on regtest nodes. Never set by `ui`. */
@@ -341,7 +341,7 @@ export function startUi(
     const auth = req.headers.get("authorization");
     if (!constantTimeEqual(auth?.replace(/^Bearer /u, "") ?? null, token)) {
       return json(
-        { error: "Missing or wrong token. Open the URL printed by `forksplit ui`." },
+        { error: "Missing or wrong token. Open the URL printed by `splayed ui`." },
         401,
       );
     }
