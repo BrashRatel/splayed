@@ -7,6 +7,12 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Donors funded elsewhere.** `donor scan` now traces a donor's funding transaction on chain
+  (`verified-funding`): accepted when it carries a 0x21 signature (XBT) or an input that leads back
+  to a coinbase of that chain or to a split this tool verified; plain-signed funding from shared
+  coins stays `unproven` and refused. Unit tests for the tracer, and a real-node scenario (a
+  0x21-funded donor is proven and fanned out; a plain-funded one is refused; turning the 0x21
+  detection off breaks it).
 - **Advanced BTC-first route** (`plan --btc-first --donor txid:vout`, `dest set btc`). The BTC copy
   is split first, protected by a BTC-only donor; ECX keeps its locktime; XBT is signed with plain
   `SIGHASH_ALL` and carries no replay protection, so `broadcast` holds it back until its coin is

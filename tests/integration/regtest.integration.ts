@@ -25,7 +25,13 @@ import {
 import { makeCli } from "./cli_harness.ts";
 import { CHAINS, copyBlocks, docker, publishedPort, waitReady } from "./cluster.ts";
 import { RegtestRpcTransport, Rpc } from "./rpc.ts";
-import { btcFirstScenario, donorScenario, rbfScenario, reorgScenario } from "./scenarios.ts";
+import {
+  btcFirstScenario,
+  donorScenario,
+  foreignFundingScenario,
+  rbfScenario,
+  reorgScenario,
+} from "./scenarios.ts";
 import { ignoresUnifiedSign, keyMap, stockSign, unifiedSign } from "./signers.ts";
 
 const seed = (words: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(words));
@@ -138,6 +144,8 @@ const REORG_WALLET = makeWallet("reorg", [PART.wpkh(words(61))]);
 const DONOR_SOURCE = makeWallet("donor-source", [PART.wpkh(words(62))]);
 const DONOR_WALLET = makeWallet("donor-wallet", [PART.wpkh(words(70))]);
 const BTC_SOURCE = makeWallet("btc-first-source", [PART.wpkh(words(63))]);
+const FOREIGN_SOURCE = makeWallet("foreign-source", [PART.wpkh(words(64))]);
+const FOREIGN_DONOR = makeWallet("foreign-donor", [PART.wpkh(words(72))]);
 const BTC_DONOR_WALLET = makeWallet("btc-donor-wallet", [PART.wpkh(words(71))]);
 
 const WALLETS: WalletSpec[] = [
@@ -184,7 +192,16 @@ Deno.test({
       // One funding transaction for every coin: a chain of single sends would trip the node's
       // ancestor limit, and the prefix has to stay below the fork height.
       const outputs: Record<string, number> = {};
-      for (const spec of [...WALLETS, RBF_WALLET, REORG_WALLET, DONOR_SOURCE, BTC_SOURCE]) {
+      for (
+        const spec of [
+          ...WALLETS,
+          RBF_WALLET,
+          REORG_WALLET,
+          DONOR_SOURCE,
+          BTC_SOURCE,
+          FOREIGN_SOURCE,
+        ]
+      ) {
         for (const descriptor of spec.descriptors) {
           const source = parseDescriptor(descriptor);
           for (let i = 0; i < COIN_VALUES.length; i++) {
@@ -447,6 +464,13 @@ Deno.test({
         sanitizeOps: false,
         sanitizeResources: false,
         fn: (t) => btcFirstScenario(t, harness, BTC_SOURCE, BTC_DONOR_WALLET),
+      });
+      await t.step({
+        name:
+          "donors funded elsewhere: a 0x21-funded donor is proven, a plain-funded one is refused",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => foreignFundingScenario(t, harness, FOREIGN_SOURCE, FOREIGN_DONOR),
       });
     } finally {
       await docker(project, ["down", "-v", "--remove-orphans"]).catch(() => {});

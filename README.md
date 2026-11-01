@@ -297,8 +297,9 @@ Rules the tool enforces:
 
 - A donor must be unspent and deep on XBT, and **absent** on BTC and ECX (an unanswered check is not
   "absent").
-- Its origin must be provable: an XBT coinbase output (mature, 100 blocks), or the output of an XBT
-  split this tool verified and broadcast. Anything else is refused as `unproven`, because a funding
+- Its origin must be provable: an XBT coinbase output (mature, 100 blocks), the output of an XBT
+  split this tool verified and broadcast, or a donor **funded elsewhere** whose funding transaction
+  the tool can trace on chain (see below). Anything else is refused as `unproven`, because a funding
   transaction signed without 0x21 could still be sent to BTC by whoever holds it, which would make
   the donor exist there and the spend replayable.
 - One donor per XBT transaction. `--batch all` uses a single donor for all your coins.
@@ -307,6 +308,14 @@ Rules the tool enforces:
   if its keys are in another wallet, sign with both in turn.
 - `verify` still asks your nodes: the XBT node must accept and BTC and ECX must reject. `broadcast`
   checks again that the donor is absent from BTC and ECX, and refuses if it can't ask.
+
+**Donors funded elsewhere.** If another machine or wallet paid your donor wallet, `donor scan` reads
+the funding transaction from the chain and accepts the donor (`verified-funding`) only when that
+transaction cannot be valid on another chain: it carries a SIGHASH_UNIFIED (0x21) signature (XBT
+only), or one of its inputs was made by a transaction that cannot be valid elsewhere, followed back
+(at most 6 levels, 40 transactions) to a coinbase of that chain or to a split this tool verified. A
+funding transaction signed with plain `SIGHASH_ALL` from shared coins is refused: anyone holding it
+could still send it to BTC. The scan shows how each donor was proven.
 
 **Fan-out.** Donors are usually big (a coinbase is 50 BTC on regtest), and each XBT transaction uses
 one. `donor fanout --donor txid:vout --outputs 5 [--value SATS]` splits a donor into smaller donors

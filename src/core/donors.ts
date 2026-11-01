@@ -24,6 +24,8 @@ import { join } from "node:path";
 import type { ChainBackend } from "../backends/types.ts";
 import { PLANS_DIR } from "./planner.ts";
 import { loadProgress } from "./execute.ts";
+import { isCoinbaseTx, proveFunding } from "./origin.ts";
+import type { ChainId } from "./profiles.ts";
 import type { CoinRecord } from "./state.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
 import { parseTx } from "./tx.ts";
@@ -33,7 +35,12 @@ export const DONOR_SCAN_FILE = "donor-scan.json";
 /** Coinbase outputs can't be spent until this many blocks are on top of them. */
 export const COINBASE_MATURITY = 100;
 
-export type DonorProvenance = "coinbase" | "protected-spend" | "unproven";
+/**
+ * coinbase: a mature coinbase of its home chain. protected-spend: made by a transaction this tool
+ * verified and sent. verified-funding: made elsewhere, but its funding transaction was traced on
+ * chain to a coinbase or a 0x21 signature (origin.ts). unproven: none of those, so it is refused.
+ */
+export type DonorProvenance = "coinbase" | "protected-spend" | "verified-funding" | "unproven";
 /** The chain a donor lives on: the only chain that has it. */
 export type DonorHome = "xbt" | "btc";
 
@@ -41,6 +48,8 @@ export interface DonorCoin extends CoinRecord {
   /** Absent in scans written before the BTC-first route: those are XBT donors. */
   home?: DonorHome;
   provenance: DonorProvenance;
+  /** For verified-funding: how the funding transaction was shown to be home-only. */
+  funding?: string;
   eligible: boolean;
   /** Why it is not eligible (empty when it is). */
   reasons: string[];
@@ -54,8 +63,6 @@ export interface DonorScan {
   warnings: string[];
   coins: DonorCoin[];
 }
-
-const NULL_TXID = "0".repeat(64);
 
 /**
  * Txids of transactions this tool verified and sent on `home`: their outputs exist on that chain only
@@ -155,20 +162,19 @@ export function assessDonor(
 }
 
 export function isCoinbase(rawTx: string): boolean {
-  const tx = parseTx(rawTx);
-  return tx.inputs.length === 1 && tx.inputs[0].txid === NULL_TXID &&
-    tx.inputs[0].vout === 0xffff_ffff;
+  return isCoinbaseTx(parseTx(rawTx));
 }
 
 /** Works out each donor's provenance and eligibility from a scan of the donor descriptors. */
 export async function evaluateDonors(
   scan: ScanResult,
-  backends: Partial<Record<DonorHome, ChainBackend>>,
+  backends: Partial<Record<ChainId, ChainBackend>>,
   confirmations: Record<DonorHome, number>,
   protectedByHome: Record<DonorHome, Set<string>>,
 ): Promise<DonorScan> {
   const warnings = [...scan.warnings];
   const coins: DonorCoin[] = [];
+  const fundingNotes = new Map<string, string>();
   const ctx = {
     tips: scan.tips,
     xbtConfirmations: confirmations.xbt,
@@ -183,7 +189,32 @@ export async function evaluateDonors(
         provenance = "protected-spend";
       } else if (backend) {
         try {
-          if (isCoinbase(await backend.rawTransaction(coin.txid))) provenance = "coinbase";
+          if (isCoinbase(await backend.rawTransaction(coin.txid))) {
+            provenance = "coinbase";
+          } else {
+            // Funded by someone else's transaction: trace it on chain.
+            const others = (["btc", "xbt", "ecx"] as const).filter((c) => c !== home);
+            const proof = await proveFunding(coin.txid, {
+              home,
+              rawTransaction: (id) => backend.rawTransaction(id),
+              absentElsewhere: async (id, vout) => {
+                for (const c of others) {
+                  const other = backends[c];
+                  if (!other) return false;
+                  const o = await other.observeOutput(id, vout).catch(() => undefined);
+                  if (o?.state !== "absent") return false;
+                }
+                return true;
+              },
+              ownProtected: protectedByHome[home],
+            });
+            if (proof.ok) {
+              provenance = "verified-funding";
+              fundingNotes.set(`${coin.txid}:${coin.vout}`, proof.via);
+            } else {
+              fundingNotes.set(`${coin.txid}:${coin.vout}`, proof.reason);
+            }
+          }
         } catch (error) {
           warnings.push(
             `${coin.txid.slice(0, 8)}:${coin.vout}: couldn't read its creating transaction ` +
@@ -192,7 +223,16 @@ export async function evaluateDonors(
         }
       }
     }
-    coins.push({ ...coin, home, provenance, ...assessDonor(coin, ctx, provenance, home) });
+    const verdict = assessDonor(coin, ctx, provenance, home);
+    const note = fundingNotes.get(`${coin.txid}:${coin.vout}`);
+    if (note && provenance === "unproven") verdict.reasons.push(`(${note})`);
+    coins.push({
+      ...coin,
+      home,
+      provenance,
+      ...verdict,
+      ...(provenance === "verified-funding" ? { funding: note } : {}),
+    });
   }
   return {
     version: 1,
@@ -218,6 +258,6 @@ export const donorKey = (c: { txid: string; vout: number }) => `${c.txid}:${c.vo
 export function describeDonor(c: DonorCoin): string {
   const home = (c.home ?? "xbt").toUpperCase();
   return c.eligible
-    ? `${home} donor · ${c.provenance}`
+    ? `${home} donor · ${c.provenance}${c.funding ? ` (${c.funding})` : ""}`
     : `${home} · ${c.provenance} · NOT usable: ${c.reasons[0]}`;
 }

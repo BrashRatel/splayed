@@ -822,7 +822,12 @@ function viewDonors() {
       h("td", { class: "mono" }, short(c.txid, c.vout)),
       h("td", {}, btc(c.value)),
       h("td", { class: "mono" }, c.address ?? ""),
-      h("td", {}, `${(c.home ?? "xbt").toUpperCase()} · ${c.provenance}`),
+      h(
+        "td",
+        {},
+        `${(c.home ?? "xbt").toUpperCase()} · ${c.provenance}`,
+        c.funding ? h("div", { class: "muted" }, c.funding) : null,
+      ),
       h(
         "td",
         {},

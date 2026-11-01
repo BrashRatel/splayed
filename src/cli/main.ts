@@ -1070,7 +1070,7 @@ async function cmdDonor(
         );
         const evaluated = await evaluateDonors(
           result,
-          { xbt: backends.xbt, btc: backends.btc },
+          backends,
           { xbt: config.chains.xbt.confirmations, btc: config.chains.btc.confirmations },
           {
             xbt: await protectedTxids(config.dataDir, "xbt"),

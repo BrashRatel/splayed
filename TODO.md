@@ -115,8 +115,8 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
     - [x] Donor fan-out (`donor fanout`): one transaction per donor, many outputs back to the donor
           wallet. Tested against real nodes. A fan-out can't be fee-bumped yet (`bump` handles
           single-output transactions only).
-    - [ ] Accept a donor whose funding transaction was made elsewhere, by verifying that
-          transaction's 0x21 signatures (today it is refused as "unproven").
+    - [x] Accept a donor whose funding transaction was made elsewhere (`verified-funding`): traced
+          on chain to a 0x21 signature or back to a coinbase / a split this tool verified.
     - [x] A donor screen in the web UI, behind an Advanced toggle (import, scan, select, fan out,
           plan). Rendered only against a stub DOM so far; not looked at in a real browser.
     - [ ] Try it with a real stock hardware wallet signing both the shared and the donor input.

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { assert, assertEquals } from "../assert.ts";
 import type { ChainId } from "../../src/core/profiles.ts";
 import {
+  finalHexOf,
   foreignSpendHex,
   makeCli,
   planIds,
@@ -15,7 +16,7 @@ import {
 } from "./cli_harness.ts";
 import type { Rpc } from "./rpc.ts";
 import { parseDescriptor } from "../../src/core/descriptors.ts";
-import { stockSign } from "./signers.ts";
+import { ignoresUnifiedSign, stockSign, unifiedSign } from "./signers.ts";
 
 export interface ScenarioWallet {
   descriptors: string[];
@@ -597,5 +598,135 @@ export async function btcFirstScenario(
     }
     await h.nodes.xbt.mine(2, await h.minerAddr("xbt"));
     assertEquals(await run("track", planId), 0, text());
+  });
+}
+
+/**
+ * Donors whose funding transaction this tool did not make. Another "machine" (a second data
+ * directory) splits two shared coins onto XBT into the donor wallet: one with a 0x21 signature, one
+ * with a plain signature sent straight to the XBT node. The first donor can be traced and used; the
+ * second could be replayed onto BTC by anyone holding its funding transaction, so it is refused.
+ */
+export async function foreignFundingScenario(
+  t: Deno.TestContext,
+  h: Harness,
+  source: ScenarioWallet,
+  donorWallet: ScenarioWallet,
+) {
+  const funder = await makeCli(h.nodes);
+  let protectedOut = "";
+  let plainOut = "";
+
+  await t.step(
+    "another machine funds the donor wallet: one 0x21 spend, one plain spend",
+    async () => {
+      const { run, text } = funder;
+      assertEquals(await run("init", "--yes"), 0, text());
+      for (const d of source.descriptors) assertEquals(await run("import", d), 0, text());
+      assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
+      assertEquals(await run("dest", "set", "ecx", h.ecxDest), 0, text());
+      assertEquals(await run("dest", "set", "xbt", donorWallet.descriptors[0]), 0, text());
+      assertEquals(
+        await run(
+          "plan",
+          "--chains",
+          "xbt",
+          "--xbt-signer",
+          "knots",
+          "--fee-rate",
+          "xbt=2",
+          "--yes",
+        ),
+        0,
+        text(),
+      );
+      const [planId] = await planIds(funder.dir);
+      const { dir, plan } = await readPlan(funder.dir, planId);
+      const [protectedTx, plainTx] = plan.transactions;
+      // Transaction 1: signed with 0x21 and sent through the tool.
+      const p1 = join(dir, protectedTx.file.replace(/\.psbt$/u, ".signed.psbt"));
+      await Deno.writeTextFile(
+        p1,
+        unifiedSign(await Deno.readTextFile(join(dir, protectedTx.file)), source.keys),
+      );
+      assertEquals(await run("verify", planId), 0, text());
+      assertEquals(await run("broadcast", planId, "--yes"), 0, text());
+      // Transaction 2: signed WITHOUT 0x21 and pushed to the XBT node directly. This is what a
+      // careless funder does, and it is the transaction someone could still send to BTC.
+      const plain = ignoresUnifiedSign(
+        await Deno.readTextFile(join(dir, plainTx.file)),
+        source.keys,
+      );
+      await h.nodes.xbt.call("sendrawtransaction", finalHexOf(plain));
+      await h.nodes.xbt.mine(2, await h.minerAddr("xbt"));
+      protectedOut = `${protectedTx.unsignedTxid}`;
+      plainOut = `${plainTx.unsignedTxid}`;
+    },
+  );
+
+  // The donor tool knows nothing about the funder's plan.
+  const cli = await makeCli(h.nodes);
+  const { run, text } = cli;
+  let scan: { coins: { txid: string; vout: number; eligible: boolean; provenance: string }[] };
+
+  await t.step(
+    "donor scan: the 0x21-funded donor is verified, the plain-funded one refused",
+    async () => {
+      assertEquals(await run("init", "--yes"), 0, text());
+      assertEquals(await run("donor", "import", donorWallet.descriptors[0]), 0, text());
+      assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
+      scan = JSON.parse(await Deno.readTextFile(join(cli.dir, "donor-scan.json")));
+      const a = scan.coins.find((c) => c.txid === protectedOut)!;
+      const b = scan.coins.find((c) => c.txid === plainOut)!;
+      assert(a && b, JSON.stringify(scan.coins.map((c) => c.txid)));
+      assertEquals([a.provenance, a.eligible], ["verified-funding", true]);
+      assertEquals([b.provenance, b.eligible], ["unproven", false]);
+      assert(text().includes("0x21"), text());
+    },
+  );
+
+  await t.step("the verified donor can be fanned out; the unproven one is refused", async () => {
+    const a = scan.coins.find((c) => c.txid === protectedOut)!;
+    const b = scan.coins.find((c) => c.txid === plainOut)!;
+    assertEquals(
+      await run(
+        "donor",
+        "fanout",
+        "--donor",
+        `${b.txid}:${b.vout}`,
+        "--outputs",
+        "2",
+        "--fee-rate",
+        "xbt=2",
+        "--yes",
+      ),
+      1,
+      text(),
+    );
+    assert(text().includes("unproven"), text());
+    assertEquals(
+      await run(
+        "donor",
+        "fanout",
+        "--donor",
+        `${a.txid}:${a.vout}`,
+        "--outputs",
+        "2",
+        "--fee-rate",
+        "xbt=2",
+        "--yes",
+      ),
+      0,
+      text(),
+    );
+    const [id] = await planIds(cli.dir);
+    const { dir, plan } = await readPlan(cli.dir, id);
+    const [tx] = plan.transactions;
+    await Deno.writeTextFile(
+      join(dir, tx.file.replace(/\.psbt$/u, ".signed.psbt")),
+      stockSign(await Deno.readTextFile(join(dir, tx.file)), donorWallet.keys),
+    );
+    assertEquals(await run("verify", id), 0, text());
+    assertEquals(await run("broadcast", id, "--yes"), 0, text());
   });
 }

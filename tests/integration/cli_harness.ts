@@ -110,3 +110,10 @@ export function foreignSpendHex(unsignedB64: string, keys: Map<string, Uint8Arra
   tx.finalize();
   return tx.hex;
 }
+
+/** The raw hex of a fully signed PSBT, for sending it outside the tool (as another machine would). */
+export function finalHexOf(signedB64: string): string {
+  const tx = Transaction.fromPSBT(Uint8Array.from(atob(signedB64.trim()), (c) => c.charCodeAt(0)));
+  tx.finalize();
+  return tx.hex;
+}
