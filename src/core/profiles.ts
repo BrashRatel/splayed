@@ -1,7 +1,7 @@
 /**
  * Network profiles. Everything in this file is consensus-critical or identity-critical and is
  * compiled in on purpose: users can choose a profile but can never edit its constants.
- * See README.md, "Security model".
+ * See docs/reference/security-model.md.
  */
 
 export type ChainId = "btc" | "xbt" | "ecx";

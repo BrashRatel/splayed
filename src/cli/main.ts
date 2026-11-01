@@ -130,7 +130,7 @@ Splitting (guided route: forks first, BTC untouched):
                                   exist on XBT only lets a stock hardware wallet make the XBT
                                   split with plain SIGHASH_ALL signatures. Donors are checked
                                   absent on BTC and ECX and must come from an XBT coinbase or a
-                                  split this tool verified. See the README.
+                                  split this tool verified. See docs/user/advanced-donor-routes.md.
   plans                           List written plans
   verify <plan> [signed files...] [--no-mempool]
                                   Check signed PSBTs/transactions: same tx as planned, replay

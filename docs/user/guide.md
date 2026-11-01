@@ -1,0 +1,130 @@
+# User guide
+
+The full walkthrough for separating your coins: install, check the network, import your wallet,
+scan, plan, sign, verify, broadcast and track. For the idea behind it, see the
+[README](../../README.md). For flags, see the [CLI reference](../reference/cli.md).
+
+The guided route is **forks first, BTC last**:
+
+1. **ECX:** send each shared coin to yourself with the ECX marker. Any signer works, hardware
+   wallets included.
+2. **XBT:** send it to yourself with a 0x21 (`SIGHASH_ALL|SIGHASH_UNIFIED`) signature. This needs a
+   signer that supports it (see [Signers](signers.md)). Stock hardware wallets can't make these
+   signatures; the [advanced donor route](advanced-donor-routes.md) is the workaround.
+3. **BTC:** once both splits are deeply confirmed, the BTC copy can be spent normally.
+
+## Install and run
+
+Requires [Deno 2.x](https://deno.com).
+
+```sh
+deno install
+deno task cli --help
+```
+
+## First run: network settings come before anything else
+
+```sh
+deno task cli init
+```
+
+`init` shows where every query will go, then checks each backend is on the right chain. It asks only
+for the chain tip and a few fixed block hashes, so nothing about your coins is sent. Importing and
+scanning stay disabled until you confirm. Changing any network setting closes the gate again.
+
+Defaults, Tor modes and using your own nodes are covered in
+[Network and privacy](network-and-privacy.md).
+
+## Import and scan
+
+```sh
+deno task cli import "wpkh([d34db33f/84h/0h/0h]xpub6.../<0;1>/*)#checksum" --label cold
+deno task cli scan
+deno task cli status        # or: status --json
+```
+
+`import` prints the first address of each branch. Check they match your wallet.
+
+Supported descriptors:
+
+- `pkh`, `wpkh`, `sh(wpkh)` and `tr` (key path);
+- `sh`, `wsh` and `sh(wsh)` with `multi` or `sortedmulti`.
+
+`ypub` and `zpub` keys are accepted and converted to xpub. Private keys are refused.
+
+Each coin gets one status:
+
+| Status       | Meaning                                                          |
+| ------------ | ---------------------------------------------------------------- |
+| `shared`     | Unspent on two or more chains. The output lists the next steps   |
+| `separated`  | Unspent on one chain; every other copy is deeply spent or absent |
+| `pending`    | A spend is unconfirmed, shallow, or its depth can't be checked   |
+| `unverified` | A chain couldn't be asked. Never treated as safe                 |
+| `spent`      | Not unspent anywhere                                             |
+
+## Plan the splits (unsigned PSBTs)
+
+```sh
+# Where split coins go on each fork (best: a new seed per fork). Ranged descriptor, branch 0 used.
+deno task cli dest set ecx "wpkh([fp/84h/0h/0h]xpub.../0/*)"
+deno task cli dest set xbt "tr([fp/86h/0h/0h]xpub.../0/*)"
+# Say what will sign XBT: knots, sparrow-blake2b, shrike, embit, privkeyio-firmware
+deno task cli plan --xbt-signer knots --fee-rate ecx=2,xbt=3
+```
+
+For every coin the last scan saw as shared, `plan`:
+
+1. re-checks the coin on the target fork;
+2. fetches the previous transaction and checks it hashes to the right txid;
+3. builds one PSBT per batch.
+
+Options:
+
+- `--batch coin` (default) keeps coins unlinked. `--batch address`, `--batch N` and `--batch all`
+  combine coins, and the summary says which addresses that links publicly.
+- Fees come from `--fee-rate` or the backend's 6-block estimate. A batch whose fee would be over 10%
+  of its value is skipped.
+
+The smallest transaction on each chain is marked **TEST FIRST**. Destination addresses are reserved,
+so re-planning never reuses one.
+
+Plans go to `<data dir>/plans/<id>/` (`ecx/*.psbt`, `xbt/*.psbt`, `plan.json`, `README.txt`). What
+each PSBT contains is documented in the [transaction model](../reference/transaction-model.md).
+
+## Sign, verify, broadcast
+
+Sign each PSBT in your wallet and save the result next to the original as `<name>.signed.psbt`.
+Finalized PSBTs, partially signed PSBTs, and raw transaction hex (`.hex`/`.txn`) are all accepted.
+For air-gapped signers, see [Signers](signers.md#air-gapped-signers-animated-qr).
+
+```sh
+deno task cli verify <plan-id>          # or: verify <plan-id> path/to/signed files...
+deno task cli broadcast <plan-id>
+deno task cli track <plan-id>
+```
+
+`verify` checks that the signed transaction is exactly the planned one, that its replay protection
+is intact, that every signature is valid on its own chain, and that the fee matches. With your own
+node RPC backends it also asks every node: the target chain must accept and the others must reject.
+The full list of checks is in the
+[transaction model](../reference/transaction-model.md#what-verify-checks).
+
+`broadcast` sends only verified transactions, each only to its own chain over its own Tor circuit.
+On each chain it sends the **TEST FIRST** transaction alone and waits for it to confirm before
+sending the rest (`--all` overrides). An unknown result (timeout, Tor failure) is recorded as
+unknown, never as failed, and is safe to retry. Re-running is idempotent. Details:
+[broadcast semantics](../reference/transaction-model.md#what-broadcast-does).
+
+`track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
+BTC copies then show as separated and can be spent normally.
+
+## When something goes wrong
+
+- A split disappears, is re-mined, or its input is spent by something else: see
+  [Recovery](recovery.md#reorgs).
+- A split is stuck at too low a fee: see [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).
+
+## Before real coins
+
+Read [TODO.md](../../TODO.md). It lists the release blockers (live tests with real signers, pinning
+a Tor release, confirming endpoints and checkpoints). Start with one small coin.
