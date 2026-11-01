@@ -190,14 +190,22 @@ async function fund(positional: string[], flags: Record<string, string>) {
   );
 }
 
-/** Donors for the advanced XBT route: XBT coinbase outputs, which exist on XBT only. */
+/**
+ * Donors for the advanced routes: coinbase outputs mined after the fork, which exist on one chain
+ * only. XBT donors serve the forks-first donor route, BTC donors the BTC-first route.
+ */
 async function donors(positional: string[], flags: Record<string, string>) {
   const s = await requireState();
+  const chain = (flags.chain ?? "xbt").toLowerCase();
+  if (chain !== "xbt" && chain !== "btc") {
+    throw new UserError("--chain is xbt (forks-first route) or btc (BTC-first route)");
+  }
+  const name = chain.toUpperCase();
   if (s.phase !== "forked") {
-    throw new UserError("Run `fork` first: donors are coins that exist on XBT only.");
+    throw new UserError(`Run \`fork\` first: donors are coins that exist on ${name} only.`);
   }
   const target = positional[0];
-  if (!target) throw new UserError("donors <descriptor|address> [--coins N]");
+  if (!target) throw new UserError("donors <descriptor|address> [--coins N] [--chain xbt|btc]");
   const nodes = nodesFor(s);
   const addresses: string[] = [];
   if (target.includes("(")) {
@@ -207,14 +215,19 @@ async function donors(positional: string[], flags: Record<string, string>) {
   } else {
     addresses.push(target);
   }
-  for (const a of addresses) await nodes.xbt.mine(1, a);
+  const node = nodes[chain];
+  for (const a of addresses) await node.mine(1, a);
   // A coinbase output can't be spent for 100 blocks.
-  await nodes.xbt.mine(100, await minerAddress(nodes.xbt));
-  console.log(`Mined one XBT block to each of ${addresses.length} address(es), then 100 more:`);
-  for (const a of addresses) console.log(`  ${a}   (50 BTC coinbase, XBT only)`);
+  await node.mine(100, await minerAddress(node));
+  console.log(`Mined one ${name} block to each of ${addresses.length} address(es), then 100 more:`);
+  for (const a of addresses) console.log(`  ${a}   (50 BTC coinbase, ${name} only)`);
   console.log(
-    "\nThese coins do not exist on BTC or ECX. In forksplit: `donor import <descriptor>`, " +
-      "`donor scan`, then `plan --donor txid:vout` (one donor per XBT transaction).",
+    chain === "xbt"
+      ? "\nThese coins do not exist on BTC or ECX. In forksplit: `donor import <descriptor>`, " +
+        "`donor scan`, then `plan --donor txid:vout` (one donor per XBT transaction)."
+      : "\nThese coins do not exist on XBT or ECX. In forksplit: `dest set btc <descriptor>`, " +
+        "`donor import <descriptor>`, `donor scan`, then `plan --btc-first --donor txid:vout` " +
+        "(one donor per BTC transaction). Use a donor wallet other than your source wallet.",
   );
 }
 
@@ -461,7 +474,9 @@ const HELP = `deno task regtest <command>
   up [--bind ADDR (default 0.0.0.0: reachable from the LAN)] [--btc-port N --xbt-port N --ecx-port N]
   fund <descriptor|address> [--coins N] [--btc AMOUNT]   (before fork)
   fork
-  donors <descriptor|address> [--coins N]   (after fork: XBT-only donor coins for the donor route)
+  donors <descriptor|address> [--coins N] [--chain xbt|btc]
+                                            (after fork: single-chain donor coins; xbt default,
+                                             btc for the BTC-first route)
   ui [--port N] [--bind 127.0.0.1 to keep it local]
   mine <btc|xbt|ecx|all> [n]
   check <plan-id>

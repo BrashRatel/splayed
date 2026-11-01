@@ -341,7 +341,8 @@ it, tick one or more donors, then fan them out or plan the splits with them.
 
 The donor's value goes to your XBT destination with the rest. Every donor transaction publicly links
 the donor wallet to the coins it spends on XBT. In the regtest playground,
-`deno task regtest donors '<descriptor>'` mines XBT-only donors for a wallet.
+`deno task regtest donors '<descriptor>'` mines XBT-only donors for a wallet; add `--chain btc` for
+BTC-only donors (the BTC-first route below).
 
 ### Advanced: the BTC-first route
 
