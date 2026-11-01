@@ -15,6 +15,8 @@ import {
   signPlan,
 } from "./cli_harness.ts";
 import type { Rpc } from "./rpc.ts";
+import { mempoolChecks, type MempoolNode } from "../../src/core/execute.ts";
+import type { PlannedTx } from "../../src/core/planner.ts";
 import { parseDescriptor } from "../../src/core/descriptors.ts";
 import { ignoresUnifiedSign, stockSign, unifiedSign } from "./signers.ts";
 
@@ -30,6 +32,9 @@ export interface Harness {
   ecxDest: string;
   xbtDest: string;
   btcDest: string;
+  /** Private keys of the ECX and XBT destination wallets (for signing CPFP children). */
+  ecxDestKeys: Map<string, Uint8Array>;
+  xbtDestKeys: Map<string, Uint8Array>;
 }
 
 const mine = async (h: Harness, chain: ChainId, n: number) =>
@@ -728,5 +733,298 @@ export async function foreignFundingScenario(
     );
     assertEquals(await run("verify", id), 0, text());
     assertEquals(await run("broadcast", id, "--yes"), 0, text());
+  });
+}
+
+/**
+ * What real nodes say when they reject a transaction, and whether `mempoolChecks` reads it right.
+ * On the target chain, "inputs missing", "already known/confirmed" and "conflicts with the
+ * mempool" must be tolerated (the transaction may already be on its way), while a bad signature
+ * must stop everything. The reasons are asserted per node, so a wording change in a node release
+ * shows up here instead of in somebody's broadcast.
+ */
+export async function nodeRpcScenario(t: Deno.TestContext, h: Harness) {
+  for (const chain of ["btc", "xbt", "ecx"] as const) {
+    await t.step(`${chain.toUpperCase()}: reject reasons are classified correctly`, async () => {
+      const node = h.nodes[chain];
+      const wallet = node.withWallet("miner");
+      await node.mine(101, await h.minerAddr(chain));
+      const test = async (hex: string) => {
+        const [r] = await node.call<{ allowed: boolean; "reject-reason"?: string }[]>(
+          "testmempoolaccept",
+          [hex],
+        );
+        return r;
+      };
+      const adapter: MempoolNode = {
+        chain,
+        backend: {
+          testMempoolAccept: async (hex: string) => {
+            const r = await test(hex);
+            return { allowed: r.allowed, reason: r["reject-reason"] };
+          },
+        } as unknown as MempoolNode["backend"],
+      };
+      const planTx = { chain } as PlannedTx;
+      const spend = async (amountOff: number, sequence = 0xffffffff, utxoIndex = 0) => {
+        const unspent = (await wallet.call<
+          { txid: string; vout: number; amount: number; spendable: boolean }[]
+        >("listunspent", 1)).filter((u) => u.spendable && u.amount >= 1);
+        const u = unspent[utxoIndex];
+        const raw = await wallet.call<string>(
+          "createrawtransaction",
+          [{ txid: u.txid, vout: u.vout, sequence }],
+          {
+            [await wallet.call<string>("getnewaddress")]: Number((u.amount - amountOff).toFixed(8)),
+          },
+        );
+        const signed = await wallet.call<{ hex: string; complete: boolean }>(
+          "signrawtransactionwithwallet",
+          raw,
+        );
+        assert(signed.complete, `${chain}: wallet couldn't sign`);
+        return signed.hex;
+      };
+      const tolerated = async (reason: string | undefined, hex: string, what: string) => {
+        console.log(`  ${chain.toUpperCase()} ${what}: ${reason}`);
+        const out = await mempoolChecks(planTx, hex, [adapter]);
+        assert(out[chain].startsWith("rejected by your node"), `${what}: ${out[chain]}`);
+      };
+
+      // 1. Inputs that do not exist.
+      const ghost = (await spend(0.001)).replace(/^(.{14})(.{64})/u, `$1${"ab".repeat(32)}`);
+      const missing = await test(ghost);
+      assertEquals(missing.allowed, false);
+      await tolerated(missing["reject-reason"], ghost, "missing inputs");
+
+      // 2. A transaction that conflicts with one already in the mempool.
+      const a = await spend(0.001, 0xffffffff, 0);
+      const b = await spend(0.0005, 0xffffffff, 0); // pays less, so it cannot replace `a`
+      await node.call("sendrawtransaction", a);
+      const conflict = await test(b);
+      assertEquals(conflict.allowed, false);
+      await tolerated(conflict["reject-reason"], b, "mempool conflict");
+
+      // 3. A transaction that is already confirmed.
+      await node.mine(1, await h.minerAddr(chain));
+      const known = await test(a);
+      assertEquals(known.allowed, false);
+      await tolerated(known["reject-reason"], a, "already confirmed");
+
+      // 4. A broken signature must NOT be tolerated.
+      const good = await spend(0.001, 0xffffffff, 1);
+      assertEquals((await test(good)).allowed, true);
+      const at = good.length - 8 - 66 - 2 - 20; // inside the witness signature
+      const flipped = good.slice(0, at) + (good[at] === "0" ? "1" : "0") + good.slice(at + 1);
+      const bad = await test(flipped);
+      assertEquals(bad.allowed, false);
+      console.log(`  ${chain.toUpperCase()} bad signature: ${bad["reject-reason"]}`);
+      let threw = false;
+      try {
+        await mempoolChecks(planTx, flipped, [adapter]);
+      } catch (error) {
+        threw = (error as Error).message.includes("node rejects it");
+      }
+      assert(threw, `${chain}: a bad signature was tolerated`);
+    });
+  }
+}
+
+/**
+ * "Left the chain AND the mempool, input unspent". A regtest node only drops a transaction that
+ * way when the mempool expires it, so: confirm a split, reorg it out (back to the mempool), move
+ * the node's clock past the 14-day mempool expiry, and let any new transaction trigger the trim.
+ */
+export async function droppedScenario(t: Deno.TestContext, h: Harness, w: ScenarioWallet) {
+  const { cli, planId, dir, plan } = await broadcastWallet(h, w, "ecx=2,xbt=2");
+  const { run, text } = cli;
+  const ecx = h.nodes.ecx;
+  const txids = await Promise.all(
+    plan.transactions.filter((x) => x.chain === "ecx").map((x) => verifiedTxid(dir, x.file)),
+  );
+  const mocktimes: Rpc[] = [];
+
+  try {
+    await t.step("confirmed, then reorged out and expired from the mempool", async () => {
+      await mine(h, "ecx", 2);
+      assertEquals(await run("track", planId), 0, text());
+      await ecx.call(
+        "invalidateblock",
+        await ecx.call("getblockhash", await ecx.call<number>("getblockcount") - 1),
+      );
+      const back = await ecx.call<string[]>("getrawmempool");
+      for (const id of txids) assert(back.includes(id), "the reorg should put it back first");
+      const now = Math.floor(Date.now() / 1000);
+      mocktimes.push(ecx);
+      await ecx.call("setmocktime", now + 15 * 24 * 3600);
+      // Any accepted transaction makes the node trim and expire its mempool.
+      const miner = ecx.withWallet("miner");
+      await miner.call("sendtoaddress", await miner.call<string>("getnewaddress"), 0.1);
+      const pool = await ecx.call<string[]>("getrawmempool");
+      for (const id of txids) assert(!pool.includes(id), `${id} should have expired`);
+    });
+
+    await t.step("track reports it as gone, and says how to recover", async () => {
+      assertEquals(await run("track", planId), 1, text());
+      assert(text().includes("has left the chain"), text());
+      assert(text().includes("Do NOT spend the BTC copy"), text());
+      const reorgs = Object.values((await readProgress(dir)).txs).flatMap((p) => p.reorgs ?? []);
+      assert(reorgs.some((r) => r.kind === "dropped"), JSON.stringify(reorgs));
+    });
+
+    await t.step("broadcast sends the dropped splits again and they confirm", async () => {
+      await ecx.call("setmocktime", 0);
+      mocktimes.length = 0;
+      assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+      const pool = await ecx.call<string[]>("getrawmempool");
+      for (const id of txids) assert(pool.includes(id), `${id} should be back in the mempool`);
+      await mine(h, "ecx", 2);
+      // They confirm in a different block from before: reported once, then quiet.
+      assertEquals(await run("track", planId), 1, text());
+      assert(text().includes("is now in block"), text());
+      assertEquals(await run("track", planId), 0, text());
+    });
+  } finally {
+    for (const n of mocktimes) await n.call("setmocktime", 0);
+  }
+}
+
+/**
+ * Fee-bump extras: dropping an input from one transaction of a `--batch all` plan, and lifting a
+ * stuck split with a CPFP child on both forks.
+ */
+export async function bumpExtrasScenario(
+  t: Deno.TestContext,
+  h: Harness,
+  dropWallet: ScenarioWallet,
+  cpfpWallet: ScenarioWallet,
+) {
+  await t.step(
+    "bump --drop: one coin leaves a batch, the node replaces the transaction",
+    async () => {
+      const cli = await makeCli(h.nodes);
+      const { run, text } = cli;
+      assertEquals(await run("init", "--yes"), 0, text());
+      for (const d of dropWallet.descriptors) assertEquals(await run("import", d), 0, text());
+      assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
+      assertEquals(await run("dest", "set", "ecx", h.ecxDest), 0, text());
+      assertEquals(
+        await run("plan", "--chains", "ecx", "--batch", "all", "--fee-rate", "ecx=2", "--yes"),
+        0,
+        text(),
+      );
+      const [planId] = await planIds(cli.dir);
+      const { dir, plan } = await readPlan(cli.dir, planId);
+      const [orig] = plan.transactions;
+      assertEquals(orig.inputs.length, 2);
+      await signPlan(dir, plan, dropWallet.keys);
+      assertEquals(await run("verify", planId), 0, text());
+      assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+      const origTxid = await verifiedTxid(dir, orig.file);
+      const dropped = `${orig.inputs[0].txid}:${orig.inputs[0].vout}`;
+      const kept = `${orig.inputs[1].txid}:${orig.inputs[1].vout}`;
+
+      // Refusals first.
+      assertEquals(
+        await run("bump", planId, "--tx", "1", "--drop", "ab:0", "--fee-rate", "ecx=6", "--yes"),
+        1,
+      );
+      assert(text().includes("is not an input"), text());
+      assertEquals(
+        await run(
+          "bump",
+          planId,
+          "--tx",
+          "1",
+          "--drop",
+          dropped,
+          "--drop",
+          kept,
+          "--fee-rate",
+          "ecx=6",
+          "--yes",
+        ),
+        1,
+      );
+      assert(text().includes("keep at least one input"), text());
+      assertEquals(await run("bump", planId, "--drop", dropped, "--yes"), 2, text());
+
+      assertEquals(
+        await run("bump", planId, "--tx", "1", "--drop", dropped, "--fee-rate", "ecx=6", "--yes"),
+        0,
+        text(),
+      );
+      const bumpId = (await planIds(cli.dir)).find((id) => id !== planId)!;
+      const bumped = await readPlan(cli.dir, bumpId);
+      const [repl] = bumped.plan.transactions;
+      assertEquals(repl.inputs.length, 1);
+      assertEquals(`${repl.inputs[0].txid}:${repl.inputs[0].vout}`, kept);
+      assert(repl.fee > orig.fee, "the replacement must pay more than the original");
+      await signPlan(bumped.dir, bumped.plan, dropWallet.keys);
+      assertEquals(await run("verify", bumpId), 0, text());
+      assertEquals(await run("broadcast", bumpId, "--yes"), 0, text());
+      const pool = await h.nodes.ecx.call<string[]>("getrawmempool");
+      assert(
+        pool.includes(await verifiedTxid(bumped.dir, repl.file)),
+        "replacement not in mempool",
+      );
+      assert(!pool.includes(origTxid), "original still in the mempool");
+      // The dropped coin is unspent again, so a later plan can use it.
+      const [txid, vout] = dropped.split(":");
+      const out = await h.nodes.ecx.call("gettxout", txid, Number(vout), true);
+      assert(out !== null, "the dropped coin should be unspent");
+      await mine(h, "ecx", 1);
+    },
+  );
+
+  await t.step("bump --cpfp: a child lifts a low-fee split on ECX and XBT", async () => {
+    const cli = await makeCli(h.nodes);
+    const { run, text } = cli;
+    assertEquals(await run("init", "--yes"), 0, text());
+    for (const d of cpfpWallet.descriptors) assertEquals(await run("import", d), 0, text());
+    assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
+    assertEquals(await run("dest", "set", "ecx", h.ecxDest), 0, text());
+    assertEquals(await run("dest", "set", "xbt", h.xbtDest), 0, text());
+    assertEquals(
+      await run("plan", "--xbt-signer", "knots", "--fee-rate", "ecx=1,xbt=1", "--yes"),
+      0,
+      text(),
+    );
+    const [planId] = await planIds(cli.dir);
+    const { dir, plan } = await readPlan(cli.dir, planId);
+    await signPlan(dir, plan, cpfpWallet.keys);
+    assertEquals(await run("verify", planId), 0, text());
+    assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+
+    // Parent still unconfirmed: lift transaction 1 on each fork.
+    assertEquals(await run("bump", planId, "--cpfp", "--tx", "1"), 2, text()); // no rate given
+    assertEquals(
+      await run("bump", planId, "--cpfp", "--tx", "1", "--fee-rate", "ecx=20,xbt=20", "--yes"),
+      0,
+      text(),
+    );
+    const cpfpId = (await planIds(cli.dir)).find((id) => id.includes("-cpfp"))!;
+    const child = await readPlan(cli.dir, cpfpId);
+    assertEquals(child.plan.route, "cpfp");
+    assertEquals(child.plan.transactions.length, 2);
+    for (const x of child.plan.transactions) {
+      const keys = x.chain === "ecx" ? h.ecxDestKeys : h.xbtDestKeys;
+      const signed = stockSign(await Deno.readTextFile(join(child.dir, x.file)), keys);
+      await Deno.writeTextFile(join(child.dir, x.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+    }
+    assertEquals(await run("verify", cpfpId), 0, text());
+    assertEquals(await run("broadcast", cpfpId, "--all", "--yes"), 0, text());
+    // The pair pays about the requested rate on each chain.
+    for (const x of child.plan.transactions) {
+      const childTxid = await verifiedTxid(child.dir, x.file);
+      const entry = await h.nodes[x.chain as "ecx" | "xbt"].call<
+        { fees: { ancestor: number }; ancestorsize: number }
+      >("getmempoolentry", childTxid);
+      const rate = (entry.fees.ancestor * 1e8) / entry.ancestorsize;
+      assert(rate >= 19, `${x.chain}: package rate ${rate} sat/vB`);
+    }
+    for (const c of ["ecx", "xbt"] as const) await mine(h, c, 2);
+    assertEquals(await run("track", planId), 0, text());
+    assertEquals(await run("track", cpfpId), 0, text());
   });
 }

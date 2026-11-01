@@ -63,9 +63,13 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 
 - [ ] Node RPC against real Bitcoin Core 31.x, Knots 29.4.x (XBT) and eCash v1.2.0 (the version the
       pinned `ecash-com/bitcoin` commit reports):
-  - [ ] `scantxoutset` with ranged descriptors;
-  - [ ] `testmempoolaccept` reject reasons. The pass/fail rules in `src/core/execute.ts`
-        (`mempoolChecks`) assume Core's strings.
+  - [x] `scantxoutset` with ranged descriptors: every regtest wallet scan uses it on all three
+        nodes.
+  - [x] `testmempoolaccept` reject reasons, checked on all three nodes: `missing-inputs`,
+        `txn-already-known`, `insufficient fee` (a lower-fee conflict; all three run full RBF, so
+        this is what a conflict looks like) are tolerated on the target chain, and
+        `mempool-script-verify-flag-failed` stops everything. "insufficient fee" was added to the
+        tolerated list.
   - [x] Knots `getdeploymentinfo`: reports `blake2b` at the top level of the result, not under
         `deployments` (confirmed on a Knots 29.4.1 regtest node; the check was wrong and is fixed).
 - [ ] Electrum against Fulcrum and electrs:
@@ -84,18 +88,20 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
       in another block, went back to the mempool, left the chain, or had its input spent by a
       different transaction; `scan` warns when a spend disappears or is replaced. Tested against
       real nodes with `invalidateblock`.
-  - [ ] The "left the chain and the mempool, input unspent" case is only covered by unit tests: a
-        regtest node can't be made to drop a transaction that way without a restart.
+  - [x] The "left the chain and the mempool, input unspent" case, against a real node: reorg the
+        split out, move the node's clock past the 14-day expiry, and let the mempool trim. `track`
+        reports it and `broadcast` sends it again.
   - [x] Electrum per-transaction status (from the history of the transaction's first output script).
         Unit-tested against a fake server only; try it against Fulcrum and electrs.
   - [x] Reorg alerts in the web UI plans view. Not yet looked at in a real browser.
 - [x] **Stuck splits.** `bump` writes a BIP125 replacement plan (same inputs and destination, higher
       fee) that is signed, verified and broadcast like any plan. Tested against real nodes.
-  - [ ] CPFP for the case where the original can't be replaced (no RBF signal from an old plan).
+  - [x] CPFP (`bump --cpfp`) for the case where the original can't be replaced. Tested on ECX and
+        XBT against real nodes (package rate checked in the node's mempool). Not done: CPFP of a
+        donor transaction or a multi-output one.
   - [x] Fee bump buttons in the web UI (per split and for the whole plan). Not yet looked at in a
         real browser.
-  - [ ] Bumping one transaction of a `--batch all` plan can't drop an input; it replaces the whole
-        transaction.
+  - [x] Bump one transaction of a batch without some of its coins (`bump --tx N --drop txid:vout`).
 - [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins. Guidance in the UI,
       not just the CLI.
 - [ ] **Chain upgrades.** Watch for:

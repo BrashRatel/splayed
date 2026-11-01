@@ -7,6 +7,17 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Fee bump: CPFP and dropping inputs.** `bump <plan> --cpfp --fee-rate ecx=N` writes a child that
+  spends a stuck split's output so the pair pays that rate (plain signature from the destination
+  wallet; the child exists only on its parent's chain). `bump <plan> --tx N --drop txid:vout`
+  replaces one transaction of a batch without some of its coins, sized for the smaller transaction.
+  Both tested against real nodes; a mutation check confirms the CPFP package rate is what the test
+  measures.
+- **Real-node checks.** The reject reasons of Core 31, Knots 29.4.1 and eCash are asserted on all
+  three nodes, which found one gap: a lower-fee conflicting transaction is reported as "insufficient
+  fee" (all three run full RBF), and `verify` now tolerates it on the target chain. A split that
+  left the chain and expired from the mempool (mempool-expiry clock trick) is reported by `track`
+  and re-sent by `broadcast`.
 - **Donors funded elsewhere.** `donor scan` now traces a donor's funding transaction on chain
   (`verified-funding`): accepted when it carries a 0x21 signature (XBT) or an input that leads back
   to a coinbase of that chain or to a split this tool verified; plain-signed funding from shared

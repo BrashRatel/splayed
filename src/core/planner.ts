@@ -196,6 +196,14 @@ export interface PlannedTx {
    * `broadcast` holds it back until its inputs are spent and deep on every chain listed here.
    */
   gate?: { chains: ("btc" | "ecx")[] };
+  /**
+   * Child-pays-for-parent: this transaction spends output 0 of an earlier, still unconfirmed split
+   * so that the pair together pays `packageRate`. It adds no fee to the parent; nothing is replaced.
+   */
+  cpfp?: {
+    parent: { plan: string; file: string; txid: string; fee: number; vsize: number };
+    packageRate: number;
+  };
   /** Set on a fee-bump replacement: the transaction of an earlier plan this one replaces. */
   replaces?: { plan: string; file: string; txid: string; fee: number; feeRate: number };
 }
@@ -205,7 +213,7 @@ export interface Plan {
   id: string;
   createdAt: string;
   profile: string;
-  route: "forks-first-0x21" | "forks-first-donor" | "donor-fanout" | "btc-first-donor";
+  route: "forks-first-0x21" | "forks-first-donor" | "donor-fanout" | "btc-first-donor" | "cpfp";
   xbtSigner?: string;
   scanAt: string;
   batch: BatchPolicy;

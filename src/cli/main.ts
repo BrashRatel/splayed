@@ -50,6 +50,7 @@ import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import {
   buildPlan,
   parseBatchPolicy,
+  type Plan,
   type PlanChain,
   PlanError,
   type PlannedTx,
@@ -58,7 +59,7 @@ import {
   XBT_SIGNERS,
 } from "../core/planner.ts";
 import { join } from "node:path";
-import { buildReplacement, BumpError, bumpPlan, defaultBumpRate } from "../core/bump.ts";
+import { buildCpfp, buildReplacement, BumpError, bumpPlan, defaultBumpRate } from "../core/bump.ts";
 import {
   assessReorg,
   confirmationDepth,
@@ -148,6 +149,13 @@ Splitting (guided route: forks first, BTC untouched):
                                   Stuck split? Write a new plan that spends the same inputs at a
                                   higher fee (RBF, BIP125). Sign, verify and broadcast it like any
                                   plan; nodes replace the original with it.
+  bump <plan> --tx N --drop txid:vout [--drop ...]
+                                  Replace one transaction of a batch without some of its coins; the
+                                  dropped coins stay unspent and can go in a later plan.
+  bump <plan> --cpfp [--chains ecx,xbt] [--tx N ...] --fee-rate ecx=20
+                                  Can't replace the original? Write a child that spends its output
+                                  so the pair pays that rate. The rate is for the PAIR; the child
+                                  goes to a fresh address of the same destination.
 
 Web UI:
   ui [--port N] [--open]          Local web interface (127.0.0.1 only) that runs these same
@@ -224,6 +232,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         open: { type: "boolean" },
         "no-mempool": { type: "boolean" },
         "btc-first": { type: "boolean" },
+        cpfp: { type: "boolean" },
+        drop: { type: "string", multiple: true },
         tx: { type: "string", multiple: true },
       },
     });
@@ -301,6 +311,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
           feeRate: flags["fee-rate"],
           chains: flags.chains,
           tx: flags.tx as string[] | undefined,
+          drop: flags.drop as string[] | undefined,
+          cpfp: flags.cpfp === true,
           yes: flags.yes === true,
         });
       case "ui":
@@ -1718,10 +1730,22 @@ async function cmdBump(
   config: Config,
   io: CliIO,
   id: string | undefined,
-  opts: { feeRate?: string; chains?: string; tx?: string[]; yes: boolean },
+  opts: {
+    feeRate?: string;
+    chains?: string;
+    tx?: string[];
+    drop?: string[];
+    cpfp?: boolean;
+    yes: boolean;
+  },
 ) {
   await requireNetworkConfirmed(config);
   if (!id) throw new UsageError("bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5]");
+  if (opts.cpfp && opts.drop?.length) throw new UsageError("--cpfp and --drop don't combine");
+  if (opts.drop?.length && opts.tx?.length !== 1) {
+    throw new UsageError("--drop works on one transaction: add --tx N");
+  }
+  if (opts.cpfp) return await cmdCpfp(config, io, id, opts);
   const { dir, plan } = await loadPlanDir(config.dataDir, id);
   const progress = await loadProgress(dir);
   const rates = parseFeeRates(opts.feeRate);
@@ -1798,6 +1822,7 @@ async function cmdBump(
             own: await ownPsbt(dir, t),
             feeRate,
             order: replacements.filter((x) => x.chain === chain).length + 1,
+            drop: opts.drop,
           });
           replacements.push(r);
           row(d.state, "replacement", String(r.fee), String(r.feeRate));
@@ -1837,6 +1862,149 @@ async function cmdBump(
     `Sign them in your wallet exactly like the originals, then:\n` +
       `  forksplit verify ${bumped.id}\n  forksplit broadcast ${bumped.id}\n  forksplit track ${bumped.id}\n` +
       "If the original confirms first, the replacement is simply refused.",
+  );
+  return refused ? 1 : 0;
+}
+
+/** `bump --cpfp`: a child that lifts a stuck split by paying for the pair. */
+async function cmdCpfp(
+  config: Config,
+  io: CliIO,
+  id: string,
+  opts: { feeRate?: string; chains?: string; tx?: string[]; yes: boolean },
+) {
+  const { dir, plan } = await loadPlanDir(config.dataDir, id);
+  const progress = await loadProgress(dir);
+  const rates = parseFeeRates(opts.feeRate);
+  const chainFilter = opts.chains?.split(",").map((c) => c.trim());
+  const wallet = await loadWallet(config.dataDir);
+  const network = networkForProfile(config.profile);
+  const children: PlannedTx[] = [];
+  const reserved: Partial<Record<PlanChain, number>> = {};
+  const rows = [["Chain", "#", "Parent fee", "Child fee", "Pair sat/vB", "Result"]];
+  let refused = 0;
+  const opened: ChainBackend[] = [];
+  try {
+    for (const chain of ["ecx", "xbt"] as const) {
+      if (chainFilter && !chainFilter.includes(chain)) continue;
+      const txs = plan.transactions.filter((t) =>
+        t.chain === chain && progress.txs[t.file]?.broadcast &&
+        (!opts.tx?.length || opts.tx.includes(String(t.order)))
+      );
+      if (!txs.length) continue;
+      const rate = rates[chain];
+      if (rate === undefined) throw new UsageError(`--fee-rate ${chain}=N (the rate for the pair)`);
+      const dest = wallet.destinations?.[chain];
+      if (!dest) throw new PlanError(`No ${chain.toUpperCase()} destination set`);
+      const descriptor = parseDescriptor(dest.descriptor, network);
+      const { backend } = await verifiedBackendsFor(config, chain, io, true);
+      if (!backend) {
+        io.err(`${chain.toUpperCase()}: no backend passed its identity check`);
+        refused += txs.length;
+        continue;
+      }
+      opened.push(backend);
+      const tip = await backend.tipHeight();
+      let next = Math.max(dest.nextIndex, reserved[chain] ?? 0);
+      for (const t of txs) {
+        const p = progress.txs[t.file];
+        const row = (child: string, result: string, pair = "") =>
+          rows.push([chain.toUpperCase(), String(t.order), String(t.fee), child, pair, result]);
+        if (!p.verified || p.replacedBy) {
+          refused++;
+          row("", p.replacedBy ? "already replaced by a fee bump" : "not verified or sent");
+          continue;
+        }
+        const d = await confirmationDepth(backend, t, p.verified.txid, tip);
+        if (d.state !== "mempool") {
+          refused++;
+          row(
+            "",
+            d.state === "confirmed" ? "already confirmed: nothing to lift" : `it is ${d.state}`,
+          );
+          continue;
+        }
+        try {
+          if (t.output.value !== Number(parseTx(p.verified.finalHex).outputs[0].value)) {
+            throw new BumpError("The sent transaction's output differs from the plan");
+          }
+          const derived = descriptor.branches[0].derive(t.output.destinationIndex);
+          const to = descriptor.branches[0].derive(next);
+          const received = {
+            coin: {
+              txid: p.verified.txid,
+              vout: 0,
+              value: t.output.value,
+              address: t.output.address,
+              scriptPubKey: derived.scriptPubKey,
+              observations: {} as never,
+            },
+            derived,
+            descriptor,
+            prevRaw: p.verified.finalHex,
+            prevTx: parseTx(p.verified.finalHex),
+          };
+          const child = buildCpfp({
+            chain,
+            parentPlanId: plan.id,
+            parent: t,
+            parentTxid: p.verified.txid,
+            parentHex: p.verified.finalHex,
+            received,
+            to,
+            toIndex: next,
+            packageRate: rate,
+          });
+          children.push({ ...child, order: children.filter((c) => c.chain === chain).length + 1 });
+          next++;
+          reserved[chain] = next;
+          row(String(child.fee), "child", String(rate));
+        } catch (error) {
+          if (!(error instanceof BumpError)) throw error;
+          refused++;
+          row("", error.message);
+        }
+      }
+    }
+  } finally {
+    for (const b of opened) await b.close?.();
+  }
+  if (rows.length === 1) {
+    io.out("No broadcast transactions match.");
+    return 1;
+  }
+  io.out(table(rows));
+  if (!children.length) return 1;
+  if (!opts.yes && !(await io.confirm(`Write ${children.length} child PSBT(s)?`))) {
+    io.out("Nothing written.");
+    return 1;
+  }
+  const taken = new Set<string>();
+  try {
+    for await (const e of Deno.readDir(join(config.dataDir, PLANS_DIR))) taken.add(e.name);
+  } catch { /* none yet */ }
+  let n = 1;
+  while (taken.has(`${plan.id}-cpfp${n}`)) n++;
+  const cpfpPlan: Plan = {
+    ...plan,
+    id: `${plan.id}-cpfp${n}`,
+    createdAt: new Date().toISOString(),
+    route: "cpfp",
+    transactions: children,
+    warnings: [],
+    reserved,
+  };
+  const newDir = await writePlan(config.dataDir, cpfpPlan);
+  const fresh = await loadWallet(config.dataDir);
+  for (const [chain, nextIndex] of Object.entries(reserved) as [PlanChain, number][]) {
+    const d = fresh.destinations?.[chain];
+    if (d && nextIndex > d.nextIndex) d.nextIndex = nextIndex;
+  }
+  await saveWallet(config.dataDir, fresh);
+  io.out(`\nWrote ${children.length} child PSBT(s) to ${newDir}`);
+  io.out(
+    "Sign them with the DESTINATION wallet (they spend the split's output), then verify and " +
+      `broadcast ${cpfpPlan.id}. The parent keeps its place; miners take both together.`,
   );
   return refused ? 1 : 0;
 }

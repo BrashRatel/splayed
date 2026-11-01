@@ -27,8 +27,11 @@ import { CHAINS, copyBlocks, docker, publishedPort, waitReady } from "./cluster.
 import { RegtestRpcTransport, Rpc } from "./rpc.ts";
 import {
   btcFirstScenario,
+  bumpExtrasScenario,
   donorScenario,
+  droppedScenario,
   foreignFundingScenario,
+  nodeRpcScenario,
   rbfScenario,
   reorgScenario,
 } from "./scenarios.ts";
@@ -146,6 +149,9 @@ const DONOR_WALLET = makeWallet("donor-wallet", [PART.wpkh(words(70))]);
 const BTC_SOURCE = makeWallet("btc-first-source", [PART.wpkh(words(63))]);
 const FOREIGN_SOURCE = makeWallet("foreign-source", [PART.wpkh(words(64))]);
 const FOREIGN_DONOR = makeWallet("foreign-donor", [PART.wpkh(words(72))]);
+const DROP_WALLET = makeWallet("drop", [PART.wpkh(words(66))]);
+const CPFP_WALLET = makeWallet("cpfp", [PART.wpkh(words(67))]);
+const DROPPED_WALLET = makeWallet("dropped", [PART.wpkh(words(65))]);
 const BTC_DONOR_WALLET = makeWallet("btc-donor-wallet", [PART.wpkh(words(71))]);
 
 const WALLETS: WalletSpec[] = [
@@ -200,6 +206,9 @@ Deno.test({
           DONOR_SOURCE,
           BTC_SOURCE,
           FOREIGN_SOURCE,
+          DROPPED_WALLET,
+          DROP_WALLET,
+          CPFP_WALLET,
         ]
       ) {
         for (const descriptor of spec.descriptors) {
@@ -440,6 +449,8 @@ Deno.test({
         ecxDest: ECX_DEST,
         xbtDest: XBT_DEST,
         btcDest: BTC_DEST,
+        ecxDestKeys: keyMap(OTHER.derive("m/84'/0'/0'")),
+        xbtDestKeys: keyMap(OTHER.derive("m/84'/0'/1'")),
       };
       await t.step({
         name: "fee bump (RBF) replaces a stuck split",
@@ -471,6 +482,25 @@ Deno.test({
         sanitizeOps: false,
         sanitizeResources: false,
         fn: (t) => foreignFundingScenario(t, harness, FOREIGN_SOURCE, FOREIGN_DONOR),
+      });
+      await t.step({
+        name: "real node RPC: reject reasons are classified the way mempoolChecks expects",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => nodeRpcScenario(t, harness),
+      });
+      await t.step({
+        name:
+          "reorg: a split that left the chain and expired from the mempool is reported and re-sent",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => droppedScenario(t, harness, DROPPED_WALLET),
+      });
+      await t.step({
+        name: "fee bump extras: drop an input from a batch, CPFP a low-fee split",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => bumpExtrasScenario(t, harness, DROP_WALLET, CPFP_WALLET),
       });
     } finally {
       await docker(project, ["down", "-v", "--remove-orphans"]).catch(() => {});

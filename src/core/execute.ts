@@ -169,7 +169,8 @@ export function verifySigned(
         `on ${planTx.gate.chains.map((c) => c.toUpperCase()).join(" and ")}`,
     );
   }
-  const unifiedMode = planTx.chain === "xbt" && !planTx.donor && !planTx.gate;
+  // A CPFP child spends an output that exists on its own chain only, so it needs no 0x21.
+  const unifiedMode = planTx.chain === "xbt" && !planTx.donor && !planTx.gate && !planTx.cpfp;
   const ctxs = inputContexts(own, planTx.inputs.map((i) => i.kind));
   const verdicts = verifyInputs(
     own.tx,
@@ -180,7 +181,7 @@ export function verifySigned(
   checks.push(
     planTx.donor
       ? `every signature is plain SIGHASH_ALL and verifies; each commits to the ${planTx.chain.toUpperCase()}-only donor input`
-      : planTx.gate
+      : planTx.gate || planTx.cpfp
       ? "every signature is plain SIGHASH_ALL and verifies"
       : planTx.chain === "xbt"
       ? "every XBT signature is SIGHASH_ALL|UNIFIED (0x21) and verifies under the unified digest"
@@ -273,7 +274,7 @@ export async function mempoolChecks(
     const r = await backend.testMempoolAccept(hex);
     if (chain === planTx.chain) {
       results[chain] = r.allowed ? "accepted by your node" : `rejected by your node: ${r.reason}`;
-      if (!r.allowed && !/missing|spent|conflict|already/i.test(r.reason ?? "")) {
+      if (!r.allowed && !/missing|spent|conflict|already|insufficient fee/i.test(r.reason ?? "")) {
         throw new SigCheckError(`Your ${chain.toUpperCase()} node rejects it: ${r.reason}`);
       }
     } else {
