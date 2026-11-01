@@ -1,0 +1,93 @@
+name: Tester report
+description: Tell us what you tried with forksplit and what happened (worked or not).
+title: "[test] "
+labels: ["tester-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        forksplit is **pre-alpha**. Reports of what worked are as useful as bugs.
+
+        **Do not paste descriptors, xpubs, addresses or txids for wallets you use with real coins.** They
+        reveal every address you own. Redact them (for example `xpub6...REDACTED`), or reproduce on the
+        regtest playground and share that instead.
+  - type: input
+    id: version
+    attributes:
+      label: forksplit version or commit
+      placeholder: "0.1.0-pre-alpha.1, or the output of `git rev-parse --short HEAD`"
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did you run it?
+      options:
+        - Regtest playground
+        - Mainnet
+        - Demo UI (deno task demo-ui)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - Web UI
+        - CLI
+        - Both
+    validations:
+      required: true
+  - type: checkboxes
+    id: chains
+    attributes:
+      label: Chains involved
+      options:
+        - label: BTC
+        - label: XBT
+        - label: ECX
+  - type: input
+    id: wallet
+    attributes:
+      label: Wallet type and descriptor kind
+      description: For example `wpkh` single-sig, `tr` key path, 2-of-3 `wsh` sortedmulti. Not the descriptor itself.
+  - type: input
+    id: signer
+    attributes:
+      label: Signer used, per chain
+      description: 'Wallet or device and version, for example "ECX: Sparrow 2.x, XBT: Shrike". Say if it was air-gapped (QR).'
+  - type: input
+    id: backends
+    attributes:
+      label: Backends
+      description: Default Tor servers, or your own node/Electrum/Esplora (which software and version)?
+  - type: dropdown
+    id: reached
+    attributes:
+      label: How far did you get?
+      options:
+        - Network confirm and scan only
+        - Plan created
+        - Signed and verified
+        - Broadcast
+        - Confirmed and rescanned (BTC copy shows separated)
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - It worked
+        - It worked with problems
+        - It failed
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and anything surprising. Paste relevant text from the Activity panel or terminal, redacted.
+    validations:
+      required: true

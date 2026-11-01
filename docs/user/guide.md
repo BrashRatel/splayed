@@ -129,5 +129,5 @@ BTC copies then show as separated and can be spent normally.
 
 ## Before real coins
 
-Read [TODO.md](../../TODO.md). It lists the release blockers (live tests with real signers, pinning
-a Tor release, confirming endpoints and checkpoints). Start with one small coin.
+Read [TODO.md](../../TODO.md). It lists the release gates and open work (live tests with real
+signers, real Tor runs, confirming checkpoints). Start with one small coin.

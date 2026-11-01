@@ -81,12 +81,14 @@ export const MAINNET: NetworkProfile = deepFreeze({
         {
           height: 961_640,
           hash: "00000000000000000001d82da6ecccf08e07afa383f9212b0e1b95cc72430c00",
-          source: "smolcars/bcashjr-wallet chain_verifier.ts",
+          source:
+            "smolcars/bcashjr-wallet chain_verifier.ts; confirmed on blockchair.com, mempool.space",
         },
         {
           height: 973_728,
           hash: "0000000000000000000104150b08ff89bbb2d11bab42c245c82b8165ab2e2c11",
-          source: "smolcars/ecashjr-wallet network.ts (mempool.space, blockstream.info)",
+          source:
+            "smolcars/ecashjr-wallet network.ts (mempool.space, blockstream.info); confirmed on blockchair.com",
         },
       ],
       replayProtection: { kind: "none" },
@@ -114,7 +116,8 @@ export const MAINNET: NetworkProfile = deepFreeze({
         {
           height: 961_640,
           hash: "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb",
-          source: "smolcars/bcashjr-wallet chain_verifier.ts; awesome-bitcoin-blake",
+          source:
+            "smolcars/bcashjr-wallet chain_verifier.ts; awesome-bitcoin-blake; confirmed on pool.rabidmining.com",
         },
       ],
       replayProtection: { kind: "unified-sighash", bit: SIGHASH_UNIFIED },
@@ -143,13 +146,15 @@ export const MAINNET: NetworkProfile = deepFreeze({
         {
           height: 973_728,
           hash: "0000000000000001441a6a4ae49d679d4a30581db3e3eaeeb2fba5da6dc146ed",
-          source: "smolcars/ecashjr-wallet network.ts (explorer.ecash.com)",
+          source:
+            "smolcars/ecashjr-wallet network.ts (explorer.ecash.com); confirmed on explorer.blockfab.org",
         },
         {
           // After the first post-fork retarget (974,016): rejects nodes still on v1.0.0.
           height: 974_017,
           hash: "00000000000000008d487d52676c997de6b83c6712ef0914325f623e3d1ebc47",
-          source: "explorer.ecash.com, 2026-10-31 (needs a second-source check before release)",
+          source:
+            "explorer.ecash.com 2026-10-31; confirmed on esplora.ecash.ninja and explorer.blockfab.org",
         },
       ],
       replayProtection: { kind: "locktime-marker", lockTime: ECX_MAINNET_REPLAY_LOCKTIME },

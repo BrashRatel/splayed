@@ -1,0 +1,65 @@
+name: Bug report
+description: Something is wrong, crashes, or gives a misleading result.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this could let someone lose coins or reveal private data, **do not file it here**: see
+        [SECURITY.md](https://github.com/BrashRatel/forksplit/blob/main/SECURITY.md).
+
+        **Do not paste descriptors, xpubs, addresses or txids for wallets you use with real coins.**
+        Redact them, or reproduce on the regtest playground.
+  - type: input
+    id: version
+    attributes:
+      label: forksplit version or commit
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Deno version
+      placeholder: "Linux x86_64, deno 2.x"
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - Web UI
+        - CLI
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - Regtest playground
+        - Mainnet
+        - Demo UI
+        - Tests (deno task test)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: Redacted terminal output or Activity panel text.
+      render: text

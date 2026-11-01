@@ -1,11 +1,18 @@
 # Changelog
 
-All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); see
-[TODO.md](TODO.md) for the release blockers. Newest first.
+All notable changes to forksplit. The first release will be `0.1.0-pre-alpha.1` (not yet tagged);
+see [TODO.md](TODO.md) for what gates it. Newest first.
 
-## Unreleased
+## 0.1.0-pre-alpha.1 (not yet tagged)
 
 ### Added
+
+- **Pre-alpha packaging.** `SECURITY.md` now has a reporting contact (email, PGP) and a disclosure
+  policy; GitHub issue templates for tester reports and bugs (with a link to `SECURITY.md` for
+  vulnerabilities); release notes for `0.1.0-pre-alpha.1`; a pre-alpha status line in the README;
+  and `scripts/docs_screenshots.ts` to regenerate the Web UI guide images.
+- **Role-based docs.** The README is a short overview; the detail lives in `docs/` (user guides, a
+  screenshot Web UI guide, transaction and security models, a CLI reference, and developer docs).
 
 - **Air-gapped signing by animated QR.** Each transaction in the web UI has **QR** (plays the
   unsigned PSBT as UR `crypto-psbt` frames) and **Scan signed** (reads the signer's frames through

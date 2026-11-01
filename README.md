@@ -9,10 +9,11 @@ chain can be **replayed** on the others, moving the copies you meant to keep. fo
 coins on all three chains, tells you which ones are still shared, and walks each shared coin through
 plan → sign (in your wallet) → verify → broadcast. Your keys never leave your wallet.
 
-> **Status: milestone 4.** The full guided route works end to end against test chains, from the CLI
-> or the local web UI, with Esplora, Electrum and node-RPC backends and a managed or system Tor. It
-> has not yet been run against live servers or real signers; start with one small coin, and read
-> [TODO.md](TODO.md) first.
+> **Status: pre-alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
+> eCash nodes on regtest. It is **not security-reviewed** and has **not been run on mainnet**: start
+> with one small coin, and read the [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and
+> [TODO.md](TODO.md) first. Testers wanted: please file a
+> [tester report](https://github.com/BrashRatel/forksplit/issues/new/choose).
 
 ## How it works
 

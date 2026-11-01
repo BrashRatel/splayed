@@ -12,14 +12,18 @@ default servers probed through Tor. **Nothing has moved real coins on mainnet.**
 
 ### Identity and endpoints (wrong here means wrong chain)
 
-- [ ] **Checkpoint hashes** in `src/core/profiles.ts`:
-  - [ ] Re-verify every hash from two independent sources.
-  - [ ] ECX 974,017 came from one explorer and needs a second source, such as an eCash node (v1.2.0
-        is what the pinned commit reports).
-  - [ ] Confirm it's buried deep enough that a reorg can't replace it.
-- [ ] **ECX default endpoint.** `explorer.ecash.com` answered through a Tor exit with no Cloudflare
-      challenge on one request. Repeat from several exits and under scan load. If it fails, decide
-      on a different default or ship with the fallback (`esplora.ecash.ninja`).
+- [x] **Checkpoint hashes** in `src/core/profiles.ts`, each confirmed on at least two independent
+      sources (2026-11-01):
+  - BTC 961,640 and 973,728: mempool.space, blockstream.info and blockchair.com.
+  - XBT 961,640: mempool.guide and pool.rabidmining.com/explorer/xbt.
+  - ECX 973,728 and 974,017: explorer.ecash.com, esplora.ecash.ninja and explorer.blockfab.org.
+  - ECX 974,017 is buried deep enough that a reorg can't replace it: the ECX tip was 982,129, about
+    8,100 blocks later.
+  - Still worth doing: confirm the ECX hashes against an eCash node (v1.2.0 is what the pinned
+    commit reports), since explorers can share a backend.
+- [x] **ECX default endpoint.** `explorer.ecash.com` stays the default (no Cloudflare challenge seen
+      through Tor), and ships with `esplora.ecash.ninja` as the fallback in case that changes. The
+      fallback needs the user's explicit confirmation before it is ever contacted.
 
 ### One real run
 
@@ -43,21 +47,25 @@ default servers probed through Tor. **Nothing has moved real coins on mainnet.**
 - [ ] **Release artifacts.** `deno task compile` for Linux x86_64 packaged with
       `vendor/tor/<platform>/`, signed, with published checksums. Other platforms can follow
       (section 2). A source-only release is acceptable if you'd rather not ship binaries yet.
-- [ ] **`SECURITY.md`**: set the disclosure contact (it still says TBD) and the disclosure policy.
-      Its "known limitations" list is out of date: it says Tor isn't pinned, and it points at the
-      old TODO sections.
+- [x] **`SECURITY.md`**: contact `brash@in-btc.com` with the PGP key (fingerprint
+      `E6D1FC8869F4317E0AEFC58851E2C57C67FA2A4A`, checked against the Keybase key), a disclosure
+      policy (7-day acknowledgement, 90-day coordinated disclosure), and an up-to-date known
+      limitations list.
 - [ ] **Name and license.** Decide before going public. The license is MIT today, to match the
       vendored smolcars code.
-- [ ] **Pre-alpha messaging.**
-  - [ ] README status line says pre-alpha and no longer says "milestone 4".
-  - [ ] Release notes state plainly: not security-reviewed, never run on mainnet beyond the one
-        small-coin test, start with one small coin.
-  - [ ] Known limitations are listed in the release notes: inputs with script timelocks (CLTV) are
-        unsupported; Taproot script trees, miniscript and `combo()` are unsupported; fee bumps for
-        BTC and fan-out transactions are unsupported; PSBT v2 input is unsupported.
-  - [ ] Move `CHANGELOG.md` "Unreleased" under the version heading and bump `deno.json` from
-        `0.1.0-dev`.
-  - [ ] An issue template for tester reports (wallet, signer, chain, backend, what was verified).
+- [x] **Pre-alpha messaging.**
+  - [x] README status line says pre-alpha and no longer says "milestone 4".
+  - [x] Release notes (`docs/release-notes/0.1.0-pre-alpha.1.md`) state plainly: not
+        security-reviewed, not proven on mainnet, start with one small coin. Reword the mainnet line
+        once the live run above is done.
+  - [x] Known limitations are listed in the release notes: inputs with script timelocks (CLTV),
+        Taproot script trees, miniscript and `combo()`, PSBT v2 input, and fee bumps for BTC and
+        fan-out transactions are unsupported.
+  - [x] `CHANGELOG.md` "Unreleased" is now under `0.1.0-pre-alpha.1 (not yet tagged)` and
+        `deno.json` / `package.json` are bumped from `0.1.0-dev`. Drop "not yet tagged" when
+        releasing.
+  - [x] Issue templates in `.github/ISSUE_TEMPLATE/`: tester report (wallet, signer, chain, backend,
+        how far it got), bug report, and a link to `SECURITY.md` for vulnerabilities.
 
 ## 2. Before beta (verification and hardening)
 
