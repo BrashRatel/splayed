@@ -1,9 +1,8 @@
 # Changelog
 
-All notable changes to splayed. The first release will be `0.1.0-pre-alpha.1` (not yet tagged); see
-[TODO.md](TODO.md) for what gates it. Newest first.
+All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
-## 0.1.0-pre-alpha.1 (not yet tagged)
+## 0.1.0-pre-alpha.1 (2026-11-01)
 
 ### Changed
 

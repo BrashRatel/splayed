@@ -104,9 +104,8 @@ and XBT away from BTC, BTC confirmed untouched. Still only one coin, still early
   - [x] Known limitations are listed in the release notes: inputs with script timelocks (CLTV),
         Taproot script trees, miniscript and `combo()`, PSBT v2 input, and fee bumps for BTC and
         fan-out transactions are unsupported.
-  - [x] `CHANGELOG.md` "Unreleased" is now under `0.1.0-pre-alpha.1 (not yet tagged)` and
-        `deno.json` / `package.json` are bumped from `0.1.0-dev`. Drop "not yet tagged" when
-        releasing.
+  - [x] `CHANGELOG.md` "Unreleased" is now under `0.1.0-pre-alpha.1 (2026-11-01)` (tagged) and
+        `deno.json` / `package.json` are bumped from `0.1.0-dev`.
   - [x] Issue templates in `.github/ISSUE_TEMPLATE/`: tester report (wallet, signer, chain, backend,
         how far it got), bug report, and a link to `SECURITY.md` for vulnerabilities.
 
