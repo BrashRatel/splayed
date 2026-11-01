@@ -1,13 +1,13 @@
 # Changelog
 
-All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (not yet tagged); see
+All notable changes to splayed. The first release will be `0.1.0-pre-alpha.1` (not yet tagged); see
 [TODO.md](TODO.md) for what gates it. Newest first.
 
 ## 0.1.0-pre-alpha.1 (not yet tagged)
 
 ### Changed
 
-- **Renamed from forksplit to Splayed.** The command is `splayed`, the config file is
+- **Renamed from forksplit to splayed.** The command is `splayed`, the config file is
   `splayed.toml`, the data directory is `splayed` (`~/.local/share/splayed` on Linux), and the
   environment variables are now `SPLAYED_DATA_DIR`, `SPLAYED_PROFILE`, `SPLAYED_TOR_SOCKS` and
   `SPLAYED_TOR_BINARY`. Nothing was released under the old name, so there is no migration: move the
@@ -19,15 +19,14 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
 
 - **First live mainnet run.** The full guided route (scan, plan, sign, verify, broadcast, track,
   rescan) split one real coin's ECX and XBT copies away from BTC, with BTC confirmed untouched at
-  its original address and both forks confirmed at their new ones. ECX signed with stock
-  SeedSigner firmware; XBT with the SIGHASH_UNIFIED-aware fork at
+  its original address and both forks confirmed at their new ones. ECX signed with stock SeedSigner
+  firmware; XBT with the SIGHASH_UNIFIED-aware fork at
   [privkeyio/seedsigner](https://github.com/privkeyio/seedsigner) (release
   `v0.8.7-unified-sighash.6`). Steps for both are now in `docs/user/signers.md`.
-- **Managed Tor verified against the real bundled binary.** `deno task fetch-tor` plus
-  `TorManager` bootstraps the pinned Tor Browser 16.0 (tor 0.4.9.15) binary in about 10 seconds.
-  Per-chain and per-broadcast SOCKS isolation keys were confirmed to land on distinct circuits
-  (five keys, five different exit IPs), and re-using a key returns to the same circuit instead of
-  rotating.
+- **Managed Tor verified against the real bundled binary.** `deno task fetch-tor` plus `TorManager`
+  bootstraps the pinned Tor Browser 16.0 (tor 0.4.9.15) binary in about 10 seconds. Per-chain and
+  per-broadcast SOCKS isolation keys were confirmed to land on distinct circuits (five keys, five
+  different exit IPs), and re-using a key returns to the same circuit instead of rotating.
 - **Pre-alpha packaging.** `SECURITY.md` now has a reporting contact (email, PGP) and a disclosure
   policy; GitHub issue templates for tester reports and bugs (with a link to `SECURITY.md` for
   vulnerabilities); release notes for `0.1.0-pre-alpha.1`; a pre-alpha status line in the README;
@@ -100,10 +99,10 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
   history of the transaction's first output script.
 
 - **Regtest playground** (`deno task regtest`): a long-lived environment with stable ports for
-  trying Splayed by hand. `up` starts the three nodes and mines the shared history, `fund` puts
+  trying splayed by hand. `up` starts the three nodes and mines the shared history, `fund` puts
   coins on your own wallet (a descriptor or an address) on all three chains before the fork, `fork`
   separates the chains, and `ui` runs the web UI against them. `mine`, `reorg`, `check` (asks every
-  node about a plan's signed transactions, independent of Splayed), `status`, `stop` and `down`
+  node about a plan's signed transactions, independent of splayed), `status`, `stop` and `down`
   complete it. It was exercised end to end through the UI's HTTP API; Sparrow and Shrike themselves
   have not been tried yet.
 - **Regtest address network for test profiles.** A regtest profile accepts the `tpub`, `upub` and
@@ -127,7 +126,7 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
   Unit tests cover the replacement rules, the reorg classification and the scan comparison.
 - **Regtest integration suite** (`deno task test:integration`, `tests/integration/`). Real Bitcoin
   Core 31.0, Bitcoin Knots 29.4.1 (BLAKE2b from regtest height 110) and an eCash node built from
-  `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. Splayed's CLI runs
+  `ecash-com/bitcoin` commit `c8474e0b` (reports eCash v1.2.0) run in Docker. splayed's CLI runs
   against their JSON-RPC: init, import, scan, plan, verify, broadcast, track and rescan, for eight
   wallets (`pkh`, `wpkh`, `sh(wpkh)`, `tr` key path, 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`,
   and a mixed wallet whose single `--batch all` transaction per fork spends all seven script types).
@@ -145,14 +144,14 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
 
 - **`bump` silently failed to broadcast an ECX fee bump.** `EsploraBackend.txStatus` treated a
   `GET /tx/<txid>/status` answer of `{"confirmed":false}` as proof the transaction was in the
-  mempool, but both of ECX's default backends (`explorer.ecash.com` and `esplora.ecash.ninja`)
-  give that same answer for *any* syntactically valid txid, including ones never broadcast. The
-  fee-bump broadcast pre-check (`cmdBroadcast`'s `t.replaces` branch in `src/cli/main.ts`) then
-  believed the replacement was "already accepted" and never actually sent it, while the original
-  stayed live and unreplaced. `txStatus` now checks existence via `GET /tx/<txid>` first, the
-  same guard `observeOutput` already had for the `/outspend` endpoint's identical trap. Found and
-  fixed during the live mainnet run above; regression test in `tests/core_test.ts`
-  (`FakeChain.statusTrap` in `tests/fakes.ts`).
+  mempool, but both of ECX's default backends (`explorer.ecash.com` and `esplora.ecash.ninja`) give
+  that same answer for _any_ syntactically valid txid, including ones never broadcast. The fee-bump
+  broadcast pre-check (`cmdBroadcast`'s `t.replaces` branch in `src/cli/main.ts`) then believed the
+  replacement was "already accepted" and never actually sent it, while the original stayed live and
+  unreplaced. `txStatus` now checks existence via `GET /tx/<txid>` first, the same guard
+  `observeOutput` already had for the `/outspend` endpoint's identical trap. Found and fixed during
+  the live mainnet run above; regression test in `tests/core_test.ts` (`FakeChain.statusTrap` in
+  `tests/fakes.ts`).
 - **QR export drew nothing in the browser.** `qr.js` called `.json()` on the result of the UI's
   `api()` helper, which already returns parsed JSON, so the call threw. A test now runs the browser
   module against a stub DOM using the real `api()` contract; it fails on the old code.
@@ -190,7 +189,7 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
 
 ## Docs and UI polish (2026-10-31)
 
-- Describe Splayed as keyless (your wallet signs) rather than watch-only.
+- Describe splayed as keyless (your wallet signs) rather than watch-only.
 - TODO.md with release blockers and open work, SECURITY.md, project layout in the README, and a CI
   workflow (fmt, lint, type-check, tests).
 - UI: dark mode by default, with a light toggle that is remembered per browser.
@@ -198,7 +197,7 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
 
 ## Milestone 4: managed Tor and local web UI (2026-10-31)
 
-- Tor manager with `auto`, `managed` and `system` modes. Splayed's own Tor uses `IsolateSOCKSAuth`,
+- Tor manager with `auto`, `managed` and `system` modes. splayed's own Tor uses `IsolateSOCKSAuth`,
   `SafeSocks 1` and `__OwningControllerProcess`, and starts only when a backend about to be
   contacted needs it.
 - `fetch-tor` and `update-tor-manifest`: GPG-verified, SHA-256-pinned Tor Expert Bundles.

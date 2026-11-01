@@ -32,7 +32,7 @@ deno task regtest ui                          # open the printed URL
    upload button. Then verify, broadcast and track.
 6. **`verify` asks all three nodes.** The target chain must accept the transaction and the other two
    must reject it. `deno task regtest check <plan-id>` asks them again directly, independent of
-   Splayed's own checks, and prints a table of what each node said.
+   splayed's own checks, and prints a table of what each node said.
 7. **`mine`** to confirm what you broadcast (`deno task regtest mine all 1`). `reorg ecx 2` undoes
    two ECX blocks so you can see what `track` reports.
 
@@ -56,4 +56,4 @@ HTTP. `ui --bind 127.0.0.1` keeps it local, and then `ssh -L 18080:127.0.0.1:180
 ## Lifecycle
 
 `stop` pauses the nodes, `up` resumes them with the same chains, and `down` deletes everything
-(containers, volumes and the playground's Splayed data under `.data/regtest/`).
+(containers, volumes and the playground's splayed data under `.data/regtest/`).

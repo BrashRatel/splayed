@@ -263,7 +263,7 @@ function viewNetwork() {
     h(
       "p",
       { class: "note" },
-      "auto: use a Tor already running (or the Tor Browser), else start Splayed's own. managed: always start our own. system: only a Tor you run, never start one.",
+      "auto: use a Tor already running (or the Tor Browser), else start splayed's own. managed: always start our own. system: only a Tor you run, never start one.",
     ),
     h(
       "div",

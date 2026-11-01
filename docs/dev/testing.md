@@ -27,7 +27,7 @@ which touches an existing container or volume:
 | ECX   | `ecash-com/bitcoin` at commit `c8474e0b` (reports eCash v1.2.0), built from source  |
 
 The nodes share blocks 1 to 109, so the test coins exist at the same outpoint on all three chains,
-then each mines its own chain. Splayed's real CLI runs against their JSON-RPC, and the suite checks
+then each mines its own chain. splayed's real CLI runs against their JSON-RPC, and the suite checks
 that each fork split is rejected by the other two nodes. It does this for eight wallets: `pkh`,
 `wpkh`, `sh(wpkh)`, `tr` (key path), 2-of-3 `sh`, `wsh` and `sh(wsh)` `sortedmulti`, and a mixed
 wallet whose single `--batch all` transaction per fork spends all seven of those script types at

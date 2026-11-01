@@ -101,9 +101,9 @@ Setup (nothing about your coins is sent anywhere until you confirm):
   config backend fallback <chain> Add the profile's fallback backend to the list
   config clearnet <chain> on|off  Allow direct (non-Tor) connections to public hosts
   config tor auto|managed|system [host:port]
-                                  auto (default): use a running Tor, else start Splayed's own.
+                                  auto (default): use a running Tor, else start splayed's own.
                                   system: only a Tor you run (e.g. 127.0.0.1:9150 for Tor
-                                  Browser). managed: always start Splayed's own Tor.
+                                  Browser). managed: always start splayed's own Tor.
   config confirmations <chain> N  Depth required before a spend counts as final
 
 Coins:
@@ -346,7 +346,7 @@ export function describeTor(config: Config): string {
   const where = t.socks ? `${t.socks.host}:${t.socks.port}` : "127.0.0.1:9050 or :9150";
   switch (t.mode) {
     case "auto":
-      return `auto (use a running Tor at ${where}, else start Splayed's own)`;
+      return `auto (use a running Tor at ${where}, else start splayed's own)`;
     case "system":
       return `system (only the Tor running at ${t.socks ? where : "127.0.0.1:9050"})`;
     case "managed":

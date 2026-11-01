@@ -1,6 +1,6 @@
 /**
  * A long-lived regtest environment for trying splayed by hand: real Bitcoin Core (BTC), Knots
- * with BLAKE2b (XBT) and eCash (ECX) in Docker, Splayed's web UI wired to them, and your own
+ * with BLAKE2b (XBT) and eCash (ECX) in Docker, splayed's web UI wired to them, and your own
  * regtest wallets (Sparrow, Shrike, ...) for signing.
  *
  *   deno task regtest up                      start the three nodes, mine the shared history
@@ -399,7 +399,7 @@ async function ui(flags: Record<string, string>) {
   await server.server.finished;
 }
 
-/** Asks every node about each signed transaction of a plan, independently of Splayed's checks. */
+/** Asks every node about each signed transaction of a plan, independently of splayed's checks. */
 async function check(positional: string[]) {
   const s = await requireState();
   const id = positional[0];

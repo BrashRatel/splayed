@@ -1,6 +1,6 @@
-# Splayed documentation
+# splayed documentation
 
-Start with the [project README](../README.md) for what Splayed is and a quick start. Then pick your
+Start with the [project README](../README.md) for what splayed is and a quick start. Then pick your
 path.
 
 ## I want to separate my coins

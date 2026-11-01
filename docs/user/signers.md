@@ -1,6 +1,6 @@
 # Signers
 
-Splayed never holds keys. Your wallet signs the PSBTs it writes. Which wallet you can use depends on
+splayed never holds keys. Your wallet signs the PSBTs it writes. Which wallet you can use depends on
 the chain.
 
 | Chain | Needs                                                      | Works with                                                                                        |
@@ -52,18 +52,18 @@ Notes:
 
 ### SeedSigner
 
-SeedSigner reads and writes `crypto-psbt` the same way Splayed's **QR** and **Scan signed** buttons
+SeedSigner reads and writes `crypto-psbt` the same way splayed's **QR** and **Scan signed** buttons
 do, so the flow is the same for both forks: scan the unsigned PSBT with the device, check what it
-shows, sign, then scan its signed QR back into Splayed.
+shows, sign, then scan its signed QR back into splayed.
 
 **ECX** needs no special firmware. Stock SeedSigner signs with a plain signature, which is all the
 ECX marker needs:
 
-1. In the Splayed UI, open the plan and click **QR** on the ECX transaction.
+1. In the splayed UI, open the plan and click **QR** on the ECX transaction.
 2. On SeedSigner: `Scan` the animated QR. It parses the PSBT and shows the transaction to review.
 3. Check the output amount and address against the plan before approving — same as any spend.
 4. Approve and sign. SeedSigner shows the signed PSBT as its own animated QR.
-5. Back in Splayed, click **Scan signed** and scan that QR with the camera.
+5. Back in splayed, click **Scan signed** and scan that QR with the camera.
 6. `verify` should report the ECX replay marker (`nLockTime 499999998` with a non-final sequence)
    and a plain `SIGHASH_ALL`/`DEFAULT` signature.
 
@@ -79,10 +79,10 @@ refers to the SIGHASH_UNIFIED-aware SeedSigner fork at
 1. Flash the device with the unified-sighash firmware fork instead of stock SeedSigner. (A device
    can only run one firmware at a time — use a spare device or SD card if you also sign ECX with
    stock SeedSigner.)
-2. In the Splayed UI, click **QR** on the XBT transaction.
+2. In the splayed UI, click **QR** on the XBT transaction.
 3. On the device: `Scan` the animated QR, review the transaction the same way as any spend.
 4. Approve and sign. The device shows the signed PSBT as an animated QR.
-5. Back in Splayed, click **Scan signed** and scan it in.
+5. Back in splayed, click **Scan signed** and scan it in.
 6. `verify` should report every XBT signature as `SIGHASH_ALL|UNIFIED` (0x21), verified under the
    unified digest. If it instead reports a plain `SIGHASH_ALL` signature, the firmware silently
    dropped the 0x21 request — don't broadcast; such a transaction would also be valid on BTC.

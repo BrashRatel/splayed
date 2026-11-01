@@ -1,6 +1,6 @@
 # Releasing: bundling Tor
 
-For maintainers and release builds. Users don't need this; Splayed falls back to a `tor` on `PATH`
+For maintainers and release builds. Users don't need this; splayed falls back to a `tor` on `PATH`
 (see [Network and privacy](../user/network-and-privacy.md#tor)).
 
 ```sh

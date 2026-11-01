@@ -1,19 +1,19 @@
-# Splayed
+# splayed
 
 Keyless tool for separating the **BTC**, **XBT** (Bitcoin BLAKE2b) and **ECX** (eCash) copies of the
-same coins after the 2026 forks: Splayed builds replay-protected PSBTs, your (cold) wallet signs
-them, and Splayed verifies and broadcasts each split only to its own chain, over Tor.
+same coins after the 2026 forks: splayed builds replay-protected PSBTs, your (cold) wallet signs
+them, and splayed verifies and broadcasts each split only to its own chain, over Tor.
 
 Coins that existed before a fork exist on both chains at the same outpoint. An ordinary spend on one
-chain can be **replayed** on the others, moving the copies you meant to keep. Splayed finds your
+chain can be **replayed** on the others, moving the copies you meant to keep. splayed finds your
 coins on all three chains, tells you which ones are still shared, and walks each shared coin through
 plan → sign (in your wallet) → verify → broadcast. Your keys never leave your wallet.
 
 > **Status: pre-alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
-> eCash nodes on regtest. It is **not security-reviewed** and has **not been run on mainnet**: start
-> with one small coin, and read the [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and
-> [TODO.md](TODO.md) first. Testers wanted: please file a
-> [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
+> eCash nodes on regtest, and has split one real coin on mainnet (ECX and XBT away from BTC, BTC
+> confirmed untouched). It is **not security-reviewed**: start with one small coin, and read the
+> [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and [TODO.md](TODO.md) first. Testers
+> wanted: please file a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
 ## How it works
 

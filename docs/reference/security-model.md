@@ -5,7 +5,7 @@ in [TODO.md](../../TODO.md).
 
 ## Keyless
 
-Splayed never asks for, accepts or stores seeds or private keys. It reads your wallet through
+splayed never asks for, accepts or stores seeds or private keys. It reads your wallet through
 xpub-based (watch-only) descriptors, and your own (cold) wallet signs the PSBTs it builds. Private
 keys in a descriptor are refused.
 

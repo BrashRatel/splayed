@@ -1,6 +1,6 @@
 /**
  * Regtest integration: real Bitcoin Core (BTC), Bitcoin Knots with BLAKE2b (XBT) and an eCash node
- * (ECX) in Docker. Splayed's own CLI runs end to end against their JSON-RPC:
+ * (ECX) in Docker. splayed's own CLI runs end to end against their JSON-RPC:
  * init -> import -> scan -> dest -> plan -> (sign in test code) -> verify -> broadcast -> track.
  *
  *   deno task test:integration

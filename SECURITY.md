@@ -1,6 +1,6 @@
 # Security
 
-Splayed builds and broadcasts transactions that move real coins. Please report vulnerabilities
+splayed builds and broadcasts transactions that move real coins. Please report vulnerabilities
 **privately**, not in a public issue.
 
 ## Reporting
@@ -18,7 +18,7 @@ private keys or descriptors (xpubs) for coins you care about; use regtest or a t
 
 ## What to expect
 
-Splayed is **pre-alpha** and maintained by one person, so these are goals, not guarantees:
+splayed is **pre-alpha** and maintained by one person, so these are goals, not guarantees:
 
 - an acknowledgement within 7 days;
 - a fix or a mitigation plan within 90 days, with coordinated disclosure: please don't publish

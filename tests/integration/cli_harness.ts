@@ -9,7 +9,7 @@ import { REGTEST_PROFILE_ID } from "./regtest_profile.ts";
 import { RegtestRpcTransport, type Rpc } from "./rpc.ts";
 import { stockSign, unifiedSign } from "./signers.ts";
 
-/** Splayed's real CLI, in a fresh data dir, with the three regtest nodes as its only backends. */
+/** splayed's real CLI, in a fresh data dir, with the three regtest nodes as its only backends. */
 export interface Cli {
   dir: string;
   io: CliIO;

@@ -1,4 +1,4 @@
-# Splayed TODO
+# splayed TODO
 
 Target: a **pre-alpha** release, so more people can test. Section 1 is everything that has to be
 true before tagging it. Everything after that is follow-up work and does not block the release.
@@ -31,48 +31,44 @@ and XBT away from BTC, BTC confirmed untouched. Still only one coin, still early
 - [x] **One live end-to-end run on mainnet with one small coin**, ECX and XBT only: scan, plan
       `--batch coin`, sign ECX with an ordinary wallet and XBT with a real 0x21 signer, `verify`,
       `broadcast`, `track`, rescan. Confirm the BTC copy is untouched and shows as separated.
-  - Done (2026-11-01), run through the local web UI: `verify` and `broadcast` accepted on all
-    three nodes, `track` showed per-tx confirmations. Checked against block explorers: BTC copy
-    confirmed untouched at the original address; XBT and ECX both confirmed at their new
-    addresses (the ECX split hit the `bump` bug below along the way). Both forks have their
-    first confirmation; `scan` itself will keep reporting `pending` rather than `SEPARATED`
-    until they reach the profile's default depth (50 confirmations) — that's just the clock, not
-    a functional gap.
+  - Done (2026-11-01), run through the local web UI: `verify` and `broadcast` accepted on all three
+    nodes, `track` showed per-tx confirmations. Checked against block explorers: BTC copy confirmed
+    untouched at the original address; XBT and ECX both confirmed at their new addresses (the ECX
+    split hit the `bump` bug below along the way). Both forks have their first confirmation; `scan`
+    itself will keep reporting `pending` rather than `SEPARATED` until they reach the profile's
+    default depth (50 confirmations) — that's just the clock, not a functional gap.
   - **Bug found and fixed (2026-11-01): `bump` silently failed to broadcast ECX replacements.**
     `bump` on the ECX split reported `verify` clean and `broadcast` as `accepted`
-    (`"detail": "already in the mempool"`), but neither `explorer.ecash.com` nor `blockfab.org`
-    ever showed the replacement — only the original, lower-fee transaction. Root cause confirmed
-    directly against both of ECX's default backends: `GET /tx/<txid>/status` returns HTTP 200
+    (`"detail": "already in the mempool"`), but neither `explorer.ecash.com` nor `blockfab.org` ever
+    showed the replacement — only the original, lower-fee transaction. Root cause confirmed directly
+    against both of ECX's default backends: `GET /tx/<txid>/status` returns HTTP 200
     `{"confirmed":false}` for **any** syntactically valid txid, including ones that were never
-    broadcast (confirmed with a random txid on both `explorer.ecash.com` and
-    `esplora.ecash.ninja`; `GET /tx/<txid>` on the same txid correctly 404s on both). This is the
-    same "Esplora trap" already called out in `observeOutput`'s comment in
-    `src/backends/esplora.ts` for the `/outspend` endpoint, but it also affects `/status`, and
-    switching ECX backends doesn't dodge it since both share the bug.
-    `confirmationDepth()` (`src/core/execute.ts`) trusted `txStatus()` and treated
+    broadcast (confirmed with a random txid on both `explorer.ecash.com` and `esplora.ecash.ninja`;
+    `GET /tx/<txid>` on the same txid correctly 404s on both). This is the same "Esplora trap"
+    already called out in `observeOutput`'s comment in `src/backends/esplora.ts` for the `/outspend`
+    endpoint, but it also affects `/status`, and switching ECX backends doesn't dodge it since both
+    share the bug. `confirmationDepth()` (`src/core/execute.ts`) trusted `txStatus()` and treated
     `{"confirmed":false}` as `state: "mempool"`, so `cmdBroadcast`'s fee-bump pre-check
-    (`src/cli/main.ts`, the `t.replaces` branch) short-circuited on the brand-new replacement
-    txid and reported it "already accepted" **without ever calling `broadcast()`**. Nothing was
-    lost — the original transaction was never actually replaced, so the coin's on-chain state
-    didn't change while this was happening.
-    **Fixed:** `EsploraBackend.txStatus` (`src/backends/esplora.ts`) now checks existence via
-    `GET /tx/<txid>` before trusting an unconfirmed status, the same guard `observeOutput`
-    already had. Regression test added (`tests/core_test.ts`, `tests/fakes.ts`:
-    `FakeChain.statusTrap`). Verified against the real `esplora.ecash.ninja` backend: a random
-    txid now correctly reports `absent`. For the stuck coin itself, the already-verified signed
-    bump transaction was broadcast directly (`POST /tx`) to get it out while the fix landed; it's
-    now genuinely in the mempool on both explorers, and the original is correctly marked
-    `replaced` in the plan's progress file.
+    (`src/cli/main.ts`, the `t.replaces` branch) short-circuited on the brand-new replacement txid
+    and reported it "already accepted" **without ever calling `broadcast()`**. Nothing was lost —
+    the original transaction was never actually replaced, so the coin's on-chain state didn't change
+    while this was happening. **Fixed:** `EsploraBackend.txStatus` (`src/backends/esplora.ts`) now
+    checks existence via `GET /tx/<txid>` before trusting an unconfirmed status, the same guard
+    `observeOutput` already had. Regression test added (`tests/core_test.ts`, `tests/fakes.ts`:
+    `FakeChain.statusTrap`). Verified against the real `esplora.ecash.ninja` backend: a random txid
+    now correctly reports `absent`. For the stuck coin itself, the already-verified signed bump
+    transaction was broadcast directly (`POST /tx`) to get it out while the fix landed; it's now
+    genuinely in the mempool on both explorers, and the original is correctly marked `replaced` in
+    the plan's progress file.
 - [x] **Working XBT signer steps in the docs** for at least one signer (Sparrow BLAKE2b build or
       Shrike are the candidates; both already signed our PSBTs on regtest). Cover Knots
       `walletprocesspsbt` (does it need an explicit `sighashtype`, and with what spelling?) only if
       Knots is the one you pick. Put the steps in `docs/user/signers.md`.
   - Confirmed working on mainnet (2026-11-01), but with a different signer than planned: a
     SeedSigner, stock firmware for the ECX split (plain signature, as expected) and the
-    SIGHASH_UNIFIED-aware fork at
-    [privkeyio/seedsigner](https://github.com/privkeyio/seedsigner) (release
-    `v0.8.7-unified-sighash.6`, the `p10.img` asset) for the XBT 0x21 split. Both verified and
-    broadcast; XBT reached 2 confirmations. Steps are written up in `docs/user/signers.md`.
+    SIGHASH_UNIFIED-aware fork at [privkeyio/seedsigner](https://github.com/privkeyio/seedsigner)
+    (release `v0.8.7-unified-sighash.6`, the `p10.img` asset) for the XBT 0x21 split. Both verified
+    and broadcast; XBT reached 2 confirmations. Steps are written up in `docs/user/signers.md`.
 
 ### Tor (Linux first)
 
@@ -85,8 +81,8 @@ and XBT away from BTC, BTC confirmed untouched. Still only one coin, still early
       The docs claim this, so verify it.
   - Confirmed (2026-11-01): five isolation keys (`btc`, `xbt`, `ecx`, two distinct
     `broadcast:<txid>` keys) each got a different exit IP through the bundled Tor's SOCKS proxy.
-    Re-using the same isolation key in the same session returned the same exit IP both times, so
-    a key pins to one circuit rather than rotating per request.
+    Re-using the same isolation key in the same session returned the same exit IP both times, so a
+    key pins to one circuit rather than rotating per request.
 
 ### Packaging and project
 
@@ -97,14 +93,14 @@ and XBT away from BTC, BTC confirmed untouched. Still only one coin, still early
       `E6D1FC8869F4317E0AEFC58851E2C57C67FA2A4A`, checked against the Keybase key), a disclosure
       policy (7-day acknowledgement, 90-day coordinated disclosure), and an up-to-date known
       limitations list.
-- [x] **Name:** renamed to **Splayed** (checked for conflicts: npm, PyPI, crates.io, jsr and
+- [x] **Name:** renamed to **splayed** (checked for conflicts: npm, PyPI, crates.io, jsr and
       RubyGems are free, no product or company found, and `splayed.com` is a parked domain).
   - [x] GitHub repo renamed to `BrashRatel/splayed`; links and the git remote updated.
 - [x] **Pre-alpha messaging.**
   - [x] README status line says pre-alpha and no longer says "milestone 4".
   - [x] Release notes (`docs/release-notes/0.1.0-pre-alpha.1.md`) state plainly: not
-        security-reviewed, not proven on mainnet, start with one small coin. Reword the mainnet line
-        once the live run above is done.
+        security-reviewed, start with one small coin. The mainnet line was reworded (2026-11-01)
+        once the live run above was done.
   - [x] Known limitations are listed in the release notes: inputs with script timelocks (CLTV),
         Taproot script trees, miniscript and `combo()`, PSBT v2 input, and fee bumps for BTC and
         fan-out transactions are unsupported.
@@ -132,9 +128,9 @@ Wanted, but this is the work pre-alpha testers help with.
       and keep the locktime and sequences. Record which devices warn or refuse.
 - [ ] A real stock hardware wallet signing both the shared and the donor input (XBT donor route).
 - [ ] **Scan signed** with a real camera, and a Jade, Keystone and Passport.
-  - Confirmed on mainnet (2026-11-01), in front of a real camera: exporting to a SeedSigner
-    (stock firmware for ECX, a unified-sighash firmware fork for XBT) and scanning its signed QR
-    back in both worked. Jade, Keystone and Passport still untried.
+  - Confirmed on mainnet (2026-11-01), in front of a real camera: exporting to a SeedSigner (stock
+    firmware for ECX, a unified-sighash firmware fork for XBT) and scanning its signed QR back in
+    both worked. Jade, Keystone and Passport still untried.
 - [ ] Multisig and Taproot PSBTs with real signers.
 
 ### Backends against real servers
@@ -146,9 +142,9 @@ Wanted, but this is the work pre-alpha testers help with.
 - [ ] Esplora/mempool: `/fee-estimates` format on each default server, the `POST /tx` error format,
       HTTP 429 handling and backoff.
   - One concrete bug already found and fixed this way: see the `bump` entry under "One real run"
-    above — both of ECX's default backends report `{"confirmed":false}` instead of 404 for a
-    txid that was never broadcast, which made the fee-bump pre-check falsely believe a
-    replacement already landed and skip sending it. Fixed in `EsploraBackend.txStatus`.
+    above — both of ECX's default backends report `{"confirmed":false}` instead of 404 for a txid
+    that was never broadcast, which made the fee-bump pre-check falsely believe a replacement
+    already landed and skip sending it. Fixed in `EsploraBackend.txStatus`.
 - [ ] Remote node RPC over an onion address, end to end.
 
 ### Platforms
@@ -185,15 +181,15 @@ Wanted, but this is the work pre-alpha testers help with.
       written).
 - [ ] UI:
   - [ ] guided first-run wizard;
-  - [ ] live Tor bootstrap progress; confirmed needed in practice (2026-11-01): after "Check
-        servers and confirm", establishing circuits over Tor is slow enough to look hung without
-        a progress or waiting indicator;
+  - [ ] live Tor bootstrap progress; confirmed needed in practice (2026-11-01): after "Check servers
+        and confirm", establishing circuits over Tor is slow enough to look hung without a progress
+        or waiting indicator;
   - [ ] auto-advance from the Network tab to the Wallet tab once settings are confirmed;
   - [ ] scan a QR descriptor directly into the wallet/destination fields on the Wallet tab;
   - [ ] auto-advance from the Wallet tab to the Coins tab once all fork destinations are set;
-  - [ ] a progress or waiting indicator on the Coins tab while `scan` runs (or at least a note to
-        be patient over Tor and watch the activity log) — same issue as Tor bootstrap, it looks
-        hung but is just slow, especially noticeable on re-scans after a split;
+  - [ ] a progress or waiting indicator on the Coins tab while `scan` runs (or at least a note to be
+        patient over Tor and watch the activity log) — same issue as Tor bootstrap, it looks hung
+        but is just slow, especially noticeable on re-scans after a split;
   - [ ] edit scan gap limit and jitter;
   - [ ] archive or delete plans;
   - [ ] show the per-coin plan, verify and broadcast state on the Coins tab;
