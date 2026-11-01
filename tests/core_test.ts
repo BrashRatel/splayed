@@ -144,6 +144,27 @@ Deno.test("Esplora trap: an unknown txid is absent even though outspend says uns
   if (spent.state === "spent") assertEquals(spent.spendHeight, 974_400);
 });
 
+Deno.test("Esplora trap: a never-broadcast txid's /status says unconfirmed, not absent", async () => {
+  const chain = fakeChain("ecx");
+  chain.statusTrap = true;
+  const cfg = {
+    kind: "esplora" as const,
+    url: "http://x/api",
+    proxy: { kind: "tor" as const },
+    role: "both" as const,
+    priority: 0,
+    origin: "user" as const,
+  };
+  const backend = new EsploraBackend("ecx", cfg, new FakeEsploraTransport(chain));
+  // txStatus must not trust confirmed:false alone: it should check existence separately and
+  // report a never-broadcast txid as absent, not mempool.
+  assertEquals(await backend.txStatus(txid(1)), { state: "absent" });
+  addOutput(chain, txid(2), 0, 5000, "bc1qexample", "0014"); // no height: unconfirmed
+  assertEquals(await backend.txStatus(txid(2)), { state: "mempool" });
+  chain.txs.get(txid(2))!.height = 974_400;
+  assertEquals((await backend.txStatus(txid(2))).state, "confirmed");
+});
+
 Deno.test("btcToSats has no float drift", () => {
   assertEquals(btcToSats(0.1 + 0.2), 30_000_000);
   assertEquals(btcToSats(20999999.9769), 2_099_999_997_690_000);

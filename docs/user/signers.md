@@ -49,3 +49,43 @@ Notes:
 - The coding is in `src/core/ur.ts`, checked frame for frame against the reference implementation.
   QR drawing and reading use two small vendored libraries in `src/ui/static/vendor/` (pinned by
   checksum).
+
+### SeedSigner
+
+SeedSigner reads and writes `crypto-psbt` the same way Splayed's **QR** and **Scan signed** buttons
+do, so the flow is the same for both forks: scan the unsigned PSBT with the device, check what it
+shows, sign, then scan its signed QR back into Splayed.
+
+**ECX** needs no special firmware. Stock SeedSigner signs with a plain signature, which is all the
+ECX marker needs:
+
+1. In the Splayed UI, open the plan and click **QR** on the ECX transaction.
+2. On SeedSigner: `Scan` the animated QR. It parses the PSBT and shows the transaction to review.
+3. Check the output amount and address against the plan before approving — same as any spend.
+4. Approve and sign. SeedSigner shows the signed PSBT as its own animated QR.
+5. Back in Splayed, click **Scan signed** and scan that QR with the camera.
+6. `verify` should report the ECX replay marker (`nLockTime 499999998` with a non-final sequence)
+   and a plain `SIGHASH_ALL`/`DEFAULT` signature.
+
+**XBT** needs a signer that makes `SIGHASH_ALL|SIGHASH_UNIFIED` (0x21) signatures. Stock SeedSigner
+firmware can't do this. `--xbt-signer privkeyio-firmware` in `planner.ts` (`src/core/planner.ts`)
+refers to the SIGHASH_UNIFIED-aware SeedSigner fork at
+[github.com/privkeyio/seedsigner](https://github.com/privkeyio/seedsigner). Tested with release
+[`v0.8.7-unified-sighash.6`](https://github.com/privkeyio/seedsigner/releases/tag/v0.8.7-unified-sighash.6)
+("Take embit 0.8.0-unified-sighash.4"), the `p10.img` asset from that release. It is marked
+**experimental and unaudited** — test with the smallest coin first, and plan with
+`--xbt-signer privkeyio-firmware` so the plan carries that warning.
+
+1. Flash the device with the unified-sighash firmware fork instead of stock SeedSigner. (A device
+   can only run one firmware at a time — use a spare device or SD card if you also sign ECX with
+   stock SeedSigner.)
+2. In the Splayed UI, click **QR** on the XBT transaction.
+3. On the device: `Scan` the animated QR, review the transaction the same way as any spend.
+4. Approve and sign. The device shows the signed PSBT as an animated QR.
+5. Back in Splayed, click **Scan signed** and scan it in.
+6. `verify` should report every XBT signature as `SIGHASH_ALL|UNIFIED` (0x21), verified under the
+   unified digest. If it instead reports a plain `SIGHASH_ALL` signature, the firmware silently
+   dropped the 0x21 request — don't broadcast; such a transaction would also be valid on BTC.
+
+Confirmed working on mainnet (2026-11-01): both splits of a real coin, verified and broadcast, with
+the XBT split reaching 2 confirmations.

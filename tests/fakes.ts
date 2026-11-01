@@ -19,6 +19,9 @@ export interface FakeChain {
   history: Map<string, string[]>;
   requests: string[];
   status429?: boolean;
+  /** Mimic the real eCash Esplora bug: /tx/{txid}/status answers confirmed:false (not 404) for
+   *  a txid that was never broadcast. */
+  statusTrap?: boolean;
   feeEstimates?: Record<string, number>;
   broadcasts?: { txid: string; isolation: string; hex: string }[];
   /** Optional consensus stand-in: return a reject reason, or undefined to accept. */
@@ -120,7 +123,13 @@ export class FakeEsploraTransport implements Transport {
     }
     if ((m = /^\/tx\/([0-9a-f]{64})\/status$/u.exec(path))) {
       const tx = c.txs.get(m[1]);
-      if (!tx) return Promise.resolve(response(404, "Transaction not found"));
+      if (!tx) {
+        return Promise.resolve(
+          c.statusTrap
+            ? response(200, JSON.stringify({ confirmed: false }))
+            : response(404, "Transaction not found"),
+        );
+      }
       return Promise.resolve(response(
         200,
         JSON.stringify(

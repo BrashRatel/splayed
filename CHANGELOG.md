@@ -17,6 +17,17 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
 
 ### Added
 
+- **First live mainnet run.** The full guided route (scan, plan, sign, verify, broadcast, track,
+  rescan) split one real coin's ECX and XBT copies away from BTC, with BTC confirmed untouched at
+  its original address and both forks confirmed at their new ones. ECX signed with stock
+  SeedSigner firmware; XBT with the SIGHASH_UNIFIED-aware fork at
+  [privkeyio/seedsigner](https://github.com/privkeyio/seedsigner) (release
+  `v0.8.7-unified-sighash.6`). Steps for both are now in `docs/user/signers.md`.
+- **Managed Tor verified against the real bundled binary.** `deno task fetch-tor` plus
+  `TorManager` bootstraps the pinned Tor Browser 16.0 (tor 0.4.9.15) binary in about 10 seconds.
+  Per-chain and per-broadcast SOCKS isolation keys were confirmed to land on distinct circuits
+  (five keys, five different exit IPs), and re-using a key returns to the same circuit instead of
+  rotating.
 - **Pre-alpha packaging.** `SECURITY.md` now has a reporting contact (email, PGP) and a disclosure
   policy; GitHub issue templates for tester reports and bugs (with a link to `SECURITY.md` for
   vulnerabilities); release notes for `0.1.0-pre-alpha.1`; a pre-alpha status line in the README;
@@ -132,6 +143,16 @@ All notable changes to Splayed. The first release will be `0.1.0-pre-alpha.1` (n
 
 ### Fixed
 
+- **`bump` silently failed to broadcast an ECX fee bump.** `EsploraBackend.txStatus` treated a
+  `GET /tx/<txid>/status` answer of `{"confirmed":false}` as proof the transaction was in the
+  mempool, but both of ECX's default backends (`explorer.ecash.com` and `esplora.ecash.ninja`)
+  give that same answer for *any* syntactically valid txid, including ones never broadcast. The
+  fee-bump broadcast pre-check (`cmdBroadcast`'s `t.replaces` branch in `src/cli/main.ts`) then
+  believed the replacement was "already accepted" and never actually sent it, while the original
+  stayed live and unreplaced. `txStatus` now checks existence via `GET /tx/<txid>` first, the
+  same guard `observeOutput` already had for the `/outspend` endpoint's identical trap. Found and
+  fixed during the live mainnet run above; regression test in `tests/core_test.ts`
+  (`FakeChain.statusTrap` in `tests/fakes.ts`).
 - **QR export drew nothing in the browser.** `qr.js` called `.json()` on the result of the UI's
   `api()` helper, which already returns parsed JSON, so the call threw. A test now runs the browser
   module against a stub DOM using the real `api()` contract; it fails on the old code.

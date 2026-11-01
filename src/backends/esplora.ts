@@ -123,7 +123,14 @@ export class EsploraBackend implements ChainBackend {
     if (!validStatus(parsed)) {
       throw new BackendError(`GET /tx/${txid}/status returned an unexpected answer`);
     }
-    if (!parsed.confirmed) return { state: "mempool" };
+    if (!parsed.confirmed) {
+      // The same "Esplora trap" as observeOutput's /outspend: some servers (observed on both
+      // eCash defaults) answer {"confirmed":false} for a txid that was never broadcast instead
+      // of 404, so existence must be checked separately before trusting "unconfirmed" as mempool.
+      const exists = await this.get(`/tx/${txid}`);
+      if (exists.status === 404) return { state: "absent" };
+      return { state: "mempool" };
+    }
     if (typeof parsed.block_hash !== "string" || !HEX64.test(parsed.block_hash)) {
       throw new BackendError(`GET /tx/${txid}/status gave no valid block hash`);
     }
