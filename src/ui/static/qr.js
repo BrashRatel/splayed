@@ -85,9 +85,9 @@ export async function showPsbtQr({ api, h, planId, file, label }) {
   };
   const load = async () => {
     try {
-      const r = await (await api(
+      const r = await api(
         `/api/plans/${planId}/qr?file=${encodeURIComponent(file)}&size=${sizeSel.value}`,
-      )).json();
+      );
       frames = r.frames;
       i = 0;
       play();
@@ -162,10 +162,10 @@ export async function scanSignedPsbt({ api, h, planId, file, label, onSaved }) {
     const frames = queue;
     queue = [];
     try {
-      const r = await (await api(`/api/plans/${planId}/qr`, {
+      const r = await api(`/api/plans/${planId}/qr`, {
         method: "POST",
         body: JSON.stringify({ file, frames }),
-      })).json();
+      });
       if (r.complete) {
         stop();
         status.textContent = `Got it. Saved as ${r.saved}.`;
