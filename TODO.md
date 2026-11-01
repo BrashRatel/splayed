@@ -54,9 +54,6 @@ default servers probed through Tor. **Nothing has moved real coins on mainnet.**
 - [x] **Name:** renamed to **Splayed** (checked for conflicts: npm, PyPI, crates.io, jsr and
       RubyGems are free, no product or company found, and `splayed.com` is a parked domain).
   - [x] GitHub repo renamed to `BrashRatel/splayed`; links and the git remote updated.
-  - [ ] Search USPTO, UK IPO and EUIPO for the name before going public.
-  - [ ] Register a domain if you want one (`.io`, `.dev`, `.app` and others looked unregistered).
-- [ ] **License.** MIT today, to match the vendored smolcars code. Confirm before going public.
 - [x] **Pre-alpha messaging.**
   - [x] README status line says pre-alpha and no longer says "milestone 4".
   - [x] Release notes (`docs/release-notes/0.1.0-pre-alpha.1.md`) state plainly: not
