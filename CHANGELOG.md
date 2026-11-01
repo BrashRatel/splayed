@@ -13,7 +13,9 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
   fountain frames, xoshiro chooser) is written here and matches the reference implementation frame
   for frame, including the fountain frames; the decoder takes frames in any order, repeated or
   missing, and skips misread ones. Two small libraries are vendored and checksum-pinned
-  (`qrcode-generator` MIT, `jsQR` Apache-2.0). Not yet tried with a real signer or camera.
+  (`qrcode-generator` MIT, `jsQR` Apache-2.0). Tried so far: the export (QR button) was scanned and
+  signed by a SeedSigner set to regtest. Not yet tried: **Scan signed** with a real camera (browsers
+  only allow the camera on `localhost`/`127.0.0.1`), and a Jade.
 - **Fee bump: CPFP and dropping inputs.** `bump <plan> --cpfp --fee-rate ecx=N` writes a child that
   spends a stuck split's output so the pair pays that rate (plain signature from the destination
   wallet; the child exists only on its parent's chain). `bump <plan> --tx N --drop txid:vout`
@@ -31,6 +33,9 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
   coins stays `unproven` and refused. Unit tests for the tracer, and a real-node scenario (a
   0x21-funded donor is proven and fanned out; a plain-funded one is refused; turning the 0x21
   detection off breaks it).
+- **Regtest playground: `donors --chain btc`** mines BTC-only donor coins for the BTC-first route
+  (`deno task regtest donors '<descriptor>' --chain btc`); without `--chain` it still mines XBT
+  donors.
 - **Advanced BTC-first route** (`plan --btc-first --donor txid:vout`, `dest set btc`). The BTC copy
   is split first, protected by a BTC-only donor; ECX keeps its locktime; XBT is signed with plain
   `SIGHASH_ALL` and carries no replay protection, so `broadcast` holds it back until its coin is
@@ -110,6 +115,17 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Fixed
 
+- **QR export drew nothing in the browser.** `qr.js` called `.json()` on the result of the UI's
+  `api()` helper, which already returns parsed JSON, so the call threw. A test now runs the browser
+  module against a stub DOM using the real `api()` contract; it fails on the old code.
+- **Plan form failed with "No fee estimate from the ECX backend"** in the regtest playground
+  (regtest nodes have no estimates). In the playground the fee boxes now start at 2 sat/vB;
+  elsewhere "auto" is unchanged.
+- **Donors tab only described the XBT route.** It now explains both donor routes (XBT donors and the
+  BTC-first route), and its fee boxes are labelled "Fee" since they apply to either chain.
+- `verify` treated "insufficient fee" (what Core, Knots and eCash say for a lower-fee conflicting
+  transaction) as a rejection by the user's own node; it is now tolerated on the target chain like
+  the other "already known / conflicting" cases.
 - The reorg warning said a split's "depth restarted" even when it stayed at the same height; it now
   says it is in a different block.
 - `track` could not see confirmations through node RPC: a confirmed spend with no detail was read as
@@ -126,6 +142,9 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Changed
 
+- `deno lint` and `deno fmt` skip `src/ui/static/vendor/` (the pinned third-party QR libraries).
+- TODO: ticked the donor pool, the fan-out and the playground signer checks (Sparrow and Shrike were
+  run by the project owner); added the real-signer and camera follow-ups for QR.
 - TODO and README now name eCash v1.2.0, the version the pinned node commit reports (they said
   v1.1.0).
 - Default endpoints probed through Tor: both onion addresses match the operators' `Onion-Location`
