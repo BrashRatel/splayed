@@ -237,3 +237,139 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     assertEquals(bump.exitCode, 1, bump.text);
   });
 });
+
+Deno.test("UI QR: the PSBT goes out as UR frames and the signed one comes back by scanning", async () => {
+  const { URDecoder, psbtFromUr, psbtToUr } = await import("../src/core/ur.ts");
+  await withUi(async ({ runJob, api, base }) => {
+    for (const path of ["/qr.js", "/vendor/qrcode.js", "/vendor/jsQR.js"]) {
+      const res = await fetch(`${base}${path}`);
+      assertEquals(res.status, 200, path);
+      assert(res.headers.get("content-type")?.startsWith("text/javascript"), path);
+      await res.body?.cancel();
+    }
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    assertEquals(
+      (await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true])).exitCode,
+      0,
+    );
+    const p = (await (await api("/api/plans")).json()).plans[0];
+    const t = p.transactions[0];
+    const qrUrl = `/api/plans/${p.id}/qr`;
+
+    // Export: the frames decode (as the signer would) to exactly the plan's PSBT.
+    const out = await (await api(`${qrUrl}?file=${encodeURIComponent(t.file)}&size=60`)).json();
+    assertEquals(out.type, "crypto-psbt");
+    assert(out.frames.length > 1, "a PSBT with a previous transaction needs several frames");
+    const signerSide = new URDecoder();
+    for (const f of out.frames) if (!signerSide.isComplete) signerSide.receive(f);
+    const unsigned = psbtFromUr(signerSide);
+    const planned = base64.decode(
+      (await (await api(`/api/plans/${p.id}/download?file=${encodeURIComponent(t.file)}`)).text())
+        .trim(),
+    );
+    assertEquals(base64.encode(unsigned), base64.encode(planned));
+
+    // The signer signs and plays its own animation back; the camera misses frames and sees one
+    // twice, reads one wrongly, and starts in the middle.
+    const tx = Transaction.fromPSBT(unsigned);
+    tx.signIdx(SOURCE.derive("m/84'/0'/0'/0/0").privateKey!, 0);
+    const signed = tx.toPSBT();
+    const animation = psbtToUr(signed, 70).frames;
+    assert(animation.length > 2);
+    const scanned = [
+      ...animation.slice(2),
+      animation[3],
+      animation[1].replace(/.{2}$/u, "zz"), // a misread frame fails its checksum
+      ...animation.slice(0, 2),
+    ];
+    let done: { complete: boolean; saved?: string; rejected?: number } = { complete: false };
+    for (let i = 0; i < scanned.length && !done.complete; i += 3) {
+      const r = await api(qrUrl, {
+        method: "POST",
+        body: JSON.stringify({ file: t.file, frames: scanned.slice(i, i + 3) }),
+      });
+      assertEquals(r.status, 200);
+      done = await r.json();
+    }
+    assert(done.complete, JSON.stringify(done));
+    assert(done.saved?.includes("uploads/") && done.saved.endsWith(".signed.psbt"));
+
+    // The scanned file is the signed PSBT and verifies like an uploaded one.
+    const verify = await runJob(["verify", p.id]);
+    assertEquals(verify.exitCode, 0, verify.text);
+    assert(verify.text.includes("VERIFIED"));
+
+    // Garbage and wrong transfers don't save anything or crash.
+    const junk = await (await api(qrUrl, {
+      method: "POST",
+      body: JSON.stringify({ file: t.file, reset: true, frames: ["hello", "ur:crypto-psbt/zzzz"] }),
+    })).json();
+    assertEquals(junk.complete, false);
+    assertEquals(junk.rejected, 2);
+    const tooMany = await api(qrUrl, {
+      method: "POST",
+      body: JSON.stringify({ file: t.file, frames: new Array(300).fill("x") }),
+    });
+    assertEquals(tooMany.status, 400);
+    await tooMany.body?.cancel();
+    const notOurs = await api(`${qrUrl}?file=${encodeURIComponent("../../etc/passwd")}`);
+    assertEquals(notOurs.status, 404);
+    await notOurs.body?.cancel();
+  });
+});
+
+Deno.test("UI QR: the vendored libraries are the pinned ones and a drawn frame reads back", async () => {
+  const dir = "src/ui/static/vendor";
+  for (const line of (await Deno.readTextFile(`${dir}/SHA256SUMS`)).trim().split("\n")) {
+    const [sum, name] = line.split(/\s+/u);
+    const bytes = await Deno.readFile(`${dir}/${name}`);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    assertEquals(Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join(""), sum, name);
+  }
+  // Draw a UR frame exactly as qr.js does, then read it like the camera path does.
+  const load = async (name: string) => {
+    const module = { exports: {} as unknown };
+    new Function("module", "exports", await Deno.readTextFile(`${dir}/${name}`))(
+      module,
+      module.exports,
+    );
+    return module.exports as never;
+  };
+  type QrFactory = (type: number, level: string) => {
+    addData(s: string, mode: string): void;
+    make(): void;
+    getModuleCount(): number;
+    isDark(r: number, c: number): boolean;
+  };
+  const qrcode = await load("qrcode.js") as QrFactory;
+  const jsQR = await load("jsQR.js") as (
+    data: Uint8ClampedArray,
+    w: number,
+    h: number,
+  ) => { data: string } | null;
+  const { psbtToUr } = await import("../src/core/ur.ts");
+  const frame = psbtToUr(new Uint8Array(400).map((_, i) => i & 255), 100).frames[1];
+  const qr = qrcode(0, "L");
+  qr.addData(frame.toUpperCase(), "Alphanumeric");
+  qr.make();
+  const n = qr.getModuleCount();
+  const cell = 4;
+  const quiet = 4;
+  const size = (n + quiet * 2) * cell;
+  const rgba = new Uint8ClampedArray(size * size * 4).fill(255);
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (!qr.isDark(r, c)) continue;
+      for (let y = 0; y < cell; y++) {
+        for (let x = 0; x < cell; x++) {
+          const at = ((r + quiet) * cell + y) * size * 4 + ((c + quiet) * cell + x) * 4;
+          rgba[at] = rgba[at + 1] = rgba[at + 2] = 0;
+        }
+      }
+    }
+  }
+  assertEquals(jsQR(rgba, size, size)?.data, frame.toUpperCase());
+});

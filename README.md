@@ -277,6 +277,18 @@ The final transaction is rebuilt canonically from the verified signatures.
 - An unknown result (timeout, Tor failure) is recorded as unknown, never as failed, and is safe to
   retry. Re-running is idempotent.
 
+**Air-gapped signers (animated QR).** In the web UI each transaction has a **QR** button and a
+**Scan signed** button. **QR** plays the unsigned PSBT as a looping animation of QR codes (Uniform
+Resources, type `crypto-psbt`, the format Keystone, Passport, Jade, SeedSigner and others read); the
+signer shows its own animated QR codes for the signed transaction, and **Scan signed** reads them
+through the camera and saves the result exactly like an uploaded file, so the usual `verify`
+follows. Frames can be scanned in any order, repeated, or missed: the stream carries extra
+"fountain" frames, and a misread frame is skipped. The coding is in `src/core/ur.ts` and is checked
+frame for frame against the reference implementation; the QR drawing and reading use two small
+vendored libraries in `src/ui/static/vendor/` (pinned by checksum). Browsers only allow the camera
+on `localhost` or `127.0.0.1`, so open the UI there (not at a LAN address). Plain base64 QR codes
+and the BBQr format are not supported yet.
+
 `track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
 BTC copies then show as separated and can be spent normally.
 

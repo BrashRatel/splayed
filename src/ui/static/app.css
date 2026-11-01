@@ -427,3 +427,38 @@ input[type="file"]::file-selector-button {
   padding: 8px 12px;
   margin: 8px 0;
 }
+
+.qr-modal {
+  align-items: flex-start;
+  overflow: auto;
+}
+.qr-box {
+  max-width: 460px;
+  width: 100%;
+  margin-top: 2rem;
+}
+.qr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: .5rem;
+}
+.qr-canvas {
+  display: block;
+  margin: .5rem auto;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  background: #fff;
+}
+.qr-video {
+  display: block;
+  width: 100%;
+  max-height: 50vh;
+  background: #000;
+  border-radius: 6px;
+}
+.qr-progress {
+  width: 100%;
+  margin-top: .5rem;
+}

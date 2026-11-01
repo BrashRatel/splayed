@@ -7,6 +7,13 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Air-gapped signing by animated QR.** Each transaction in the web UI has **QR** (plays the
+  unsigned PSBT as UR `crypto-psbt` frames) and **Scan signed** (reads the signer's frames through
+  the camera and saves the signed PSBT like an upload). The UR codec (`src/core/ur.ts`: bytewords,
+  fountain frames, xoshiro chooser) is written here and matches the reference implementation frame
+  for frame, including the fountain frames; the decoder takes frames in any order, repeated or
+  missing, and skips misread ones. Two small libraries are vendored and checksum-pinned
+  (`qrcode-generator` MIT, `jsQR` Apache-2.0). Not yet tried with a real signer or camera.
 - **Fee bump: CPFP and dropping inputs.** `bump <plan> --cpfp --fee-rate ecx=N` writes a child that
   spends a stuck split's output so the pair pays that rate (plain signature from the destination
   wallet; the child exists only on its parent's chain). `bump <plan> --tx N --drop txid:vout`

@@ -1,3 +1,4 @@
+import { scanSignedPsbt, showPsbtQr } from "./qr.js";
 // forksplit web UI. Every action runs a forksplit CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
@@ -1107,6 +1108,23 @@ function viewPlans() {
             { class: "small secondary", onclick: () => download(p.id, t.file, "base64") },
             "base64",
           ),
+          " ",
+          h(
+            "button",
+            {
+              class: "small secondary",
+              title: "Show this PSBT as animated QR codes for an air-gapped signer",
+              onclick: () =>
+                showPsbtQr({
+                  api,
+                  h,
+                  planId: p.id,
+                  file: t.file,
+                  label: `${t.chain.toUpperCase()} #${t.order}`,
+                }),
+            },
+            "QR",
+          ),
         ),
         h(
           "td",
@@ -1121,6 +1139,29 @@ function viewPlans() {
             : null,
           fileInput,
           h("button", { class: "small secondary", onclick: upload }, "Upload signed"),
+          " ",
+          h(
+            "button",
+            {
+              class: "small secondary",
+              title: "Read the signed PSBT from your signer's animated QR codes",
+              onclick: () =>
+                scanSignedPsbt({
+                  api,
+                  h,
+                  planId: p.id,
+                  file: t.file,
+                  label: `${t.chain.toUpperCase()} #${t.order}`,
+                  onSaved: async () => {
+                    await refresh();
+                    flash(
+                      `Signed PSBT received for ${t.chain.toUpperCase()} #${t.order}. Press Verify next.`,
+                    );
+                  },
+                }),
+            },
+            "Scan signed",
+          ),
         ),
         h(
           "td",

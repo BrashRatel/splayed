@@ -129,15 +129,19 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
   - [x] BTC-first with a BTC donor (`plan --btc-first`): BTC with a donor, ECX, then a plain XBT
         split that `broadcast` holds back until BTC and ECX are deep. Tested against real nodes. Not
         done: fee bump of BTC transactions, a real hardware wallet run.
-  - [x] A donor pool that tracks where each donor came from: `donor scan` records the home chain
-        and the origin of each donor (coinbase / protected-spend / verified-funding / unproven).
+  - [x] A donor pool that tracks where each donor came from: `donor scan` records the home chain and
+        the origin of each donor (coinbase / protected-spend / verified-funding / unproven).
   - [x] A fan-out transaction to make several donors (`donor fanout`).
   - [ ] An opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Testnet profiles for rehearsals: testnet4 BLAKE2b (fork at 150,308) and ECX betanet (marker
       499,999,999). Each needs its own pinned checkpoints.
 - [ ] PSBT v2 (BIP370) input, for signers that only emit v2.
 - [ ] Descriptors: Taproot script trees, miniscript, `combo()`.
-- [ ] Air-gapped signers: animated QR (BC-UR) export and import of PSBTs in the UI.
+- [x] Air-gapped signers: animated QR (BC-UR `crypto-psbt`) export and import of PSBTs in the UI.
+  - [ ] Try it with a real signer and a real camera (Keystone, Passport, Jade, SeedSigner). Nothing
+        here has been in front of a camera: the UR coding is checked against the reference
+        implementation and the drawn QR codes against the vendored reader, but not the scanning UI.
+  - [ ] BBQr (Coldcard Q) and plain base64 QR codes; the `ur:psbt` type is read but not written.
 - [ ] UI:
   - [ ] live Tor bootstrap progress;
   - [ ] edit scan gap limit and jitter;
@@ -152,8 +156,8 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 
 - [x] **Regtest playground with real signers.** `deno task regtest` was tried with real Sparrow and
       Shrike wallets (reported by the project owner): both connected to their nodes, imported
-      descriptors, exported our PSBTs, signed them, and the signed files went through upload,
-      verify and broadcast in the UI. The steps are in the README ("Regtest playground").
+      descriptors, exported our PSBTs, signed them, and the signed files went through upload, verify
+      and broadcast in the UI. The steps are in the README ("Regtest playground").
   - [ ] Still to try in the playground: the Sparrow BLAKE2b build on the Knots node by itself, and
         multisig and Taproot PSBTs with real signers.
 

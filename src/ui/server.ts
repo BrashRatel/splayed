@@ -14,6 +14,8 @@ import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
 import { loadDonorScan } from "../core/donors.ts";
+import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
+import { decodePsbt } from "../core/psbt.ts";
 import { loadScan } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { ensureDir } from "../core/store.ts";
@@ -22,10 +24,30 @@ import { describeRoute } from "../net/transport.ts";
 import { torManager } from "../net/tor.ts";
 import { JobError, JobRunner } from "./jobs.ts";
 
+/** Saves a signed file the user handed over (file picker or QR) next to its plan. */
+async function saveUpload(dir: string, planFile: string, bytes: Uint8Array): Promise<string> {
+  let kind: "psbt" | "hex";
+  try {
+    kind = readSignedArtifact(bytes).psbt ? "psbt" : "hex";
+  } catch {
+    throw new JobError("That file isn't a PSBT or a raw transaction");
+  }
+  await ensureDir(join(dir, "uploads"));
+  const name = `${planFile.replace("/", "-").replace(/\.psbt$/u, "")}.signed.${kind}`;
+  await Deno.writeFile(join(dir, "uploads", name), bytes, { mode: 0o600 });
+  return `uploads/${name}`;
+}
+
+/** Decoders for scans in progress, keyed by plan and file. Memory only. */
+const qrSessions = new Map<string, URDecoder>();
+
 const STATIC: Record<string, { file: string; type: string }> = {
   "/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
   "/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
+  "/qr.js": { file: "qr.js", type: "text/javascript; charset=utf-8" },
+  "/vendor/qrcode.js": { file: "vendor/qrcode.js", type: "text/javascript; charset=utf-8" },
+  "/vendor/jsQR.js": { file: "vendor/jsQR.js", type: "text/javascript; charset=utf-8" },
 };
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -412,16 +434,65 @@ export function startUi(
         } catch {
           throw new JobError("content must be base64");
         }
-        let kind: "psbt" | "hex";
-        try {
-          kind = readSignedArtifact(bytes).psbt ? "psbt" : "hex";
-        } catch {
-          throw new JobError("That file isn't a PSBT or a raw transaction");
+        return json({ ok: true, saved: await saveUpload(dir, t.file, bytes) });
+      }
+      // Air-gapped signers: the unsigned PSBT as animated QR frames (UR, crypto-psbt) ...
+      if ((m = /^\/api\/plans\/([\w-]+)\/qr$/u.exec(path)) && req.method === "GET") {
+        const { dir, plan } = await loadPlanDir(options.dataDir, m[1]);
+        const t = planTx(plan, url.searchParams.get("file"));
+        const size = Math.min(
+          400,
+          Math.max(30, Number(url.searchParams.get("size") ?? 100) || 100),
+        );
+        const bytes = base64.decode((await Deno.readTextFile(join(dir, t.file))).trim());
+        const { type, frames } = psbtToUr(bytes, size);
+        return json({ type, frames, bytes: bytes.length });
+      }
+      // ... and the signed PSBT back, a few scanned frames at a time.
+      if ((m = /^\/api\/plans\/([\w-]+)\/qr$/u.exec(path)) && req.method === "POST") {
+        const { dir, plan } = await loadPlanDir(options.dataDir, m[1]);
+        const body = await readBody(req) as { file?: string; frames?: string[]; reset?: boolean };
+        const t = planTx(plan, body.file ?? null);
+        const key = `${m[1]}|${t.file}`;
+        if (body.reset) qrSessions.delete(key);
+        let session = qrSessions.get(key);
+        if (!session) {
+          if (qrSessions.size >= 8) qrSessions.delete(qrSessions.keys().next().value!);
+          session = new URDecoder();
+          qrSessions.set(key, session);
         }
-        await ensureDir(join(dir, "uploads"));
-        const name = `${t.file.replace("/", "-").replace(/\.psbt$/u, "")}.signed.${kind}`;
-        await Deno.writeFile(join(dir, "uploads", name), bytes, { mode: 0o600 });
-        return json({ ok: true, saved: `uploads/${name}` });
+        if (!Array.isArray(body.frames) || body.frames.length > 200) {
+          throw new JobError("frames must be a list of at most 200 scanned strings");
+        }
+        let rejected = 0;
+        let lastError: string | undefined;
+        for (const frame of body.frames) {
+          try {
+            session.receive(String(frame));
+          } catch (error) {
+            if (!(error instanceof URError)) throw error;
+            // A frame misread by the camera fails its checksum: skip it, the next lap brings it again.
+            rejected++;
+            lastError = error.message;
+            if (/another transfer/u.test(error.message)) {
+              qrSessions.delete(key);
+              throw new JobError(`${error.message}. Start the scan again.`);
+            }
+          }
+          if (session.isComplete) break;
+        }
+        if (!session.isComplete) {
+          return json({ complete: false, rejected, lastError, progress: session.progress });
+        }
+        qrSessions.delete(key);
+        let bytes: Uint8Array;
+        try {
+          bytes = psbtFromUr(session);
+          decodePsbt(bytes);
+        } catch (error) {
+          throw new JobError(`The scanned data is not a usable PSBT: ${(error as Error).message}`);
+        }
+        return json({ complete: true, saved: await saveUpload(dir, t.file, bytes) });
       }
       return json({ error: "Not found" }, 404);
     } catch (error) {
