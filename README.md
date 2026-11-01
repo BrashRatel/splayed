@@ -57,7 +57,8 @@ See [docs/](docs/README.md) for everything below.
 
 | I want to...                                           | Read                                                                     |
 | ------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Separate my coins, step by step                        | [User guide](docs/user/guide.md)                                         |
+| Separate my coins, step by step with screenshots       | [Web UI guide](docs/user/web-ui-guide.md)                                |
+| Do the same from the command line                      | [User guide (CLI)](docs/user/guide.md)                                   |
 | Know which wallet can sign what                        | [Signers](docs/user/signers.md)                                          |
 | Use my own nodes or tune Tor and privacy               | [Network and privacy](docs/user/network-and-privacy.md)                  |
 | Use the browser UI or an air-gapped signer             | [Web UI](docs/user/web-ui.md)                                            |

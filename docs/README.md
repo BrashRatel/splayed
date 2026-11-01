@@ -5,14 +5,15 @@ your path.
 
 ## I want to separate my coins
 
-| Doc                                                    | Read it for                                      |
-| ------------------------------------------------------ | ------------------------------------------------ |
-| [User guide](user/guide.md)                            | The full walkthrough, install to track           |
-| [Signers](user/signers.md)                             | Which wallet signs which chain; air-gapped QR    |
-| [Network and privacy](user/network-and-privacy.md)     | Tor, your own nodes, what is revealed            |
-| [Web UI](user/web-ui.md)                               | The browser interface                            |
-| [Recovery](user/recovery.md)                           | Reorgs, fee bumps (RBF), CPFP                    |
-| [Advanced donor routes](user/advanced-donor-routes.md) | Stock hardware wallets for XBT; moving BTC first |
+| Doc                                                    | Read it for                                           |
+| ------------------------------------------------------ | ----------------------------------------------------- |
+| [Web UI guide](user/web-ui-guide.md)                   | **Start here:** step-by-step with screenshots, no CLI |
+| [User guide (CLI)](user/guide.md)                      | The same walkthrough from the command line            |
+| [Signers](user/signers.md)                             | Which wallet signs which chain; air-gapped QR         |
+| [Network and privacy](user/network-and-privacy.md)     | Tor, your own nodes, what is revealed                 |
+| [Web UI](user/web-ui.md)                               | The browser interface                                 |
+| [Recovery](user/recovery.md)                           | Reorgs, fee bumps (RBF), CPFP                         |
+| [Advanced donor routes](user/advanced-donor-routes.md) | Stock hardware wallets for XBT; moving BTC first      |
 
 ## I want to understand or audit it
 

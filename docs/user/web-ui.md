@@ -1,4 +1,7 @@
-# Web UI
+# Web UI reference
+
+New here? Follow the [Web UI guide](web-ui-guide.md) instead; this page is the short reference and
+the UI's security properties.
 
 ```sh
 deno task ui        # or: deno task cli ui [--port N] [--open]

@@ -1,4 +1,7 @@
-# User guide
+# User guide (command line)
+
+Prefer screenshots and no command line? Use the [Web UI guide](web-ui-guide.md). This page covers
+the same steps for the CLI.
 
 The full walkthrough for separating your coins: install, check the network, import your wallet,
 scan, plan, sign, verify, broadcast and track. For the idea behind it, see the
