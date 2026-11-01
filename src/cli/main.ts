@@ -20,10 +20,24 @@ import {
 import { DescriptorError } from "../core/descriptors.ts";
 import { verifyIdentity } from "../core/identity.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId, isChainId } from "../core/profiles.ts";
+import {
+  describeDonor,
+  donorKey,
+  evaluateDonors,
+  loadDonorScan,
+  protectedXbtTxids,
+  saveDonorScan,
+} from "../core/donors.ts";
 import { loadScan, runScan, saveScan, scanRegressions } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { defaultDataDir, ensureDir } from "../core/store.ts";
-import { importDescriptor, loadWallet, parsedDescriptors, saveWallet } from "../core/wallet.ts";
+import {
+  importDescriptor,
+  importDonorDescriptor,
+  loadWallet,
+  parsedDescriptors,
+  saveWallet,
+} from "../core/wallet.ts";
 import {
   describeRoute,
   PolicyError,
@@ -99,10 +113,17 @@ Splitting (guided route: forks first, BTC untouched):
   dest set <xbt|ecx> <descriptor> [--start-index N]
                                   Where split coins go on that fork (best: a new seed per fork)
   dest show
-  plan --xbt-signer NAME [--chains ecx,xbt] [--batch coin|address|all|N]
+  plan --xbt-signer NAME | --donor txid:vout ... [--chains ecx,xbt] [--batch coin|address|all|N]
        [--fee-rate ecx=2,xbt=3] [--coin txid:vout ...] [--yes]
                                   Write unsigned, replay-protected PSBTs for shared coins.
                                   XBT signers: ${Object.keys(XBT_SIGNERS).join(", ")}
+  donor import <descriptor> [--label L] | donor list | donor forget <number>
+  donor scan [--rpc-range N] | donor show
+                                  Advanced XBT donor route (opt-in): a donor wallet of coins that
+                                  exist on XBT only lets a stock hardware wallet make the XBT
+                                  split with plain SIGHASH_ALL signatures. Donors are checked
+                                  absent on BTC and ECX and must come from an XBT coinbase or a
+                                  split this tool verified. See the README.
   plans                           List written plans
   verify <plan> [signed files...] [--no-mempool]
                                   Check signed PSBTs/transactions: same tx as planned, replay
@@ -185,6 +206,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         "rpc-range": { type: "string" },
         "start-index": { type: "string" },
         "xbt-signer": { type: "string" },
+        donor: { type: "string", multiple: true },
         chains: { type: "string" },
         batch: { type: "string" },
         "fee-rate": { type: "string" },
@@ -245,8 +267,11 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
           batch: flags.batch,
           feeRate: flags["fee-rate"],
           coins: flags.coin as string[] | undefined,
+          donors: flags.donor as string[] | undefined,
           yes: flags.yes === true,
         });
+      case "donor":
+        return await cmdDonor(config, io, args, flags.label, flags["rpc-range"]);
       case "plans":
         return await cmdPlans(config, io);
       case "verify":
@@ -639,17 +664,8 @@ async function cmdForget(config: Config, args: string[], io: CliIO) {
 
 // ---- scan / status ----
 
-async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
-  await requireNetworkConfirmed(config);
-  const wallet = await loadWallet(config.dataDir);
-  if (!wallet.descriptors.length) throw new UsageError("Import a descriptor first");
-  const rpcRange = rpcRangeFlag ? Number(rpcRangeFlag) : undefined;
-  if (
-    rpcRange !== undefined &&
-    (!Number.isSafeInteger(rpcRange) || rpcRange < 1 || rpcRange > 100_000)
-  ) {
-    throw new UsageError("--rpc-range must be between 1 and 100000");
-  }
+/** Identity-checked read backends for all three chains (a chain may be missing if none passed). */
+async function openAllBackends(config: Config, io: CliIO) {
   io.out("Re-checking backend identity before sending anything about your coins…");
   const backends: Partial<Record<ChainId, ChainBackend>> = {};
   for (const chain of CHAIN_IDS) {
@@ -669,6 +685,21 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
       );
     }
   }
+  return backends;
+}
+
+async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
+  await requireNetworkConfirmed(config);
+  const wallet = await loadWallet(config.dataDir);
+  if (!wallet.descriptors.length) throw new UsageError("Import a descriptor first");
+  const rpcRange = rpcRangeFlag ? Number(rpcRangeFlag) : undefined;
+  if (
+    rpcRange !== undefined &&
+    (!Number.isSafeInteger(rpcRange) || rpcRange < 1 || rpcRange > 100_000)
+  ) {
+    throw new UsageError("--rpc-range must be between 1 and 100000");
+  }
+  const backends = await openAllBackends(config, io);
   let result;
   try {
     result = await runScan(config, parsedDescriptors(wallet, networkForProfile(config.profile)), {
@@ -830,6 +861,7 @@ async function cmdPlan(
     batch?: string;
     feeRate?: string;
     coins?: string[];
+    donors?: string[];
     yes: boolean;
   },
 ) {
@@ -859,7 +891,19 @@ async function cmdPlan(
       feeRates: parseFeeRates(opts.feeRate),
       xbtSigner: opts.xbtSigner,
       coins: opts.coins,
-    }, { backends, log: (m) => io.out(m) });
+      donors: opts.donors,
+    }, {
+      backends,
+      log: (m) => io.out(m),
+      donors: opts.donors?.length
+        ? {
+          coins: (await loadDonorScan(config.dataDir))?.coins ?? [],
+          descriptors: (wallet.donors ?? []).map((d) =>
+            parseDescriptor(d.descriptor, networkForProfile(config.profile))
+          ),
+        }
+        : undefined,
+    });
     for (const w of plan.warnings) io.err(`Warning: ${w}`);
     if (!plan.transactions.length) {
       io.out("Nothing to plan: no shared coins left on the selected forks.");
@@ -913,6 +957,112 @@ async function cmdPlan(
     return 0;
   } finally {
     for (const b of Object.values(backends)) await b?.close?.();
+  }
+}
+
+async function cmdDonor(
+  config: Config,
+  io: CliIO,
+  args: string[],
+  label: string | undefined,
+  rpcRangeFlag: string | undefined,
+) {
+  const [action, arg] = args;
+  const network = networkForProfile(config.profile);
+  const wallet = await loadWallet(config.dataDir);
+  const donors = wallet.donors ?? [];
+  const usage = "donor import <descriptor> | list | forget <number> | scan | show";
+  switch (action) {
+    case "import": {
+      await requireNetworkConfirmed(config);
+      if (!arg) throw new UsageError(usage);
+      if (
+        wallet.descriptors.some((d) => d.descriptor === parseDescriptor(arg, network).normalized)
+      ) {
+        throw new UsageError(
+          "That descriptor is already in your main wallet. A donor wallet must hold coins that " +
+            "exist on XBT only: use a separate wallet for donors.",
+        );
+      }
+      const { parsed, added } = await importDonorDescriptor(config.dataDir, arg, label, network);
+      io.out(added ? "Donor wallet imported (watch-only):" : "Already imported as a donor wallet:");
+      io.out(`  ${parsed.normalized}`);
+      io.out("First addresses (fund these on XBT only):");
+      for (const branch of parsed.branches) {
+        io.out(`  branch ${branch.branch}: ${branch.derive(0).address}`);
+      }
+      return 0;
+    }
+    case "list":
+    case undefined: {
+      if (!donors.length) {
+        io.out("No donor wallets imported. `forksplit donor import <descriptor>`");
+      }
+      donors.forEach((d, i) =>
+        io.out(`${i + 1}. ${d.label ? `[${d.label}] ` : ""}${d.descriptor}`)
+      );
+      return 0;
+    }
+    case "forget": {
+      const n = Number(arg);
+      if (!Number.isSafeInteger(n) || n < 1 || n > donors.length) {
+        throw new UsageError("donor forget <number from `donor list`>");
+      }
+      donors.splice(n - 1, 1);
+      wallet.donors = donors;
+      await saveWallet(config.dataDir, wallet);
+      io.out("Removed. Run `donor scan` again: donor numbers in the last scan are now stale.");
+      return 0;
+    }
+    case "scan": {
+      await requireNetworkConfirmed(config);
+      if (!donors.length) throw new UsageError("Import a donor wallet first: donor import");
+      const rpcRange = rpcRangeFlag ? Number(rpcRangeFlag) : undefined;
+      const backends = await openAllBackends(config, io);
+      try {
+        const result = await runScan(
+          config,
+          donors.map((d) => parseDescriptor(d.descriptor, network)),
+          {
+            backends,
+            log: (m) => io.out(m),
+            rpcRange,
+          },
+        );
+        const evaluated = await evaluateDonors(
+          result,
+          backends.xbt,
+          config.chains.xbt.confirmations,
+          await protectedXbtTxids(config.dataDir),
+        );
+        await saveDonorScan(config.dataDir, evaluated);
+      } finally {
+        for (const b of Object.values(backends)) await b?.close?.();
+      }
+      return await cmdDonor(config, io, ["show"], undefined, undefined);
+    }
+    case "show": {
+      const scan = await loadDonorScan(config.dataDir);
+      if (!scan) {
+        io.out("No donor scan yet. Run `forksplit donor scan`.");
+        return 0;
+      }
+      for (const w of scan.warnings) io.err(`Warning: ${w}`);
+      if (!scan.coins.length) {
+        io.out("No donor coins found.");
+        return 0;
+      }
+      const rows = [["Donor", "Value", "Origin / verdict"]];
+      for (const c of scan.coins) rows.push([donorKey(c), sats(c.value), describeDonor(c)]);
+      io.out(table(rows));
+      const usable = scan.coins.filter((c) => c.eligible).length;
+      io.out(
+        `${usable} usable donor(s). Use them with: plan --donor txid:vout (one per XBT transaction).`,
+      );
+      return 0;
+    }
+    default:
+      throw new UsageError(usage);
   }
 }
 
@@ -1035,6 +1185,35 @@ async function cmdVerify(config: Config, io: CliIO, args: string[], noMempool: b
   return failures ? 1 : 0;
 }
 
+/**
+ * A donor transaction is replay-protected only while its donor is absent from BTC and ECX. Ask both
+ * again right before sending; refuse if either can't be asked or has the donor.
+ */
+async function donorPreflight(
+  config: Config,
+  io: CliIO,
+  donor: { txid: string; vout: number },
+  opened: ChainBackend[],
+) {
+  for (const chain of ["btc", "ecx"] as const) {
+    const { backend, results } = await verifiedBackendsFor(config, chain, io, true);
+    if (!backend) {
+      throw new ExecuteError(
+        `Can't confirm the donor is absent from ${chain.toUpperCase()}: no backend passed ` +
+          `(${results.map((r) => r.detail).join("; ")}). Not broadcasting.`,
+      );
+    }
+    opened.push(backend);
+    const obs = await backend.observeOutput(donor.txid, donor.vout);
+    if (obs.state !== "absent") {
+      throw new ExecuteError(
+        `The donor ${donor.txid}:${donor.vout} is ${obs.state} on ${chain.toUpperCase()}. It is ` +
+          "no longer XBT-only, so this transaction could replay there. Not broadcasting.",
+      );
+    }
+  }
+}
+
 async function cmdBroadcast(
   config: Config,
   io: CliIO,
@@ -1115,6 +1294,7 @@ async function cmdBroadcast(
         if (again.finalHex !== v.finalHex) {
           throw new ExecuteError(`${t.file}: stored transaction changed`);
         }
+        if (t.donor && !t.replaces) await donorPreflight(config, io, t.donor, opened);
         if (t.replaces) {
           // A fee bump: its inputs are legitimately spent by the original while that one sits in
           // the mempool, so judge by the two transactions instead of the inputs.

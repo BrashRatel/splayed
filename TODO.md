@@ -110,7 +110,13 @@ dl.deno.land, so **nothing has run against real servers, real signers or a real 
 ## 4. Features
 
 - [ ] **Advanced donor-input routes** (spec §4, opt-in):
-  - [ ] Forks-first with an XBT donor, so stock hardware wallets can do the XBT step.
+  - [x] Forks-first with an XBT donor, so stock hardware wallets can do the XBT step. Donor wallet,
+        `donor scan`, `plan --donor`, verify, broadcast preflight, tested against real nodes.
+    - [ ] Donor fan-out: split one big donor into several (needs a multi-output plan transaction).
+    - [ ] Accept a donor whose funding transaction was made elsewhere, by verifying that
+          transaction's 0x21 signatures (today it is refused as "unproven").
+    - [ ] A donor screen in the web UI (the `donor` commands already run there).
+    - [ ] Try it with a real stock hardware wallet signing both the shared and the donor input.
   - [ ] BTC-first with a BTC donor.
   - [ ] A donor pool that tracks where each donor came from (coinbase / protected-spend / derived).
   - [ ] A fan-out transaction to make several donors.

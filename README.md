@@ -35,7 +35,7 @@ For each coin that is still shared:
    hardware wallets can't make these signatures.
 3. **BTC:** once both splits are deeply confirmed, the BTC copy can be spent normally.
 
-Advanced donor-input routes exist in the design and will be opt-in.
+The advanced XBT donor route (below) is opt-in. It lets a stock hardware wallet do the XBT step.
 
 ## Install and run
 
@@ -279,6 +279,40 @@ The final transaction is rebuilt canonically from the verified signatures.
 
 `track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
 BTC copies then show as separated and can be spent normally.
+
+### Advanced: the XBT donor route (stock hardware wallets)
+
+Stock hardware wallets can't make the 0x21 signature XBT needs. The donor route avoids it. A
+**donor** is a coin that exists on XBT only. A transaction that spends your shared coin _and_ a
+donor is invalid on BTC and ECX, which have never seen the donor, so the shared coin can be signed
+with an ordinary `SIGHASH_ALL` signature.
+
+```sh
+deno task cli donor import '<donor wallet descriptor>'   # a separate wallet, funded on XBT only
+deno task cli donor scan                                  # checks every donor on all three chains
+deno task cli plan --donor <txid:vout> --donor <txid:vout> --chains ecx,xbt
+```
+
+Rules the tool enforces:
+
+- A donor must be unspent and deep on XBT, and **absent** on BTC and ECX (an unanswered check is not
+  "absent").
+- Its origin must be provable: an XBT coinbase output (mature, 100 blocks), or the output of an XBT
+  split this tool verified and broadcast. Anything else is refused as `unproven`, because a funding
+  transaction signed without 0x21 could still be sent to BTC by whoever holds it, which would make
+  the donor exist there and the spend replayable.
+- One donor per XBT transaction. `--batch all` uses a single donor for all your coins.
+- Every signature must be plain `SIGHASH_ALL` (or Taproot default). `ANYONECANPAY` and 0x21 are
+  refused, so each signature commits to the donor input. Your signer must sign the donor input too:
+  if its keys are in another wallet, sign with both in turn.
+- `verify` still asks your nodes: the XBT node must accept and BTC and ECX must reject. `broadcast`
+  checks again that the donor is absent from BTC and ECX, and refuses if it can't ask.
+
+The donor's value goes to your XBT destination with the rest. Every donor transaction publicly links
+the donor wallet to the coins it spends on XBT. Not done yet: making several small donors from one
+big one (fan-out), the BTC-first route, and checking a foreign funding transaction instead of
+refusing it. In the regtest playground, `deno task regtest donors '<descriptor>'` mines XBT-only
+donors for a wallet.
 
 ### Reorgs
 

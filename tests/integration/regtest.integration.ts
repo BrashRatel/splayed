@@ -25,7 +25,7 @@ import {
 import { makeCli } from "./cli_harness.ts";
 import { CHAINS, copyBlocks, docker, publishedPort, waitReady } from "./cluster.ts";
 import { RegtestRpcTransport, Rpc } from "./rpc.ts";
-import { rbfScenario, reorgScenario } from "./scenarios.ts";
+import { donorScenario, rbfScenario, reorgScenario } from "./scenarios.ts";
 import { ignoresUnifiedSign, keyMap, stockSign, unifiedSign } from "./signers.ts";
 
 const seed = (words: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(words));
@@ -131,6 +131,10 @@ const MIXED = makeWallet("mixed-batch-all", [
 const RBF_WALLET = makeWallet("rbf", [PART.wpkh(words(60))]);
 const REORG_WALLET = makeWallet("reorg", [PART.wpkh(words(61))]);
 
+// Donor route: shared coins to split, and a separate donor wallet (its keys sign the donor inputs).
+const DONOR_SOURCE = makeWallet("donor-source", [PART.wpkh(words(62))]);
+const DONOR_WALLET = makeWallet("donor-wallet", [PART.wpkh(words(70))]);
+
 const WALLETS: WalletSpec[] = [
   makeWallet("pkh", [PART.pkh()]),
   makeWallet("wpkh", [PART.wpkh()]),
@@ -175,7 +179,7 @@ Deno.test({
       // One funding transaction for every coin: a chain of single sends would trip the node's
       // ancestor limit, and the prefix has to stay below the fork height.
       const outputs: Record<string, number> = {};
-      for (const spec of [...WALLETS, RBF_WALLET, REORG_WALLET]) {
+      for (const spec of [...WALLETS, RBF_WALLET, REORG_WALLET, DONOR_SOURCE]) {
         for (const descriptor of spec.descriptors) {
           const source = parseDescriptor(descriptor);
           for (let i = 0; i < COIN_VALUES.length; i++) {
@@ -187,6 +191,13 @@ Deno.test({
           }
         }
       }
+      // A decoy: a donor-wallet address (index 5) that already holds a SHARED coin.
+      outputs[
+        await regtestAddress(
+          nodes.btc,
+          parseDescriptor(DONOR_WALLET.descriptors[0]).branches[0].derive(5).scriptPubKey,
+        )
+      ] = 0.3;
       await wallet("btc").call("sendmany", "", outputs);
       await nodes.btc.mine(XBT_ACTIVATION_HEIGHT - 1 - 101, await minerAddr("btc"));
       await copyBlocks(nodes.btc, [nodes.xbt, nodes.ecx], 0, XBT_ACTIVATION_HEIGHT - 1);
@@ -418,6 +429,12 @@ Deno.test({
         sanitizeOps: false,
         sanitizeResources: false,
         fn: (t) => reorgScenario(t, harness, REORG_WALLET),
+      });
+      await t.step({
+        name: "advanced XBT donor route: stock signatures, protected by an XBT-only donor",
+        sanitizeOps: false,
+        sanitizeResources: false,
+        fn: (t) => donorScenario(t, harness, DONOR_SOURCE, DONOR_WALLET),
       });
     } finally {
       await docker(project, ["down", "-v", "--remove-orphans"]).catch(() => {});

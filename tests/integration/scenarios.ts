@@ -14,6 +14,8 @@ import {
   signPlan,
 } from "./cli_harness.ts";
 import type { Rpc } from "./rpc.ts";
+import { parseDescriptor } from "../../src/core/descriptors.ts";
+import { stockSign } from "./signers.ts";
 
 export interface ScenarioWallet {
   descriptors: string[];
@@ -235,5 +237,149 @@ export async function reorgScenario(t: Deno.TestContext, h: Harness, w: Scenario
     assert(text().includes("another transaction"), text());
     assert(text().includes("treat the key as compromised"), text());
     assertEquals((await readProgress(dir)).txs[a2.file].broadcast?.status, "conflict");
+  });
+}
+
+/**
+ * Advanced XBT donor route. `source` holds shared coins; `donorWallet` holds XBT-only coinbase
+ * donors (mined here, after the fork) plus one decoy coin from the shared prefix at index 5.
+ * Every XBT split is signed with plain SIGHASH_ALL, as a stock hardware wallet would.
+ */
+export async function donorScenario(
+  t: Deno.TestContext,
+  h: Harness,
+  source: ScenarioWallet,
+  donorWallet: ScenarioWallet,
+) {
+  const cli = await makeCli(h.nodes);
+  const { run, text } = cli;
+  const donorDesc = parseDescriptor(donorWallet.descriptors[0]);
+  const addrOf = async (i: number) =>
+    (await h.nodes.xbt.call<{ address: string }>(
+      "decodescript",
+      donorDesc.branches[0].derive(i).scriptPubKey,
+    )).address;
+  const allKeys = new Map([...source.keys, ...donorWallet.keys]);
+
+  await t.step("mine XBT-only coinbase donors, then let them mature", async () => {
+    for (const i of [0, 1]) await h.nodes.xbt.mine(1, await addrOf(i));
+    await h.nodes.xbt.mine(100, await h.minerAddr("xbt"));
+    assertEquals(await run("init", "--yes"), 0, text());
+    for (const d of source.descriptors) assertEquals(await run("import", d), 0, text());
+    assertEquals(await run("scan", "--rpc-range", "20"), 0, text());
+    assertEquals(await run("dest", "set", "ecx", h.ecxDest), 0, text());
+    assertEquals(await run("dest", "set", "xbt", h.xbtDest), 0, text());
+  });
+
+  await t.step("donor scan: coinbase donors are usable, the shared decoy is refused", async () => {
+    assertEquals(await run("donor", "import", donorWallet.descriptors[0]), 0, text());
+    assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
+    assert(text().includes("2 usable donor(s)"), text());
+    assert(text().includes("exists on BTC"), text());
+    assert(text().includes("coinbase"), text());
+    assertEquals(await run("donor", "show"), 0, text());
+  });
+
+  // The donor outpoints in full, from the saved scan.
+  const scan = JSON.parse(await Deno.readTextFile(join(cli.dir, "donor-scan.json"))) as {
+    coins: { txid: string; vout: number; eligible: boolean; provenance: string }[];
+  };
+  const good = scan.coins.filter((c) => c.eligible).map((c) => `${c.txid}:${c.vout}`);
+  const decoy = scan.coins.find((c) => !c.eligible)!;
+
+  await t.step(
+    "plan: without a signer or donor XBT is refused; a bad donor is refused",
+    async () => {
+      assertEquals(good.length, 2);
+      assertEquals(await run("plan", "--chains", "xbt", "--fee-rate", "xbt=2", "--yes"), 1, text());
+      assert(text().includes("--donor"), text());
+      assertEquals(
+        await run("plan", "--chains", "xbt", "--donor", `${decoy.txid}:${decoy.vout}`, "--yes"),
+        1,
+        text(),
+      );
+      assert(text().includes("can't be used"), text());
+      // Two shared coins, one transaction each, but only one donor.
+      assertEquals(
+        await run("plan", "--chains", "xbt", "--donor", good[0], "--fee-rate", "xbt=2", "--yes"),
+        1,
+        text(),
+      );
+      assert(text().includes("needs 2 transaction(s)"), text());
+      await Deno.stat(join(cli.dir, "plans")).then(
+        async () => assertEquals((await planIds(cli.dir)).length, 0),
+        () => {}, // no plan was ever written, so there is no plans directory either
+      );
+    },
+  );
+
+  let planId = "";
+  await t.step("plan: each XBT split spends one donor next to a shared coin", async () => {
+    assertEquals(
+      await run(
+        "plan",
+        "--donor",
+        good[0],
+        "--donor",
+        good[1],
+        "--fee-rate",
+        "ecx=2,xbt=2",
+        "--yes",
+      ),
+      0,
+      text(),
+    );
+    [planId] = await planIds(cli.dir);
+    const { plan } = await readPlan(cli.dir, planId);
+    const xbt = plan.transactions.filter((x) => x.chain === "xbt");
+    assertEquals(xbt.length, 2);
+    for (const x of xbt) {
+      assertEquals(x.inputs.length, 2);
+      assert(x.donor && good.includes(`${x.donor.txid}:${x.donor.vout}`));
+      assertEquals(x.sighashType, undefined); // no 0x21: the donor is the protection
+    }
+    assertEquals(plan.route, "forks-first-donor");
+  });
+
+  await t.step("verify refuses a split whose donor input is not signed", async () => {
+    const { dir, plan } = await readPlan(cli.dir, planId);
+    const signWith = async (keys: Map<string, Uint8Array>) => {
+      for (const x of plan.transactions.filter((x) => x.chain === "xbt")) {
+        const signed = stockSign(await Deno.readTextFile(join(dir, x.file)), keys);
+        await Deno.writeTextFile(join(dir, x.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+      }
+    };
+    await signWith(source.keys); // the shared coin only: nobody signed the donor input
+    assertEquals(await run("verify", planId), 1, text());
+    assert(text().includes("required signature"), text());
+  });
+
+  await t.step("verify accepts stock SIGHASH_ALL signatures; BTC and ECX reject them", async () => {
+    const { dir, plan } = await readPlan(cli.dir, planId);
+    for (const x of plan.transactions) {
+      const signed = stockSign(await Deno.readTextFile(join(dir, x.file)), allKeys);
+      await Deno.writeTextFile(join(dir, x.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+    }
+    assertEquals(await run("verify", planId), 0, text());
+    assert(text().includes("plain SIGHASH_ALL"), text());
+    assert(text().includes("BTC node: rejected (good)"), text());
+    assert(text().includes("ECX node: rejected (good)"), text());
+  });
+
+  await t.step("broadcast, confirm, track; the donors are spent on XBT", async () => {
+    assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
+    for (const c of ["xbt", "ecx"] as const) await h.nodes[c].mine(2, await h.minerAddr(c));
+    assertEquals(await run("track", planId), 0, text());
+    const progress = await readProgress((await readPlan(cli.dir, planId)).dir);
+    const { plan } = await readPlan(cli.dir, planId);
+    for (const x of plan.transactions.filter((x) => x.chain === "xbt")) {
+      const hex = progress.txs[x.file].verified!.finalHex;
+      for (const other of ["btc", "ecx"] as const) {
+        const [r] = await h.nodes[other].call<{ allowed: boolean }[]>("testmempoolaccept", [hex]);
+        assertEquals(r.allowed, false, `XBT donor split accepted by ${other}`);
+      }
+    }
+    assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
+    assert(text().includes("0 usable donor(s)"), text());
   });
 }

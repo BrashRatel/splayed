@@ -7,6 +7,15 @@ All notable changes to forksplit. There is no tagged release yet (`0.1.0-dev`); 
 
 ### Added
 
+- **Advanced XBT donor route.** `donor import|list|forget|scan|show` manage a donor wallet, and
+  `plan --donor txid:vout` builds XBT splits that spend one XBT-only donor next to the shared coins,
+  so they can be signed with plain `SIGHASH_ALL` by a stock hardware wallet. A donor must be absent
+  from BTC and ECX and come from an XBT coinbase or a split this tool verified; anything else is
+  refused. `verify` requires plain signatures that commit to the donor, and `broadcast` re-checks
+  the donor against BTC and ECX first. Tested against real nodes, including a mutation check that
+  the "absent elsewhere" test is what keeps a shared coin from being used as a donor.
+  `deno task regtest donors` creates XBT-only donors in the playground.
+
 - **Regtest playground UI: mining buttons.** The plans page shows the three chains' heights and
   "Mine 1 / Mine 6" per chain or for all, then tracks the newest broadcast plan. The endpoints exist
   only when the playground starts the UI; the real `forksplit ui` does not have them.

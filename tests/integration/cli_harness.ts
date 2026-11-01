@@ -76,7 +76,7 @@ export async function readProgress(planDir: string) {
     txs: Record<
       string,
       {
-        verified?: { txid: string };
+        verified?: { txid: string; finalHex: string };
         broadcast?: { status: string };
         replacedBy?: { plan: string };
         reorgs?: { kind: string }[];

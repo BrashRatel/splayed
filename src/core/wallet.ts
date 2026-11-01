@@ -25,6 +25,8 @@ export interface Destination {
 export interface WatchOnlyWallet {
   version: 1;
   descriptors: StoredDescriptor[];
+  /** Donor wallet (advanced XBT donor route): descriptors whose coins exist only on XBT. */
+  donors?: StoredDescriptor[];
   /** Where split outputs go on each fork (ideally a new seed per fork). */
   destinations?: Partial<Record<"xbt" | "ecx", Destination>>;
 }
@@ -65,6 +67,24 @@ export async function importDescriptor(
     label,
     addedAt: new Date().toISOString(),
   });
+  await saveWallet(dataDir, wallet);
+  return { parsed, added: true };
+}
+
+export async function importDonorDescriptor(
+  dataDir: string,
+  input: string,
+  label?: string,
+  network: AddressNetwork = MAIN_NETWORK,
+): Promise<{ parsed: ParsedDescriptor; added: boolean }> {
+  const parsed = parseDescriptor(input, network);
+  const wallet = await loadWallet(dataDir);
+  const donors = wallet.donors ?? [];
+  if (donors.some((d) => parseDescriptor(d.descriptor, network).normalized === parsed.normalized)) {
+    return { parsed, added: false };
+  }
+  donors.push({ descriptor: parsed.normalized, label, addedAt: new Date().toISOString() });
+  wallet.donors = donors;
   await saveWallet(dataDir, wallet);
   return { parsed, added: true };
 }

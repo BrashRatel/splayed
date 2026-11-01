@@ -146,15 +146,30 @@ export function verifySigned(
     }
     checks.push("ECX replay marker: nLockTime 499999998 with non-final sequences");
   }
+  if (planTx.donor) {
+    const d = planTx.donor;
+    if (planTx.chain !== "xbt") throw new SigCheckError("Only XBT transactions use a donor");
+    if (!own.tx.inputs.some((i) => i.txid === d.txid && i.vout === d.vout)) {
+      throw new SigCheckError(
+        `The donor input ${d.txid}:${d.vout} is missing from the transaction`,
+      );
+    }
+    checks.push(
+      `donor input ${d.txid.slice(0, 8)}:${d.vout} (${d.provenance}) is part of the transaction`,
+    );
+  }
+  const unifiedMode = planTx.chain === "xbt" && !planTx.donor;
   const ctxs = inputContexts(own, planTx.inputs.map((i) => i.kind));
   const verdicts = verifyInputs(
     own.tx,
     ctxs,
     extractSignatures(ctxs, signed),
-    planTx.chain === "xbt" ? "unified" : "standard",
+    unifiedMode ? "unified" : "standard",
   );
   checks.push(
-    planTx.chain === "xbt"
+    planTx.donor
+      ? "every signature is plain SIGHASH_ALL and verifies; each commits to the XBT-only donor input"
+      : planTx.chain === "xbt"
       ? "every XBT signature is SIGHASH_ALL|UNIFIED (0x21) and verifies under the unified digest"
       : "every signature is SIGHASH_ALL/DEFAULT and verifies",
   );

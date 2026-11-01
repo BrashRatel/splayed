@@ -190,6 +190,34 @@ async function fund(positional: string[], flags: Record<string, string>) {
   );
 }
 
+/** Donors for the advanced XBT route: XBT coinbase outputs, which exist on XBT only. */
+async function donors(positional: string[], flags: Record<string, string>) {
+  const s = await requireState();
+  if (s.phase !== "forked") {
+    throw new UserError("Run `fork` first: donors are coins that exist on XBT only.");
+  }
+  const target = positional[0];
+  if (!target) throw new UserError("donors <descriptor|address> [--coins N]");
+  const nodes = nodesFor(s);
+  const addresses: string[] = [];
+  if (target.includes("(")) {
+    const parsed = parseDescriptor(target, REGTEST_NETWORK);
+    const count = Number(flags.coins ?? 2);
+    for (let i = 0; i < count; i++) addresses.push(parsed.branches[0].derive(i).address);
+  } else {
+    addresses.push(target);
+  }
+  for (const a of addresses) await nodes.xbt.mine(1, a);
+  // A coinbase output can't be spent for 100 blocks.
+  await nodes.xbt.mine(100, await minerAddress(nodes.xbt));
+  console.log(`Mined one XBT block to each of ${addresses.length} address(es), then 100 more:`);
+  for (const a of addresses) console.log(`  ${a}   (50 BTC coinbase, XBT only)`);
+  console.log(
+    "\nThese coins do not exist on BTC or ECX. In forksplit: `donor import <descriptor>`, " +
+      "`donor scan`, then `plan --donor txid:vout` (one donor per XBT transaction).",
+  );
+}
+
 async function fork() {
   const s = await requireState();
   if (s.phase === "forked") throw new UserError("Already forked.");
@@ -433,6 +461,7 @@ const HELP = `deno task regtest <command>
   up [--bind ADDR (default 0.0.0.0: reachable from the LAN)] [--btc-port N --xbt-port N --ecx-port N]
   fund <descriptor|address> [--coins N] [--btc AMOUNT]   (before fork)
   fork
+  donors <descriptor|address> [--coins N]   (after fork: XBT-only donor coins for the donor route)
   ui [--port N] [--bind 127.0.0.1 to keep it local]
   mine <btc|xbt|ecx|all> [n]
   check <plan-id>
@@ -456,6 +485,9 @@ if (import.meta.main) {
         break;
       case "ui":
         await ui(flags);
+        break;
+      case "donors":
+        await donors(positional, flags);
         break;
       case "mine":
         await mine(positional);
