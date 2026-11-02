@@ -11,8 +11,16 @@
  */
 import { join } from "node:path";
 import type { Config } from "./config.ts";
-import { loadProgress, type Progress } from "./execute.ts";
-import { type Plan, PLANS_DIR } from "./planner.ts";
+import type { ChainBackend } from "../backends/types.ts";
+import {
+  confirmationDepth,
+  type DepthResult,
+  loadProgress,
+  type Progress,
+  type ReplacementLink,
+  type TxProgress,
+} from "./execute.ts";
+import { type Plan, type PlannedTx, PLANS_DIR } from "./planner.ts";
 import type { ChainId } from "./profiles.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
 
@@ -69,11 +77,9 @@ export async function unsettledTransactions(
   for (const t of plan.transactions) {
     const p = progress.txs[t.file];
     if (!p?.broadcast) continue;
-    // Refused by every backend and never seen since: nothing is out there to follow up.
-    if (p.broadcast.status === "rejected" && !p.confirmations) continue;
     const required = config.chains[t.chain as ChainId].confirmations;
+    if (!isUnsettled(p, required)) continue;
     const depth = p.confirmations?.depth ?? 0;
-    if (depth >= required) continue;
     out.push(
       `${t.chain.toUpperCase()} ${t.file}: ${p.broadcast.status}` +
         (p.replacedBy ? ` (replaced by plan ${p.replacedBy.plan})` : "") +
@@ -81,6 +87,22 @@ export async function unsettledTransactions(
     );
   }
   return out;
+}
+
+/**
+ * Whether a sent transaction still needs following. Settled: confirmed `required` deep with
+ * nothing since (a record from an older version with a stale depth doesn't count while its
+ * status says the send is unclear or in conflict, or `track` saw it leave its block); refused by
+ * every backend and never seen; or superseded by another plan whose transaction is deep.
+ */
+export function isUnsettled(p: TxProgress, required: number): boolean {
+  const b = p.broadcast;
+  if (!b) return false;
+  if (b.status === "rejected" && !p.confirmations) return false;
+  if (b.status === "superseded") return (p.supersededBy?.depth ?? 0) < required;
+  if (b.status === "unknown" || b.status === "sending" || b.status === "conflict") return true;
+  if (p.confirmations?.state) return true;
+  return (p.confirmations?.depth ?? 0) < required;
 }
 
 /** One plan (not archived) that spends a coin. */
@@ -114,8 +136,11 @@ export async function plannedOutpoints(dataDir: string): Promise<Map<string, Pla
     const spends = new Map<string, boolean>();
     for (const t of plan.transactions) {
       const p = progress.txs[t.file];
+      // A transaction superseded by another plan's spend of the coin isn't out there either; the
+      // other plan is listed for the coin itself.
       const sent = !!p?.broadcast &&
-        (!["rejected", "conflict"].includes(p.broadcast.status) || !!p.confirmations);
+        (!["rejected", "conflict", "superseded"].includes(p.broadcast.status) ||
+          !!p.confirmations);
       for (const i of t.inputs ?? []) {
         const key = `${i.txid}:${i.vout}`;
         spends.set(key, (spends.get(key) ?? false) || sent);
@@ -161,7 +186,174 @@ export async function deletePlan(config: Config, id: string): Promise<void> {
         "\nIt can't be deleted until they are. You can archive it instead.",
     );
   }
+  const referrers = await replacedByReferences(config.dataDir, id);
+  if (referrers.length) {
+    throw new PlanAdminError(
+      `Plan ${id} is a fee bump that ${referrers.join(", ")} points to as its replacement; ` +
+        "`track` and `broadcast` follow it there. Archive that plan first if you're done with " +
+        "it, or archive this one instead.",
+    );
+  }
   await Deno.remove(dir, { recursive: true });
+}
+
+async function planIds(dataDir: string): Promise<string[]> {
+  const ids: string[] = [];
+  try {
+    for await (const e of Deno.readDir(join(dataDir, PLANS_DIR))) {
+      if (e.isDirectory) ids.push(e.name);
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  return ids.sort();
+}
+
+/**
+ * Transactions of plans that aren't archived whose `replacedBy` names plan `id`, as
+ * "plan P (file)".
+ */
+export async function replacedByReferences(dataDir: string, id: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const other of await planIds(dataDir)) {
+    if (other === id) continue;
+    const dir = join(dataDir, PLANS_DIR, other);
+    if (await archivedAt(dir)) continue;
+    const progress = await loadProgress(dir).catch(() => undefined);
+    for (const [file, p] of Object.entries(progress?.txs ?? {})) {
+      if (p.replacedBy?.plan === id) out.push(`plan ${other} (${file})`);
+    }
+  }
+  return out;
+}
+
+/** A transaction of one of this tool's plans that was verified, archived plans included. */
+export interface OwnTx {
+  plan: string;
+  file: string;
+  chain: string;
+  txid: string;
+  /** Set on a fee bump: what it replaces (with the original's txid). */
+  replaces?: { plan: string; file: string; txid: string };
+  input?: { txid: string; vout: number };
+}
+
+/** Every verified transaction of every plan (archived ones included), by txid. */
+export async function ownTransactions(dataDir: string): Promise<Map<string, OwnTx>> {
+  const out = new Map<string, OwnTx>();
+  for (const id of await planIds(dataDir)) {
+    const dir = join(dataDir, PLANS_DIR, id);
+    const plan = await readJson<Plan>(join(dir, "plan.json")).catch(() => undefined);
+    if (!plan?.transactions) continue;
+    const progress = await loadProgress(dir).catch(() => undefined);
+    for (const t of plan.transactions) {
+      const txid = progress?.txs[t.file]?.verified?.txid;
+      if (!txid) continue;
+      out.set(txid, {
+        plan: plan.id ?? id,
+        file: t.file,
+        chain: t.chain,
+        txid,
+        replaces: t.replaces,
+        input: t.inputs?.[0] && { txid: t.inputs[0].txid, vout: t.inputs[0].vout },
+      });
+    }
+  }
+  return out;
+}
+
+/** Who spent a split's input instead of it, as far as this tool's own plans can tell. */
+export type Spender =
+  /** A fee bump of the split (perhaps a bump of a bump): `link` is the split's direct one. */
+  | { kind: "replacement"; link: ReplacementLink; spender: OwnTx }
+  /** Another plan's transaction spent the coin first. */
+  | { kind: "own"; spender: OwnTx }
+  | { kind: "unknown" };
+
+/** The longest chain of fee bumps followed (a bump of a bump of …). */
+export const MAX_BUMP_HOPS = 16;
+
+/**
+ * Looks the spender `by` of a split's input up among every plan's verified transactions. A spend
+ * whose `replaces` chain leads back to the split is its own fee bump; any other is another plan's.
+ */
+export async function classifySpender(
+  dataDir: string,
+  split: { plan: string; file: string; chain: string },
+  by: string | undefined,
+  index?: Map<string, OwnTx>,
+): Promise<Spender> {
+  if (!by) return { kind: "unknown" };
+  const all = index ?? await ownTransactions(dataDir);
+  const own = all.get(by);
+  if (!own || own.chain !== split.chain) return { kind: "unknown" };
+  let cur: OwnTx | undefined = own;
+  for (let hop = 0; cur?.replaces && hop < MAX_BUMP_HOPS; hop++) {
+    if (cur.replaces.plan === split.plan && cur.replaces.file === split.file) {
+      return {
+        kind: "replacement",
+        link: { plan: cur.plan, file: cur.file, txid: cur.txid, input: cur.input },
+        spender: own,
+      };
+    }
+    cur = all.get(cur.replaces.txid);
+  }
+  if (own.plan === split.plan && own.file === split.file) return { kind: "unknown" };
+  return { kind: "own", spender: own };
+}
+
+export interface FollowedReplacement {
+  /** The last replacement reached: the one whose state is reported. */
+  link: ReplacementLink;
+  /** The bump plans followed, in order. */
+  plans: string[];
+  /** Where that replacement is; undefined when it can't be read or the chain is too long. */
+  depth?: DepthResult;
+  /** Its progress record, when its plan can be read. */
+  progress?: TxProgress;
+}
+
+/**
+ * Follows a replaced transaction to the replacement that is on the network: through each bump's
+ * own `replacedBy`, or, when a bump's send result was lost, through whichever of this tool's
+ * bumps spent its input. Asks the chain by txid, so a replacement whose plan is gone can still
+ * be followed when its link carries the txid.
+ */
+export async function followReplacement(
+  dataDir: string,
+  start: ReplacementLink,
+  chain: string,
+  backend: ChainBackend,
+  tip: number,
+): Promise<FollowedReplacement> {
+  let link = start;
+  const plans: string[] = [];
+  let index: Map<string, OwnTx> | undefined;
+  for (let hop = 0; hop < MAX_BUMP_HOPS; hop++) {
+    plans.push(link.plan);
+    const loaded = await planFolder(dataDir, link.plan).catch(() => undefined);
+    const rt = loaded?.plan.transactions.find((x) => x.file === link.file);
+    const progress = loaded
+      ? (await loadProgress(loaded.dir).catch(() => undefined))?.txs[link.file]
+      : undefined;
+    const txid = link.txid ?? progress?.verified?.txid;
+    const probe = rt ??
+      (link.input ? ({ inputs: [link.input] } as unknown as PlannedTx) : undefined);
+    if (!txid || !probe) return { link, plans, progress };
+    const depth = await confirmationDepth(backend, probe, txid, tip);
+    if (depth.state === "confirmed" || depth.state === "mempool") {
+      return { link, plans, depth, progress };
+    }
+    let next = progress?.replacedBy;
+    if (!next && depth.state === "conflict" && depth.by) {
+      index ??= await ownTransactions(dataDir);
+      const s = await classifySpender(dataDir, { ...link, chain }, depth.by, index);
+      if (s.kind === "replacement") next = s.link;
+    }
+    if (!next) return { link, plans, depth, progress };
+    link = next;
+  }
+  return { link, plans };
 }
 
 /** A fee bump written for a transaction and not sent (or not known to be sent) yet. */

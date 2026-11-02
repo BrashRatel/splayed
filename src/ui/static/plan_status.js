@@ -12,8 +12,13 @@ export function utc(iso) {
  */
 export function bumpable(pr) {
   if (!pr.broadcast || pr.broadcast.status === "replaced" || pr.replacedBy) return false;
+  if (pr.broadcast.status === "superseded" || pr.supersededBy) return false;
   if (pr.broadcast.status === "conflict" || pr.confirmations?.state === "conflict") return false;
   if (pr.pendingBump) return false;
+  // Out of its block (track said so), or a send whose result is unclear: not settled in a block,
+  // whatever depth an older record still carries.
+  if (pr.confirmations?.state) return true;
+  if (pr.broadcast.status === "unknown" || pr.broadcast.status === "sending") return true;
   return !(pr.confirmations && pr.confirmations.depth > 0);
 }
 

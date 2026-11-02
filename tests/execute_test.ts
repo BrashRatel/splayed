@@ -20,7 +20,8 @@ import {
 import { parseTx, type Tx } from "../src/core/tx.ts";
 import { unifiedSignatureHash } from "../src/core/unified_sighash.ts";
 import type { HttpResponse, RequestSpec, Route, Transport } from "../src/net/transport.ts";
-import { type FakeChain, fakeChain, FakeEsploraTransport, fund } from "./fakes.ts";
+import { type FakeChain, fakeChain, FakeEsploraTransport, fund, spendReal } from "./fakes.ts";
+import { protectedTxids } from "../src/core/donors.ts";
 
 const seed = (w: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(w));
 const SOURCE = seed(
@@ -417,11 +418,13 @@ Deno.test("track after a reorg: depth goes to 0, broadcast sends the dropped spl
   assertEquals(ecx.broadcasts!.length, before + 1);
   assertEquals(ecx.broadcasts!.at(-1)!.txid, id1);
 
-  // Confirmed again but shallow: reorgs stay open; deep again: resolved, and track is quiet.
+  // Confirmed again but shallow: the alert stays open, and track says so (exit 1, like every
+  // other open alert); deep again: resolved, and track is quiet.
   mine(ecx);
-  s.out.length = 0;
-  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
-  assert(s.out.join("\n").includes("confirmed again after a reorg"));
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 1);
+  assert(s.err.join("\n").includes("REORG of "), s.err.join("\n"));
+  assert(s.err.join("\n").includes("is still open (now: 1 of 50)"), s.err.join("\n"));
   assert((await progressOf(s.planDir)).txs[t1.file].reorgs!.every((r) => !r.resolved));
   ecx.tip += 59;
   assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
@@ -483,14 +486,19 @@ Deno.test("TEST FIRST replaced by a fee bump: the rest goes once the replacement
   assertEquals((await progressOf(s.planDir)).txs[rest.file].broadcast!.status, "accepted");
 });
 
-Deno.test("bump --yes writes a second replacement anyway, with a warning", async () => {
+Deno.test("bump --another writes a second replacement anyway, with a warning; --yes alone doesn't", async () => {
   const s = await setup();
   await signAll(s.planDir, s.plan);
   assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
   assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
   const args = ["bump", s.id, "--chains", "ecx", "--tx", "1", "--fee-rate", "ecx=9"];
   assertEquals(await s.run(...args), 0);
-  assertEquals(await s.run(...args, "--yes"), 0, s.err.join("\n"));
+  // --yes only answers the prompt; it no longer overrides the one-unsent-bump rule.
+  s.out.length = 0;
+  assertEquals(await s.run(...args, "--yes"), 1);
+  assert(s.out.join("\n").includes("--another writes another one anyway"), s.out.join("\n"));
+  assertEquals(await Deno.stat(join(s.dir, "plans", `${s.id}-bump2`)).catch(() => null), null);
+  assertEquals(await s.run(...args, "--another", "--yes"), 0, s.err.join("\n"));
   assert(s.err.join("\n").includes("Only one replacement can ever confirm"));
   assert(await Deno.stat(join(s.dir, "plans", `${s.id}-bump2`)));
 });
@@ -691,7 +699,8 @@ Deno.test("dropped from the mempool: a fee-bumped original vanishing is expected
   assert(s.err.join("\n").includes("DROPPED: This split was in the mempool"), s.err.join("\n"));
   s.err.length = 0;
   assertEquals(await s.run("track", s.id), 1);
-  assert(s.err.join("\n").includes("no longer on the network either"), s.err.join("\n"));
+  assert(s.err.join("\n").includes("is no longer in the mempool or on the chain either"));
+  assert(s.err.join("\n").includes(`\`splayed broadcast ${bumpId}\``), s.err.join("\n"));
   // Neither plan can be deleted.
   assertEquals(await s.run("plans", "delete", bumpId, "--yes"), 1);
   assertEquals(await s.run("plans", "delete", s.id, "--yes"), 1);
@@ -699,4 +708,225 @@ Deno.test("dropped from the mempool: a fee-bumped original vanishing is expected
   const n = ecx.broadcasts!.length;
   assertEquals(await s.run("broadcast", bumpId, "--yes"), 0, s.err.join("\n"));
   assertEquals(ecx.broadcasts!.length, n + 1);
+});
+
+// ---- this tool's own spends are recognised before anything is called a conflict ----
+
+/** Bumps ECX #1 of `planId`, signs, verifies and sends it (evicting `evict`, as RBF would). */
+async function bumpAndSend(
+  s: Awaited<ReturnType<typeof setup>>,
+  planId: string,
+  rate: number,
+  evict: string,
+) {
+  assertEquals(
+    await s.run(
+      "bump",
+      planId,
+      "--chains",
+      "ecx",
+      "--tx",
+      "1",
+      "--fee-rate",
+      `ecx=${rate}`,
+      "--yes",
+    ),
+    0,
+    s.out.join("\n") + s.err.join("\n"),
+  );
+  const bumpId = `${planId}-bump1`;
+  const bumpDir = join(s.dir, "plans", bumpId);
+  await signAll(bumpDir, JSON.parse(await Deno.readTextFile(join(bumpDir, "plan.json"))));
+  assertEquals(await s.run("verify", bumpId), 0, s.err.join("\n"));
+  drop(s.chains.ecx, evict);
+  assertEquals(await s.run("broadcast", bumpId, "--yes"), 0, s.err.join("\n"));
+  return { bumpId, bumpDir, txid: s.chains.ecx.broadcasts!.at(-1)!.txid };
+}
+
+async function sentTestFirst() {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const test = s.plan.transactions.find((t: Tx1) => t.chain === "ecx" && t.testFirst);
+  return { s, test, old: s.chains.ecx.broadcasts![0].txid };
+}
+
+Deno.test("own spends: a bump of a bump is followed by track, with no false alarm, and can't be deleted from under it", async () => {
+  const { s, test, old } = await sentTestFirst();
+  const b = await bumpAndSend(s, s.id, 9, old);
+  const c = await bumpAndSend(s, b.bumpId, 15, b.txid);
+  mine(s.chains.ecx);
+  mine(s.chains.xbt);
+  s.out.length = 0;
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  const text = s.out.join("\n");
+  assert(text.includes(`REPLACED by plan ${c.bumpId} (via ${b.bumpId}) (confirmed, 1 deep)`), text);
+  assertEquals((await progressOf(s.planDir)).txs[test.file].reorgs, undefined);
+  assertEquals(await s.run("track", b.bumpId), 0, s.err.join("\n"));
+  // The last bump, deep: it is still the link the others follow, so it can't be deleted.
+  s.chains.ecx.tip += 60;
+  s.chains.xbt.tip += 60;
+  assertEquals(await s.run("track", c.bumpId), 0, s.err.join("\n"));
+  s.err.length = 0;
+  assertEquals(await s.run("plans", "delete", c.bumpId, "--yes"), 1);
+  assert(
+    s.err.join("\n").includes(`plan ${b.bumpId} (ecx/`) &&
+      s.err.join("\n").includes("points to as its replacement"),
+    s.err.join("\n"),
+  );
+});
+
+/** A fee bump that got out, but whose reply was lost: its plan says unknown, the original knows nothing. */
+async function lostReply() {
+  const { s, test, old } = await sentTestFirst();
+  const b = await bumpAndSend(s, s.id, 9, old);
+  const pb = JSON.parse(await Deno.readTextFile(join(b.bumpDir, "progress.json")));
+  for (const k in pb.txs) if (pb.txs[k].broadcast) pb.txs[k].broadcast.status = "unknown";
+  await Deno.writeTextFile(join(b.bumpDir, "progress.json"), JSON.stringify(pb));
+  const po = JSON.parse(await Deno.readTextFile(join(s.planDir, "progress.json")));
+  delete po.txs[test.file].replacedBy;
+  po.txs[test.file].broadcast.status = "accepted";
+  await Deno.writeTextFile(join(s.planDir, "progress.json"), JSON.stringify(po));
+  mine(s.chains.ecx);
+  mine(s.chains.xbt);
+  return { s, test, b };
+}
+
+Deno.test("own spends: a fee bump whose send reply was lost is recognised, however it is found", async () => {
+  for (const first of ["track the original", "broadcast the bump", "track the bump"]) {
+    const { s, test, b } = await lostReply();
+    if (first === "broadcast the bump") {
+      const n = s.chains.ecx.broadcasts!.length;
+      assertEquals(await s.run("broadcast", b.bumpId, "--yes"), 0, s.err.join("\n"));
+      assertEquals(s.chains.ecx.broadcasts!.length, n, "already on chain: not sent again");
+    } else if (first === "track the bump") {
+      assertEquals(await s.run("track", b.bumpId), 0, s.err.join("\n"));
+    }
+    s.out.length = 0;
+    s.err.length = 0;
+    assertEquals(await s.run("track", s.id), 0, `${first}: ${s.err.join("\n")}`);
+    assert(!s.err.join("\n").includes("CONFLICT"), first);
+    assert(s.out.join("\n").includes(`REPLACED by plan ${b.bumpId}`), first);
+    const p = (await progressOf(s.planDir)).txs[test.file] as Prog["txs"][string] & {
+      replacedBy?: { plan: string; txid?: string };
+    };
+    assertEquals(p.broadcast!.status, "replaced", first);
+    assertEquals(p.replacedBy!.plan, b.bumpId, first);
+    assertEquals(p.replacedBy!.txid, b.txid, first);
+    assertEquals(p.reorgs, undefined, first);
+  }
+});
+
+Deno.test("own spends: a deep fee bump plan is kept while the original follows it; archived, it can go and is followed by txid", async () => {
+  const { s, old } = await sentTestFirst();
+  const b = await bumpAndSend(s, s.id, 9, old);
+  mine(s.chains.ecx);
+  mine(s.chains.xbt);
+  s.chains.ecx.tip += 100;
+  s.chains.xbt.tip += 100;
+  assertEquals(await s.run("track", b.bumpId), 0, s.err.join("\n"));
+  assertEquals(await s.run("plans", "delete", b.bumpId, "--yes"), 1); // used to be deleted
+  assertEquals(await s.run("plans", "archive", s.id), 0);
+  assertEquals(await s.run("plans", "delete", b.bumpId, "--yes"), 0, s.err.join("\n"));
+  assertEquals(await s.run("plans", "unarchive", s.id), 0);
+  s.out.length = 0;
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assert(s.out.join("\n").includes(`REPLACED by plan ${b.bumpId} (confirmed, 101 deep)`));
+});
+
+Deno.test("own spends: a coin in two plans: the plan that lost is superseded, not in conflict", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  // The same coins planned again (say, after forgetting the first plan was sent).
+  assertEquals(
+    await s.run("plan", "--xbt-signer", "knots", "--fee-rate", "ecx=2,xbt=3", "--yes"),
+    0,
+    s.err.join("\n"),
+  );
+  const ids: string[] = [];
+  for await (const e of Deno.readDir(join(s.dir, "plans"))) ids.push(e.name);
+  const p2 = ids.sort().find((id) => id !== s.id)!;
+  const p2Dir = join(s.dir, "plans", p2);
+  await signAll(p2Dir, JSON.parse(await Deno.readTextFile(join(p2Dir, "plan.json"))));
+  assertEquals(await s.run("verify", p2), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--all", "--yes"), 0, s.err.join("\n"));
+  // On ECX the first plan's splits fall out and the second plan's get in instead.
+  const first = (await progressOf(s.planDir)).txs;
+  for (const t of s.plan.transactions.filter((t: Tx1) => t.chain === "ecx")) {
+    drop(s.chains.ecx, first[t.file].verified!.txid);
+  }
+  s.err.length = 0;
+  assertEquals(await s.run("broadcast", p2, "--all", "--yes"), 0, s.err.join("\n"));
+  // On XBT the first plan got there first: the second plan's XBT splits are superseded at once.
+  const second = (await progressOf(p2Dir)).txs;
+  const p2Plan = JSON.parse(await Deno.readTextFile(join(p2Dir, "plan.json")));
+  for (const t of p2Plan.transactions.filter((t: Tx1) => t.chain === "xbt")) {
+    assertEquals(second[t.file].broadcast!.status, "superseded", t.file);
+  }
+  assert(!s.err.join("\n").includes("no longer unspent"), s.err.join("\n"));
+  mine(s.chains.ecx);
+  mine(s.chains.xbt);
+  s.out.length = 0;
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assert(!s.err.join("\n").includes("CONFLICT"), s.err.join("\n"));
+  assert(s.out.join("\n").includes(`superseded by plan ${p2}`), s.out.join("\n"));
+  const t1 = ecxTx(s, 1);
+  const p = (await progressOf(s.planDir)).txs[t1.file] as Prog["txs"][string] & {
+    supersededBy?: { plan: string; depth?: number };
+  };
+  assertEquals(p.broadcast!.status, "superseded");
+  assertEquals(p.supersededBy!.plan, p2);
+  assertEquals(p.supersededBy!.depth, 1);
+  // Nothing to bump or send for it.
+  s.out.length = 0;
+  assertEquals(await s.run("bump", s.id, "--chains", "ecx", "--tx", "1", "--fee-rate", "ecx=9"), 1);
+  assert(s.out.join("\n").includes(`plan ${p2} already spent this coin`), s.out.join("\n"));
+  const n = s.chains.ecx.broadcasts!.length;
+  assertEquals(await s.run("broadcast", s.id, "--all", "--yes"), 0, s.err.join("\n"));
+  assertEquals(s.chains.ecx.broadcasts!.length, n);
+});
+
+Deno.test("own spends: a stranger's spend is a CONFLICT that lists the likely causes", async () => {
+  const { s, test, old } = await sentTestFirst();
+  drop(s.chains.ecx, old);
+  const input = s.plan.transactions.find((t: Tx1) => t.file === test.file).inputs[0];
+  const stranger = spendReal(s.chains.ecx, input.txid, input.vout, s.chains.ecx.tip, 7);
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 1);
+  const err = s.err.join("\n");
+  assert(err.includes(`CONFLICT: This split's input was spent by transaction ${stranger}`), err);
+  assert(err.includes("not one of this tool's plans or fee bumps"), err);
+  assert(err.includes("spent with another wallet or tool"), err);
+  assert(err.includes("replayed onto ECX"), err);
+  assert(err.includes("only if neither applies, the key may be compromised"), err);
+  assert(!err.includes("treat the key as compromised"), err);
+});
+
+Deno.test("track: a split marked conflict that is deep in the chain itself is accepted again", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--all", "--yes"), 0, s.err.join("\n"));
+  mine(s.chains.ecx);
+  mine(s.chains.xbt);
+  const t1 = s.plan.transactions.find((t: Tx1) => t.chain === "xbt" && t.order === 1);
+  // An earlier run (or an older version) marked it conflict.
+  const po = JSON.parse(await Deno.readTextFile(join(s.planDir, "progress.json")));
+  po.txs[t1.file].broadcast.status = "conflict";
+  await Deno.writeTextFile(join(s.planDir, "progress.json"), JSON.stringify(po));
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assertEquals((await progressOf(s.planDir)).txs[t1.file].broadcast!.status, "conflict"); // shallow
+  s.chains.ecx.tip += 59;
+  s.chains.xbt.tip += 59;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assertEquals((await progressOf(s.planDir)).txs[t1.file].broadcast!.status, "accepted");
+  // Back to "accepted", it counts again for the donor rules.
+  assert((await protectedTxids(s.dir, "xbt")).has(
+    (await progressOf(s.planDir)).txs[t1.file].verified!.txid,
+  ));
 });

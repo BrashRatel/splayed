@@ -39,8 +39,18 @@ export interface TxProgress {
     mempool?: Record<string, string>;
   };
   broadcast?: {
-    /** "replaced": a fee-bump plan has since been broadcast for this transaction. */
-    status: "sending" | "accepted" | "unknown" | "rejected" | "conflict" | "replaced";
+    /**
+     * "replaced": a fee-bump plan has since been broadcast for this transaction. "superseded":
+     * another of this tool's plans spent the same coin first (see `supersededBy`).
+     */
+    status:
+      | "sending"
+      | "accepted"
+      | "unknown"
+      | "rejected"
+      | "conflict"
+      | "replaced"
+      | "superseded";
     at: string;
     backend: string;
     attempts: number;
@@ -61,7 +71,46 @@ export interface TxProgress {
   /** Everything `track` has had to warn about, oldest first. */
   reorgs?: ReorgRecord[];
   /** Set on the original when a fee-bump plan replaced it. */
-  replacedBy?: { plan: string; file: string };
+  replacedBy?: ReplacementLink;
+  /**
+   * Set when another of this tool's plans (not a fee bump of this one) spent this transaction's
+   * coin first, e.g. a coin that was planned twice. Not an alarm; `depth` is how deep `track`
+   * last saw that transaction (it is settled once that is deep enough).
+   */
+  supersededBy?: { plan: string; file: string; txid: string; depth?: number; at?: string };
+}
+
+/**
+ * A fee bump that replaced a transaction: its plan and file, and (since 0.1.0-pre-alpha.2) its
+ * txid and first input, so it can still be followed on the chain if its plan can't be read.
+ */
+export interface ReplacementLink {
+  plan: string;
+  file: string;
+  txid?: string;
+  input?: { txid: string; vout: number };
+}
+
+/** Records on an original that `link` replaced it. */
+export function applyReplaced(entry: TxProgress, link: ReplacementLink): void {
+  entry.replacedBy = link;
+  delete entry.supersededBy;
+  if (entry.broadcast) {
+    entry.broadcast = { ...entry.broadcast, status: "replaced", detail: `by plan ${link.plan}` };
+  }
+}
+
+/**
+ * Drops open CONFLICT records that blamed `txid`, once it turned out to be one of this tool's
+ * own transactions (a fee bump, or another plan): they were never true.
+ */
+export function retractConflicts(entry: TxProgress, txid: string): boolean {
+  const before = entry.reorgs?.length ?? 0;
+  entry.reorgs = entry.reorgs?.filter((r) =>
+    r.resolved || r.kind !== "conflict" || !r.detail.includes(txid)
+  );
+  if (entry.reorgs && !entry.reorgs.length) delete entry.reorgs;
+  return (entry.reorgs?.length ?? 0) !== before;
 }
 
 /**
@@ -498,10 +547,15 @@ export function assessReorg(
       return {
         kind: "conflict",
         detail:
-          `This split's input was spent by ${
-            now.by ? `transaction ${now.by}` : "another transaction"
-          }, not by this split. If you did not make that spend, treat the key as compromised; if ` +
-          `you spent the BTC copy ordinarily, it was replayed onto ${label}.`,
+          (now.by
+            ? `This split's input was spent by transaction ${now.by}, which is not one of this ` +
+              "tool's plans or fee bumps."
+            : "This split's input was spent by another transaction; this backend can't say which " +
+              "(node RPC without txindex can't name a spender: an Esplora or Electrum backend " +
+              "can).") +
+          ` Likely causes, most likely first: the coin was spent with another wallet or tool (a ` +
+          `${label} wallet, say); an ordinary BTC spend of it was replayed onto ${label}; only if ` +
+          "neither applies, the key may be compromised. This split can't confirm now.",
       };
     case "confirmed":
       // Straight from one block to another. One that left the chain and came back was reported

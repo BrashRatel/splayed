@@ -1794,6 +1794,13 @@ function viewPlans() {
           pr.replacedBy
             ? h("div", { class: "muted" }, `replaced by plan ${pr.replacedBy.plan}`)
             : null,
+          pr.supersededBy
+            ? h(
+              "div",
+              { class: "muted" },
+              `superseded by plan ${pr.supersededBy.plan}: it spent this coin first`,
+            )
+            : null,
           pr.pendingBump
             ? h(
               "div",

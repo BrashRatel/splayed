@@ -392,6 +392,7 @@ async function plansView(dataDir: string) {
             unmined: progress.txs[t.file]?.unmined,
             reorgs: progress.txs[t.file]?.reorgs,
             replacedBy: progress.txs[t.file]?.replacedBy,
+            supersededBy: progress.txs[t.file]?.supersededBy,
             /** The newest fee bump written for it and not sent yet. */
             pendingBump: unsent.get(t.file)?.at(-1),
           },

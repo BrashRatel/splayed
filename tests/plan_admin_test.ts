@@ -2,7 +2,14 @@ import { assert, assertEquals } from "./assert.ts";
 import { join } from "node:path";
 import { type CliIO, main } from "../src/cli/main.ts";
 import { protectedTxids } from "../src/core/donors.ts";
-import { plannedOutpoints, unsentReplacements } from "../src/core/plan_admin.ts";
+import {
+  classifySpender,
+  isUnsettled,
+  ownTransactions,
+  plannedOutpoints,
+  unsentReplacements,
+} from "../src/core/plan_admin.ts";
+import type { TxProgress } from "../src/core/execute.ts";
 
 const ID = "20261101T120000000-abc123";
 
@@ -265,5 +272,152 @@ Deno.test("a split that left its block (depth 0 after track) can't be deleted; i
   assertEquals((await plannedOutpoints(dataDir)).get(`${input.txid}:0`), [{
     plan: ID,
     sent: true,
+  }]);
+});
+
+const B = (status: string) => ({ status, at: "x", backend: "b", attempts: 1 });
+
+Deno.test("isUnsettled: an older record with a stale depth doesn't settle an unclear or conflicting send", () => {
+  const deep = { depth: 60, at: "x" };
+  // Progress files from before 0.1.0-pre-alpha.2 kept the old depth after a reorg.
+  for (const status of ["unknown", "sending", "conflict"]) {
+    assertEquals(
+      isUnsettled({ broadcast: B(status), confirmations: deep } as TxProgress, 50),
+      true,
+      status,
+    );
+  }
+  assertEquals(
+    isUnsettled({
+      broadcast: B("accepted"),
+      confirmations: { depth: 60, at: "x", state: "mempool" },
+    } as TxProgress, 50),
+    true,
+  );
+  assertEquals(
+    isUnsettled({ broadcast: B("accepted"), confirmations: deep } as TxProgress, 50),
+    false,
+  );
+  assertEquals(isUnsettled({ broadcast: B("rejected") } as TxProgress, 50), false);
+  // Dropped from the mempool, never confirmed: still sent, still unsettled.
+  assertEquals(
+    isUnsettled({
+      broadcast: B("accepted"),
+      unmined: { state: "absent", at: "x" },
+    } as TxProgress, 50),
+    true,
+  );
+  // Superseded by another plan: settled once that plan's transaction is deep enough.
+  const sup = (depth?: number) =>
+    ({
+      broadcast: B("superseded"),
+      supersededBy: { plan: "P2", file: "f", txid: "cc".repeat(32), depth },
+    }) as TxProgress;
+  assertEquals(isUnsettled(sup(), 50), true);
+  assertEquals(isUnsettled(sup(3), 50), true);
+  assertEquals(isUnsettled(sup(50), 50), false);
+});
+
+Deno.test("plans delete: a stale depth from an older version doesn't let an unclear send be deleted", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "ecx/001-aaaa.psbt" }], {
+    "ecx/001-aaaa.psbt": { broadcast: B("unknown"), confirmations: { depth: 60, at: "x" } },
+  });
+  const r = io();
+  assertEquals(await main(["--data-dir", dataDir, "plans", "delete", ID, "--yes"], r.cli), 1);
+  assert(r.text().includes("unknown, 60 of 50"), r.text());
+});
+
+Deno.test("plans delete: a fee bump that a plan's replacedBy points to is kept until that plan is archived", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const bumpId = `${ID}-bump1`;
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "ecx/001-aaaa.psbt" }], {
+    "ecx/001-aaaa.psbt": {
+      broadcast: B("replaced"),
+      replacedBy: { plan: bumpId, file: "ecx/001-bbbb.psbt", txid: "bb".repeat(32) },
+    },
+  });
+  const bumpDir = await writePlan(dataDir, bumpId, [{
+    chain: "ecx",
+    file: "ecx/001-bbbb.psbt",
+    replaces: { plan: ID, file: "ecx/001-aaaa.psbt", txid: "aa".repeat(32) },
+  }], {
+    "ecx/001-bbbb.psbt": { broadcast: B("accepted"), confirmations: { depth: 60, at: "x" } },
+  });
+  const r = io();
+  assertEquals(await main(["--data-dir", dataDir, "plans", "delete", bumpId, "--yes"], r.cli), 1);
+  assert(r.text().includes(`plan ${ID} (ecx/001-aaaa.psbt) points to`), r.text());
+  assertEquals(r.questions.length, 0, "refuses before asking");
+  assert(await exists(bumpDir));
+  // Once the original's plan is archived, the bump plan can go.
+  assertEquals(await main(["--data-dir", dataDir, "plans", "archive", ID], io().cli), 0);
+  assertEquals(
+    await main(["--data-dir", dataDir, "plans", "delete", bumpId, "--yes"], io().cli),
+    0,
+  );
+  assertEquals(await exists(bumpDir), false);
+});
+
+Deno.test("classifySpender: own fee bumps (any hop), other plans (archived too), strangers", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const tx = (c: string) => c.repeat(32);
+  const v = (txid: string) => ({ verified: { at: "x", txid, finalHex: "00", checks: [] } });
+  const input = [{ txid: tx("01"), vout: 0 }];
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "a.psbt", inputs: input }], {
+    "a.psbt": v(tx("aa")),
+  });
+  await writePlan(dataDir, `${ID}-bump1`, [{
+    chain: "ecx",
+    file: "b.psbt",
+    inputs: input,
+    replaces: { plan: ID, file: "a.psbt", txid: tx("aa") },
+  }], { "b.psbt": v(tx("bb")) });
+  await writePlan(dataDir, `${ID}-bump1-bump1`, [{
+    chain: "ecx",
+    file: "c.psbt",
+    inputs: input,
+    replaces: { plan: `${ID}-bump1`, file: "b.psbt", txid: tx("bb") },
+  }], { "c.psbt": v(tx("cc")) });
+  const other = "20261101T130000000-def456";
+  await writePlan(dataDir, other, [{ chain: "ecx", file: "d.psbt", inputs: input }], {
+    "d.psbt": v(tx("dd")),
+  });
+  assertEquals(await main(["--data-dir", dataDir, "plans", "archive", other], io().cli), 0);
+  const split = { plan: ID, file: "a.psbt", chain: "ecx" };
+  const index = await ownTransactions(dataDir);
+  // A bump of a bump: the split's own direct replacement is named.
+  const viaC = await classifySpender(dataDir, split, tx("cc"), index);
+  assertEquals(viaC.kind, "replacement");
+  assert(viaC.kind === "replacement");
+  assertEquals(viaC.link, {
+    plan: `${ID}-bump1`,
+    file: "b.psbt",
+    txid: tx("bb"),
+    input: input[0],
+  });
+  assertEquals((await classifySpender(dataDir, split, tx("bb"))).kind, "replacement");
+  const own = await classifySpender(dataDir, split, tx("dd"), index);
+  assertEquals(own.kind === "own" && own.spender.plan, other);
+  assertEquals((await classifySpender(dataDir, split, tx("ee"), index)).kind, "unknown");
+  assertEquals((await classifySpender(dataDir, split, undefined, index)).kind, "unknown");
+  // Another chain's transaction with the same txid can't be this coin's spender.
+  assertEquals(
+    (await classifySpender(dataDir, { ...split, chain: "xbt" }, tx("dd"), index)).kind,
+    "unknown",
+  );
+});
+
+Deno.test("plannedOutpoints: a transaction superseded by another plan isn't counted as sent", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const input = { txid: "ab".repeat(32), vout: 0 };
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "a.psbt", inputs: [input] }], {
+    "a.psbt": {
+      broadcast: B("superseded"),
+      supersededBy: { plan: "P2", file: "f", txid: "cc".repeat(32), depth: 3 },
+    },
+  });
+  assertEquals((await plannedOutpoints(dataDir)).get(`${input.txid}:0`), [{
+    plan: ID,
+    sent: false,
   }]);
 });

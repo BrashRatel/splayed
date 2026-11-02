@@ -118,3 +118,20 @@ Deno.test("Plans tab: a split dropped from the mempool says so, is titled DROPPE
   }]);
   assert(done.text.includes(": confirmed deep enough. Was: Send it again."), done.text);
 });
+
+Deno.test("Plans tab: an older record's stale depth doesn't hide Fee bump for an unclear send; superseded has none", () => {
+  for (const status of ["unknown", "sending"]) {
+    assertEquals(
+      bumpable({ broadcast: { ...sent, status }, confirmations: { depth: 60, at: "x" } }),
+      true,
+      status,
+    );
+  }
+  assertEquals(
+    bumpable({
+      broadcast: { ...sent, status: "superseded" },
+      supersededBy: { plan: "p2", file: "f", txid: "t" },
+    }),
+    false,
+  );
+});

@@ -387,3 +387,14 @@ Deno.test("scan regressions: a spend replaced by a different transaction is flag
   // A backend that stopped reporting the spender is not a replacement.
   assertEquals(scanRegressions(a, scan(coin(spentBy(undefined, undefined, false)))), []);
 });
+
+Deno.test("conflict: no stranger is implied when the backend can't name the spender", () => {
+  const a = assessReorg("ecx", undefined, { state: "conflict" })!;
+  assert(a.detail.includes("this backend can't say which"), a.detail);
+  assert(a.detail.includes("node RPC without txindex"), a.detail);
+  assert(!a.detail.includes("not one of this tool's plans"), a.detail);
+  // Causes in order: another wallet, a replayed BTC spend, and only then a compromised key.
+  const order = ["another wallet or tool", "replayed onto ECX", "the key may be compromised"]
+    .map((x) => a.detail.indexOf(x));
+  assert(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])), a.detail);
+});
