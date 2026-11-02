@@ -25,7 +25,12 @@ appear as dialogs in the browser.
    Multisig), set how many signatures are required and whether keys are sorted (`sortedmulti`, what
    most coordinators use), and compare the first receive address shown with the one in your
    coordinator before using it. Private keys are refused.
-3. **Coins:** scan, plus per-coin status on all three chains.
+3. **Coins:** scan, plus per-coin status on all three chains. When a rescan finds shared coins that
+   weren't in the previous scan (or weren't shared then), a red banner lists them with what to do
+   and whether a plan already spends them, with a **Go to Plans** button; their rows carry a **new**
+   badge. Once any plan exists, a **N new shared coins** pill in the header (and a line in the setup
+   guide) points back to them from every tab. See
+   [Coins that turn up later](guide.md#coins-that-turn-up-later).
 4. **Plans & signing:** create a plan, download the unsigned PSBTs (binary or base64), upload signed
    files, then verify, broadcast and track. Each transaction has **QR** and **Scan signed** buttons
    for [air-gapped signers](signers.md#air-gapped-signers-animated-qr).

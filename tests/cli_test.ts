@@ -264,3 +264,64 @@ Deno.test("adding your own backend removes the profile default; only the first p
     "http://127.0.0.1:3003/api",
   ]);
 });
+
+Deno.test("a rescan warns about shared coins that turned up since the last scan", async () => {
+  const chains = scenario();
+  const dir = await freshDir();
+  await Deno.writeTextFile(`${dir}/splayed.toml`, `[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n`);
+  const h = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "init", "--yes"], h.io), 0);
+  assertEquals(await main(["--data-dir", dir, "import", DESC], h.io), 0);
+  const first = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "scan"], first.io), 0);
+  // The first scan has nothing to compare with: coin 1 is shared but not "new".
+  assert(!first.errors().includes("NEW SHARED"), first.errors());
+  const readScan = async () => JSON.parse(await Deno.readTextFile(`${dir}/scan.json`));
+  assertEquals((await readScan()).newShared, []);
+
+  // A pre-fork coin on a further address turns up on all three chains.
+  const a = addr(5);
+  for (const c of [chains.btc, chains.xbt, chains.ecx]) {
+    addOutput(c, txid(6), 0, 600_000, a.address, a.scriptPubKey, 900_000);
+  }
+  const second = harness(chains);
+  // Not a failure: the exit code stays 0 (only warnings make it 1).
+  assertEquals(await main(["--data-dir", dir, "scan"], second.io), 0);
+  const warning = second.errors();
+  assert(warning.includes("NEW SHARED COINS: 1 coin turned up"), warning);
+  assert(warning.includes(`${txid(6)}:0`), warning); // in full, ready for `plan --coin`
+  assert(warning.includes("unspent on BTC+XBT+ECX"), warning);
+  assert(warning.includes("not in the previous scan"), warning);
+  assert(warning.includes("Don't spend them on BTC"), warning);
+  assert(warning.includes("--coin txid:vout"), warning);
+  // Coin 1 was already shared at the first scan: not listed.
+  assert(!warning.includes(`${txid(1)}:0`), warning);
+  const saved = await readScan();
+  assertEquals(saved.newShared, [{
+    txid: txid(6),
+    vout: 0,
+    value: 600_000,
+    address: a.address,
+    unspentOn: ["btc", "xbt", "ecx"],
+    previously: "absent",
+    firstSeen: saved.scannedAt,
+  }]);
+
+  // Another rescan keeps the warning (same first sighting) until the coin is split...
+  const third = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "scan"], third.io), 0);
+  assert(third.errors().includes("NEW SHARED COINS"));
+  assertEquals((await readScan()).newShared[0].firstSeen, saved.scannedAt);
+  // ...and `status` repeats it without touching the network.
+  const status = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "status"], status.io), 0);
+  assert(status.errors().includes("NEW SHARED COINS"));
+
+  // Split on both forks (deep): it drops off.
+  chains.xbt.spends.set(`${txid(6)}:0`, { txid: txid(106), height: 965_000 });
+  chains.ecx.spends.set(`${txid(6)}:0`, { txid: txid(206), height: 974_000 });
+  const fourth = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "scan"], fourth.io), 0);
+  assert(!fourth.errors().includes("NEW SHARED"));
+  assertEquals((await readScan()).newShared, []);
+});

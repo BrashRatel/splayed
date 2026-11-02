@@ -6,6 +6,18 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Coins that turn up later.** Each `scan` compares itself with the previous one
+  (`newSharedCoins()` in `src/core/scan.ts`) and lists coins that are shared now but weren't in the
+  previous scan, or weren't shared then: a deposit to an old address, a pre-fork coin beyond the
+  earlier gap limit, a split that left the chain. `scan` and `status` print a **NEW SHARED COINS**
+  block (full `txid:vout`, value, chains, first seen, and what to do: don't spend them on BTC until
+  split, plan them, `plan --coin` for only these). They are saved in `scan.json` as `newShared` with
+  their first-seen time and stay listed until the split shows on the chains (a chain that couldn't
+  be asked doesn't clear them). Exit codes are unchanged. The web UI shows them in `/api/status`
+  (with the non-archived plans that already spend each one), as a banner on the Coins tab with a
+  **Go to Plans** button, a **new** badge on their rows, and, once any plan exists, a header pill
+  and a setup-guide line.
+
 - **Setup guide in the web UI.** A checklist above every tab walks through the guided route (confirm
   network, import wallet, set fork destinations, scan, create a plan, sign/verify/ broadcast). Steps
   are ticked off from the real state, not from clicks; the next one is explained with a button to

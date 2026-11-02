@@ -238,6 +238,39 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
   });
 });
 
+Deno.test("UI status: shared coins that turn up on a rescan are exposed, with their plans", async () => {
+  await withUi(async ({ runJob, api, chains }) => {
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    const status = async () => (await (await api("/api/status")).json()).scan;
+    assertEquals((await status()).newShared, []);
+    // A pre-fork coin turns up on a second address, on all three chains.
+    const b = parseDescriptor(SRC_DESC).branches[0].derive(1);
+    const id = fund([chains.btc, chains.xbt, chains.ecx], [{ ...b, value: 50_000 }], 900_000, 2);
+    const rescan = await runJob(["scan"]);
+    assertEquals(rescan.exitCode, 0, rescan.text);
+    assert(rescan.text.includes("NEW SHARED COINS"), rescan.text);
+    const s = await status();
+    assertEquals(s.newShared.length, 1);
+    const fresh = s.newShared[0];
+    assertEquals([fresh.txid, fresh.vout, fresh.value], [id, 0, 50_000]);
+    assertEquals(fresh.unspentOn, ["btc", "xbt", "ecx"]);
+    assertEquals(fresh.previously, "absent");
+    assertEquals(fresh.firstSeen, s.scannedAt);
+    assertEquals(fresh.plannedIn, []);
+    // Once a plan spends it, the status says which one (the coin is still shared until broadcast).
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    const plan = await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true]);
+    assertEquals(plan.exitCode, 0, plan.text);
+    const planId = (await (await api("/api/plans")).json()).plans[0].id;
+    assertEquals((await status()).newShared[0].plannedIn, [planId]);
+    // Archived plans don't count.
+    assertEquals((await runJob(["plans", "archive", planId])).exitCode, 0);
+    assertEquals((await status()).newShared[0].plannedIn, []);
+  });
+});
+
 Deno.test("UI QR: the PSBT goes out as UR frames and the signed one comes back by scanning", async () => {
   const { URDecoder, psbtFromUr, psbtToUr } = await import("../src/core/ur.ts");
   await withUi(async ({ runJob, api, base }) => {

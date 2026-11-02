@@ -70,6 +70,19 @@ Each coin gets one status:
 | `unverified` | A chain couldn't be asked. Never treated as safe                 |
 | `spent`      | Not unspent anywhere                                             |
 
+### Coins that turn up later
+
+Coins can arrive after you have split: a deposit to an old address, or a pre-fork coin on an address
+beyond the gap limit of an earlier scan. Such a coin is still shared, so spending its BTC copy would
+replay onto the forks. Every `scan` compares itself with the previous one and prints a **NEW SHARED
+COINS** block (also shown by `status`) for coins that are shared now but weren't in the previous
+scan, or weren't shared then (a split that left the chain shows up here too). Don't spend them on
+BTC until they are split: plan them like the others (`plan --coin txid:vout` plans only them). They
+stay listed, with when they were first seen, until the split shows on the chains. They are saved in
+`scan.json` under `newShared`; the exit code doesn't change for them. The first scan has nothing to
+compare with, and a scan right after importing another wallet or raising the gap limit lists that
+wallet's shared coins: expected.
+
 ## Plan the splits (unsigned PSBTs)
 
 ```sh
@@ -124,7 +137,8 @@ unknown, never as failed, and is safe to retry. Re-running is idempotent. Detail
 [broadcast semantics](../reference/transaction-model.md#what-broadcast-does).
 
 `track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
-BTC copies then show as separated and can be spent normally.
+BTC copies then show as separated and can be spent normally. Keep scanning now and then before you
+spend: a coin that turns up later is flagged as [new and shared](#coins-that-turn-up-later).
 
 ## When something goes wrong
 

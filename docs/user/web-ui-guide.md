@@ -130,6 +130,11 @@ Each coin shows its state on every chain. The **Status** column tells you what t
 
 Click **details** under a shared coin to see its next steps.
 
+When a later scan finds shared coins that weren't there before (a deposit to an old address, a coin
+beyond the earlier gap limit, a split that left the chain), a red banner at the top of **Coins**
+lists them, their rows get a **new** badge, and once you have a plan a pill in the header points to
+them. Don't spend those coins on BTC until they are split; plan them like the others.
+
 ## 5. Plan: create the transactions
 
 Open **Plans & signing**.

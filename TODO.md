@@ -170,8 +170,10 @@ Wanted, but this is the work pre-alpha testers help with.
 - [ ] **`tr(<64 hex>)` in descriptors.** `parseDescriptor` accepts a bare 32-byte hex key in `tr()`
       as an x-only public key, so a hex private key pasted there isn't recognised as one. Consider
       refusing bare hex keys in imports (found in the 1c-QR review).
-- [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins, with guidance in the
-      UI and not just the CLI.
+- [x] **Coins that turn up later.** A rescan lists coins that are shared now but weren't in the
+      previous scan (or weren't shared then): a **NEW SHARED COINS** block from `scan` / `status`,
+      `newShared` in `scan.json` (kept, with first-seen time, until split), and in the web UI a
+      banner on Coins, **new** row badges, and a header pill / guide line once a plan exists.
 - [ ] **Chain upgrades.** Watch for eCash node upgrades after v1.2.0 (may need new checkpoints) and
       XBT Knots changes: coinbase maturity ends at block 979,920, RDTS expires 2027-09-01.
 - [ ] **Explicit chain-specific coins.** Detect coins that are already chain-specific because their

@@ -321,6 +321,20 @@ function headerPills() {
     ? "Tor: failed"
     : `Tor: ${o.tor.mode} (not started)`;
   torPill.className = `pill ${s.state === "ready" ? "tor" : s.state === "failed" ? "bad" : ""}`;
+  const fresh = newSharedAfterPlans();
+  const pill = document.getElementById("new-shared-pill");
+  pill.classList.toggle("hidden", !fresh.length);
+  pill.textContent = `${fresh.length} new shared coin${fresh.length === 1 ? "" : "s"}`;
+}
+
+/** Coins that turned up shared since an earlier scan (scan.json `newShared`). */
+function newShared() {
+  return state.status?.scan?.newShared ?? [];
+}
+
+/** The same, but only once a split plan exists: that's when spending BTC becomes likely. */
+function newSharedAfterPlans() {
+  return (state.plans?.plans ?? []).length ? newShared() : [];
 }
 
 // ---------- views ----------
@@ -801,9 +815,63 @@ function obsCell(obs, tip, shared) {
   }
 }
 
+const PREVIOUSLY = {
+  absent: "not in the previous scan",
+  separated: "was separated before: a split left the chain?",
+  pending: "was pending before: a split left the chain?",
+  spent: "was spent everywhere before",
+  unverified: "was unverified before (a chain couldn't be asked)",
+};
+
+/** The "coins that turn up later" banner at the top of the Coins tab. */
+function newSharedBanner(coins) {
+  const n = coins.length;
+  return h(
+    "div",
+    { class: "banner bad new-shared", role: "alert" },
+    h(
+      "h2",
+      {},
+      `${n} new shared coin${n === 1 ? "" : "s"} turned up since an earlier scan`,
+    ),
+    h(
+      "p",
+      {},
+      "These coins are still unspent on two or more chains, so one transaction spending them is valid on each of those chains. Don't spend them on BTC until they are split, even if your other coins are done: that spend would replay onto the forks and you could lose those copies.",
+    ),
+    h(
+      "ul",
+      { class: "new-shared-list" },
+      ...coins.map((c) =>
+        h(
+          "li",
+          {},
+          h("div", { class: "mono" }, `${c.txid}:${c.vout}`),
+          h("span", {}, `${btc(c.value)} · unspent on ${c.unspentOn.join("+").toUpperCase()} · `),
+          h("span", { class: "muted" }, PREVIOUSLY[c.previously] ?? c.previously),
+          h("span", { class: "muted" }, ` · first seen ${new Date(c.firstSeen).toLocaleString()}`),
+          " ",
+          c.plannedIn?.length
+            ? badge(`in plan ${c.plannedIn[0]}`, "pending")
+            : badge("not in a plan yet", "shared"),
+        )
+      ),
+    ),
+    h(
+      "p",
+      { class: "note" },
+      "Next: plan them on the Plans tab, then sign, verify and broadcast as before. A new plan takes every coin that is still shared; to plan only these, use `splayed plan --coin txid:vout` on the command line. Expected after importing another wallet or raising the gap limit; a deposit to an old address or a split that left the chain also shows up here.",
+    ),
+    h("button", { onclick: () => selectTab("plans") }, "Go to Plans"),
+  );
+}
+
 function viewCoins() {
   const s = state.status?.scan;
-  const view = [h(
+  const fresh = newShared();
+  const isNew = new Set(fresh.map((c) => `${c.txid}:${c.vout}`));
+  const view = fresh.length ? [newSharedBanner(fresh)] : [];
+  view.push(h(
     "div",
     { class: "card" },
     h("h2", {}, "Scan"),
@@ -827,7 +895,7 @@ function viewCoins() {
     s && s.warnings.length
       ? h("div", { class: "banner bad" }, ...s.warnings.map((w) => h("div", {}, w)))
       : null,
-  )];
+  ));
   if (!s) return view;
   const counts = {};
   for (const c of s.coins) {
@@ -849,11 +917,12 @@ function viewCoins() {
       ...s.coins.map((c) =>
         h(
           "tr",
-          {},
+          { class: isNew.has(`${c.txid}:${c.vout}`) ? "new-shared-row" : null },
           h(
             "td",
             { class: "mono" },
             short(c.txid, c.vout),
+            isNew.has(`${c.txid}:${c.vout}`) ? [" ", badge("new", "new")] : null,
             c.address ? h("div", { class: "muted" }, c.address) : null,
           ),
           h("td", {}, btc(c.value)),
@@ -1667,6 +1736,24 @@ function setupGuide() {
         onclick: () => selectTab(steps[current].tab),
       }, `Go to ${tabLabel[steps[current].tab]}`),
     );
+  const fresh = newSharedAfterPlans();
+  const alert = fresh.length
+    ? h(
+      "div",
+      { class: "guide-alert" },
+      h(
+        "strong",
+        {},
+        `${fresh.length} new shared coin${
+          fresh.length === 1 ? "" : "s"
+        } turned up after you started splitting. `,
+      ),
+      h("span", {}, "Don't spend them on BTC until they're split: plan them like the others."),
+      state.tab === "coins"
+        ? null
+        : h("button", { class: "secondary", onclick: () => selectTab("coins") }, "Show coins"),
+    )
+    : null;
   return h(
     "div",
     { class: "card guide" },
@@ -1678,6 +1765,7 @@ function setupGuide() {
       h("button", { class: "secondary", onclick: () => setGuide(false) }, "Hide guide"),
     ),
     list,
+    alert,
     next,
   );
 }
@@ -1689,6 +1777,7 @@ function selectTab(tab) {
   }
   render();
 }
+document.getElementById("new-shared-pill").addEventListener("click", () => selectTab("coins"));
 for (const b of document.querySelectorAll("#tabs button[data-tab]")) {
   b.addEventListener("click", () => selectTab(b.dataset.tab));
 }

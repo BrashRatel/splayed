@@ -40,7 +40,14 @@ import {
   saveDonorScan,
 } from "../core/donors.ts";
 import { buildFanout, donorDescriptors } from "../core/fanout.ts";
-import { loadScan, runScan, saveScan, scanRegressions } from "../core/scan.ts";
+import {
+  loadScan,
+  newSharedCoins,
+  runScan,
+  saveScan,
+  scanRegressions,
+  type ScanResult,
+} from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { defaultDataDir, ensureDir } from "../core/store.ts";
 import {
@@ -803,12 +810,55 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
   } finally {
     for (const b of Object.values(backends)) await b?.close?.();
   }
-  result.warnings.push(...scanRegressions(await loadScan(config.dataDir), result));
+  const previous = await loadScan(config.dataDir);
+  result.warnings.push(...scanRegressions(previous, result));
+  result.newShared = newSharedCoins(previous, result, confirmationsOf(config));
   await saveScan(config.dataDir, result);
   for (const w of result.warnings) io.err(`Warning: ${w}`);
   io.out("");
   printStatus(config, result, io);
+  printNewShared(result, io);
+  // New shared coins aren't a scan failure (exit 1 stays for warnings): they are listed in
+  // scan.json under `newShared` for scripts and the web UI.
   return result.warnings.length ? 1 : 0;
+}
+
+function confirmationsOf(config: Config): Record<ChainId, number> {
+  return Object.fromEntries(
+    CHAIN_IDS.map((c) => [c, config.chains[c].confirmations]),
+  ) as Record<ChainId, number>;
+}
+
+const PREVIOUSLY: Record<string, string> = {
+  absent: "not in the previous scan",
+  separated: "was separated at the previous scan (a split left the chain?)",
+  pending: "was pending at the previous scan (a split left the chain?)",
+  spent: "was spent everywhere at the previous scan",
+  unverified: "was unverified at the previous scan (a chain couldn't be asked)",
+};
+
+/** The "coins that turn up later" warning, on stderr so it stands out from the table. */
+function printNewShared(result: ScanResult, io: CliIO) {
+  const coins = result.newShared ?? [];
+  if (!coins.length) return;
+  const lines = [
+    "",
+    `!! NEW SHARED COINS: ${coins.length} coin${
+      coins.length === 1 ? "" : "s"
+    } turned up since an earlier scan`,
+    ...coins.map((c) =>
+      `   ${c.txid}:${c.vout}\n     ${sats(c.value)}, unspent on ${
+        c.unspentOn.join("+").toUpperCase()
+      }, ${PREVIOUSLY[c.previously] ?? c.previously}; first seen ${c.firstSeen}`
+    ),
+    "   These coins are still shared: one transaction spending them is valid on every chain",
+    "   listed. Don't spend them on BTC until they are split, even if your other coins are",
+    "   done: that spend would replay onto the forks and you could lose those copies.",
+    "   Plan them like the others: `splayed plan ...` (add `--coin txid:vout` to plan only these),",
+    "   then sign, verify and broadcast. Expected after importing another wallet or raising the",
+    "   gap limit; a deposit to an old address or a split that left the chain also shows up here.",
+  ];
+  for (const line of lines) io.err(line);
 }
 
 async function cmdStatus(config: Config, io: CliIO, json: boolean) {
@@ -835,6 +885,7 @@ async function cmdStatus(config: Config, io: CliIO, json: boolean) {
     return 0;
   }
   printStatus(config, result, io);
+  printNewShared(result, io);
   return 0;
 }
 

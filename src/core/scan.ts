@@ -4,7 +4,7 @@ import type { Config } from "./config.ts";
 import type { ParsedDescriptor } from "./descriptors.ts";
 import { CHAIN_IDS, type ChainId } from "./profiles.ts";
 import { type ProgressSink, throttleProgress } from "./progress.ts";
-import type { CoinRecord } from "./state.ts";
+import { classify, type CoinRecord, type SeparationStatus } from "./state.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
 
 export const SCAN_FILE = "scan.json";
@@ -18,6 +18,25 @@ export interface ScanResult {
   addressesRevealed: Partial<Record<ChainId, number>>;
   warnings: string[];
   coins: CoinRecord[];
+  /**
+   * Shared coins that turned up since an earlier scan (see newSharedCoins). Absent in scan files
+   * written before this field existed.
+   */
+  newShared?: NewSharedCoin[];
+}
+
+/** A coin that is shared now but wasn't in an earlier scan, or wasn't shared then. */
+export interface NewSharedCoin {
+  txid: string;
+  vout: number;
+  value: number;
+  address?: string;
+  /** Chains where it is unspent at this scan. */
+  unspentOn: ChainId[];
+  /** Its status in the scan before it was first flagged; "absent" if that scan didn't list it. */
+  previously: SeparationStatus | "absent";
+  /** scannedAt of the scan that first flagged it. */
+  firstSeen: string;
 }
 
 export interface ScanDeps {
@@ -291,4 +310,48 @@ export function scanRegressions(prev: ScanResult | undefined, next: ScanResult):
     }
   }
   return warnings;
+}
+
+/**
+ * Coins that turn up later: shared coins in `next` that the previous scan didn't list, or listed
+ * as not shared (a deposit to an old address, a pre-fork coin beyond the old gap limit, a split
+ * that was reorged out). Spending their BTC copy would replay onto the forks, even if the user
+ * already split everything else.
+ *
+ * Coins flagged by an earlier scan stay listed (with their first-seen time) while they are still
+ * shared, or unverified because a chain couldn't be asked, so the warning doesn't vanish on the
+ * next rescan; they drop off once the split shows on the chains. The first scan flags nothing:
+ * there is nothing to compare with. Pure: uses the classification as it is.
+ */
+export function newSharedCoins(
+  prev: ScanResult | undefined,
+  next: ScanResult,
+  confirmations: Record<ChainId, number>,
+): NewSharedCoin[] {
+  if (!prev) return [];
+  const key = (c: { txid: string; vout: number }) => `${c.txid}:${c.vout}`;
+  const before = new Map(prev.coins.map((c) => [key(c), c]));
+  const flagged = new Map((prev.newShared ?? []).map((c) => [key(c), c]));
+  const out: NewSharedCoin[] = [];
+  for (const coin of next.coins) {
+    const now = classify(coin, { tips: next.tips, confirmations });
+    const earlier = flagged.get(key(coin));
+    const entry = {
+      txid: coin.txid,
+      vout: coin.vout,
+      value: coin.value,
+      ...(coin.address ? { address: coin.address } : {}),
+      unspentOn: now.unspentOn,
+    };
+    if (earlier && (now.status === "shared" || now.status === "unverified")) {
+      out.push({ ...entry, previously: earlier.previously, firstSeen: earlier.firstSeen });
+      continue;
+    }
+    if (now.status !== "shared") continue;
+    const old = before.get(key(coin));
+    const was = old ? classify(old, { tips: prev.tips, confirmations }).status : "absent";
+    if (was === "shared") continue;
+    out.push({ ...entry, previously: was, firstSeen: next.scannedAt });
+  }
+  return out;
 }
