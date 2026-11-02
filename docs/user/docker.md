@@ -77,3 +77,5 @@ docker buildx build -f docker/Dockerfile --platform linux/amd64,linux/arm64 -t s
 
 The build compiles splayed for each platform with `deno compile` and installs Tor from Debian's
 signed repository. The first build downloads the Deno runtime, Debian packages and npm dependencies.
+`--build-arg WITH_TOR=0` leaves Tor out of the image, for hosts that run their own Tor; then set
+`SPLAYED_TOR_MODE=system` and `SPLAYED_TOR_SOCKS` (the StartOS package does this).

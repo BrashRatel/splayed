@@ -18,9 +18,12 @@ RUN deno install --frozen && deno task compile
 # ---- runtime: a slim Debian with Tor from Debian's signed repository ----
 FROM debian:bookworm-slim
 # tor: the managed Tor that splayed starts for public backends (fail-closed; no clearnet fallback).
+#   WITH_TOR=0 leaves it out, for hosts that provide their own Tor (StartOS; SPLAYED_TOR_MODE=system).
 # ca-certificates: TLS to clearnet HTTPS backends reached through Tor.
+ARG WITH_TOR=1
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends tor ca-certificates tini \
+  && apt-get install -y --no-install-recommends ca-certificates tini \
+    $(if [ "$WITH_TOR" = 1 ]; then echo tor; fi) \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin splayed \
   && mkdir -p /data && chown splayed:splayed /data && chmod 700 /data
