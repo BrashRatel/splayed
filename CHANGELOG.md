@@ -6,6 +6,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Setup guide in the web UI.** A checklist above every tab walks through the guided route (confirm
+  network, import wallet, set fork destinations, scan, create a plan, sign/verify/ broadcast). Steps
+  are ticked off from the real state, not from clicks; the next one is explained with a button to
+  its tab. **Guide: on/off** in the tab bar hides it (remembered in that browser).
+
 - **Wallet import by QR code, multisig included.** **Scan QR** on the Wallet tab (import field and
   each fork destination) reads animated UR wallet exports by camera, or pasted text: a signer's xpub
   (`crypto-account` / `account-descriptor`, SeedSigner's default), a coordinator's whole wallet

@@ -366,7 +366,7 @@ details summary {
   width: 120px;
 }
 
-#advanced-toggle {
+#guide-toggle {
   margin-left: auto;
 }
 
@@ -540,4 +540,51 @@ label.inline {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Setup guide (first-run checklist above every tab). */
+.guide .guide-head {
+  align-items: center;
+}
+.guide .guide-head h2 {
+  margin: 0;
+}
+.guide-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+.guide-steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.guide-steps li.current {
+  color: var(--text);
+  font-weight: 600;
+}
+.guide-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-size: 0.8em;
+}
+.guide-steps li.done .guide-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+.guide-steps li.current .guide-mark {
+  border-color: var(--accent);
+}
+.guide-next button {
+  margin-left: 8px;
 }

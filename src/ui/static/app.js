@@ -61,6 +61,24 @@ document.getElementById("advanced-toggle").addEventListener("click", () => {
   render();
 });
 
+// The setup guide (a checklist above every tab) is on until hidden; remembered in this browser.
+let guideOn = true;
+try {
+  guideOn = localStorage.getItem("splayed-guide") !== "hidden";
+} catch { /* storage unavailable: keep it on */ }
+function applyGuide() {
+  document.getElementById("guide-toggle").textContent = `Guide: ${guideOn ? "on" : "off"}`;
+}
+function setGuide(on) {
+  guideOn = on;
+  try {
+    localStorage.setItem("splayed-guide", on ? "shown" : "hidden");
+  } catch { /* not persisted */ }
+  applyGuide();
+  render();
+}
+document.getElementById("guide-toggle").addEventListener("click", () => setGuide(!guideOn));
+
 // ---------- helpers ----------
 
 function h(tag, attrs = {}, ...children) {
@@ -1555,8 +1573,113 @@ function render() {
     plans: viewPlans,
     donors: viewDonors,
   }[state.tab]();
-  view.append(...[content].flat());
+  const guide = guideOn ? setupGuide() : null;
+  view.append(...(guide ? [guide] : []), ...[content].flat());
   setBusy(!!(state.job && !state.job.done));
+}
+
+/**
+ * The first-run guide: the steps of the guided route, each ticked off from the real state (not
+ * from clicks), with the next one explained and a button to its tab.
+ */
+function guideSteps() {
+  const o = state.overview ?? {};
+  const dests = o.destinations ?? {};
+  const plans = (state.plans?.plans ?? []).filter((p) => !p.archivedAt);
+  const newest = plans[0];
+  const sent = (t) => ["accepted", "replaced"].includes(t.progress?.broadcast?.status);
+  return [
+    {
+      tab: "network",
+      title: "Confirm the network settings",
+      done: !!o.confirmed,
+      help:
+        "Check where each chain's queries go (Tor by default), then press “Check servers & confirm”. Nothing about your coins is sent before that.",
+    },
+    {
+      tab: "wallet",
+      title: "Import your wallet",
+      done: (o.descriptors ?? []).length > 0,
+      help:
+        "Add the watch-only descriptor of the wallet holding the coins: Scan QR reads your signer's xpub export (multisig: scan each cosigner), or paste the descriptor. Keys never leave your signer.",
+    },
+    {
+      tab: "wallet",
+      title: "Set the ECX and XBT destinations",
+      done: !!dests.ecx && !!dests.xbt,
+      help:
+        "Where each fork's split coins go. Best: a new seed for each fork, so the copies never share keys again.",
+    },
+    {
+      tab: "coins",
+      title: "Scan for your coins",
+      done: !!state.status?.scan,
+      help:
+        "Finds your coins on all three chains and shows which are still shared. Over Tor this takes a while.",
+    },
+    {
+      tab: "plans",
+      title: "Create a plan",
+      done: plans.length > 0,
+      help:
+        "Pick the signer for XBT (it must make SIGHASH_UNIFIED signatures) and how to batch coins. splayed writes unsigned PSBTs; start with one small coin.",
+    },
+    {
+      tab: "plans",
+      title: "Sign, verify and broadcast",
+      done: !!newest && newest.transactions.every(sent),
+      help:
+        "Sign each PSBT in your wallet (QR or file), upload it, then Verify and Broadcast. The TEST FIRST transaction goes alone; then Track confirmations until both forks are deep. BTC stays untouched.",
+    },
+  ];
+}
+
+function setupGuide() {
+  if (!state.overview || state.overview.configError) return null;
+  const steps = guideSteps();
+  const current = steps.findIndex((s) => !s.done);
+  const tabLabel = { network: "Network", wallet: "Wallet", coins: "Coins", plans: "Plans" };
+  const list = h(
+    "ol",
+    { class: "guide-steps" },
+    ...steps.map((s, i) =>
+      h(
+        "li",
+        { class: s.done ? "done" : i === current ? "current" : "" },
+        h("span", { class: "guide-mark", "aria-hidden": "true" }, s.done ? "✓" : String(i + 1)),
+        h("span", {}, s.title),
+      )
+    ),
+  );
+  const next = current === -1
+    ? h(
+      "p",
+      { class: "note" },
+      "All steps done for the newest plan. Keep tracking confirmations until both forks are deep; only then spend the BTC copies.",
+    )
+    : h(
+      "div",
+      { class: "guide-next" },
+      h("strong", {}, `Next: ${steps[current].title}. `),
+      h("span", {}, steps[current].help),
+      state.tab === steps[current].tab ? null : h("button", {
+        class: "secondary",
+        onclick: () => selectTab(steps[current].tab),
+      }, `Go to ${tabLabel[steps[current].tab]}`),
+    );
+  return h(
+    "div",
+    { class: "card guide" },
+    h(
+      "div",
+      { class: "row guide-head" },
+      h("h2", {}, "Setup guide"),
+      h("span", { class: "grow" }),
+      h("button", { class: "secondary", onclick: () => setGuide(false) }, "Hide guide"),
+    ),
+    list,
+    next,
+  );
 }
 
 function selectTab(tab) {
@@ -1570,6 +1693,7 @@ for (const b of document.querySelectorAll("#tabs button[data-tab]")) {
   b.addEventListener("click", () => selectTab(b.dataset.tab));
 }
 applyAdvanced();
+applyGuide();
 
 setInterval(async () => {
   if (!state.overview || !token) return;

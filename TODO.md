@@ -187,7 +187,7 @@ Wanted, but this is the work pre-alpha testers help with.
 - [ ] Air-gapped QR: BBQr (Coldcard Q) and plain base64 QR codes (the `ur:psbt` type is read but not
       written).
 - [ ] UI:
-  - [ ] guided first-run wizard;
+  - [x] guided first-run wizard;
   - [x] live Tor bootstrap progress; confirmed needed in practice (2026-11-01): after "Check servers
         and confirm", establishing circuits over Tor is slow enough to look hung without a progress
         or waiting indicator;

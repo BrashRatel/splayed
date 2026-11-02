@@ -33,6 +33,9 @@ appear as dialogs in the browser.
 Reorg alerts appear above a plan's table, and each broadcast split has a "Fee bump…" button (plus
 one for the whole plan). See [Recovery](recovery.md).
 
+A **Setup guide** above every tab lists the steps of the guided route, ticks off what's done (from
+the actual state) and explains the next step. **Guide: on/off** in the tab bar hides it.
+
 Switch on **Advanced** in the tab bar to get a **Donors** tab for the
 [donor routes](advanced-donor-routes.md).
 
