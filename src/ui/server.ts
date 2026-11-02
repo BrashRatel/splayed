@@ -24,7 +24,12 @@ import {
 } from "../core/ur_wallet.ts";
 import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
-import { archivedAt, plannedOutpoints, type PlannedSpend } from "../core/plan_admin.ts";
+import {
+  archivedAt,
+  plannedOutpoints,
+  type PlannedSpend,
+  unsentReplacementsByPlan,
+} from "../core/plan_admin.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
 import { loadDonorScan } from "../core/donors.ts";
 import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
@@ -127,6 +132,7 @@ const STATIC: Record<string, { file: string; type: string }> = {
   "/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
   "/qr.js": { file: "qr.js", type: "text/javascript; charset=utf-8" },
   "/wallet_qr.js": { file: "wallet_qr.js", type: "text/javascript; charset=utf-8" },
+  "/plan_status.js": { file: "plan_status.js", type: "text/javascript; charset=utf-8" },
   "/vendor/qrcode.js": { file: "vendor/qrcode.js", type: "text/javascript; charset=utf-8" },
   "/vendor/jsQR.js": { file: "vendor/jsQR.js", type: "text/javascript; charset=utf-8" },
 };
@@ -332,10 +338,12 @@ async function plansView(dataDir: string) {
   }
   ids.sort().reverse();
   const out = [];
+  const bumps = await unsentReplacementsByPlan(dataDir);
   for (const id of ids) {
     try {
       const { dir: planDir, plan } = await loadPlanDir(dataDir, id);
       const progress = await loadProgress(planDir);
+      const unsent = bumps.get(plan.id ?? id) ?? new Map();
       const signedFiles = await findSignedFiles(planDir);
       const uploaded = async (file: string) => {
         const stem = file.replace("/", "-").replace(/\.psbt$/u, "");
@@ -369,6 +377,7 @@ async function plansView(dataDir: string) {
           value: t.inputs.reduce((s, i) => s + i.value, 0),
           fee: t.fee,
           feeRate: t.feeRate,
+          vsize: t.vsize,
           output: t.output,
           outputs: t.outputs?.length,
           donor: t.donor,
@@ -382,6 +391,8 @@ async function plansView(dataDir: string) {
             confirmations: progress.txs[t.file]?.confirmations,
             reorgs: progress.txs[t.file]?.reorgs,
             replacedBy: progress.txs[t.file]?.replacedBy,
+            /** The newest fee bump written for it and not sent yet. */
+            pendingBump: unsent.get(t.file)?.at(-1),
           },
           replaces: t.replaces,
         })),

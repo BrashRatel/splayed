@@ -1,5 +1,6 @@
 import { scanSignedPsbt, showPsbtQr } from "./qr.js";
 import { walletQrImport } from "./wallet_qr.js";
+import { bumpable, bumpQuestion, depthText, reorgAlerts } from "./plan_status.js";
 // splayed web UI. Every action runs a splayed CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
@@ -40,6 +41,10 @@ const state = {
   donorSel: new Set(),
   /** Coins picked in the New plan form ("txid:vout"); null = the default (not yet in a plan). */
   planSel: null,
+  /** What was typed into the Donors tab's fields, so a re-render doesn't wipe it. */
+  donorForm: {},
+  /** The plan whose Broadcast/Track/Fee bump button was used last (dev mining tracks it). */
+  lastPlan: null,
   job: null,
   after: 0,
 };
@@ -1030,17 +1035,10 @@ async function download(planId, file, format) {
   }, 1000);
 }
 
-/** A split can be replaced while it is sent and not yet replaced (the CLI makes the final call). */
-function bumpable(pr) {
-  return !!pr.broadcast && pr.broadcast.status !== "replaced" && !pr.replacedBy &&
-    !(pr.confirmations && pr.confirmations.depth > 0);
-}
-
-function bump(planId, scope) {
-  const rate = prompt(
-    "New fee rate in sat/vB for the replacement (empty = the tool's suggestion, at least 1.5x):",
-    "",
-  );
+/** Asks for the new rate, showing each transaction's current rate and the least it can be. */
+function bump(planId, scope, txs) {
+  state.lastPlan = planId;
+  const rate = prompt(bumpQuestion(txs), "");
   if (rate === null) return;
   const args = ["bump", planId, ...scope];
   if (rate.trim()) {
@@ -1060,9 +1058,10 @@ async function mineBlocks(chain, blocks) {
     logLine(`Mined ${blocks} on ${chain}: ${JSON.stringify(r.heights)}`);
     flash(`Mined ${blocks} block(s) on ${chain === "all" ? "every chain" : chain.toUpperCase()}.`);
     await refresh();
-    const latest = state.plans?.plans?.find((p) =>
-      p.transactions.some((t) => t.progress.broadcast)
-    );
+    // The plan last worked on (its Broadcast/Track/Fee bump buttons), else the newest sent one.
+    const sent = (p) => !p.archivedAt && p.transactions.some((t) => t.progress.broadcast);
+    const plans = state.plans?.plans ?? [];
+    const latest = plans.find((p) => p.id === state.lastPlan && sent(p)) ?? plans.find(sent);
     if (latest) run(["track", latest.id]);
   } catch (e) {
     logLine(`Mining failed: ${e.message}`, "err");
@@ -1109,10 +1108,40 @@ function feeInput() {
   });
 }
 
+/**
+ * Keeps a Donors-tab field's value in state.donorForm[key] across re-renders (ticking a donor,
+ * or a job finishing, rebuilds the view).
+ */
+function keepValue(key, el) {
+  const form = state.donorForm;
+  const box = el.type === "checkbox";
+  if (form[key] !== undefined) {
+    if (box) el.checked = form[key];
+    else el.value = form[key];
+  }
+  const save = () => (form[key] = box ? el.checked : el.value);
+  el.addEventListener("input", save);
+  el.addEventListener("change", save);
+  return el;
+}
+
 function viewDonors() {
   const d = state.donors ?? { descriptors: [], scan: null };
-  const desc = h("input", { placeholder: "donor wallet descriptor", class: "grow" });
-  const label = h("input", { placeholder: "label (optional)", class: "w160" });
+  // A donor import that went through clears the pasted descriptor; a refused one keeps it.
+  const job = state.job;
+  if (
+    job?.done && job.exitCode === 0 && job.args[0] === "donor" && job.args[1] === "import" &&
+    state.donorForm.clearedFor !== job.id && job.args[2] === state.donorForm.desc?.trim()
+  ) {
+    state.donorForm.clearedFor = job.id;
+    state.donorForm.desc = "";
+    state.donorForm.label = "";
+  }
+  const desc = keepValue(
+    "desc",
+    h("input", { placeholder: "donor wallet descriptor", class: "grow" }),
+  );
+  const label = keepValue("label", h("input", { placeholder: "label (optional)", class: "w160" }));
   const importIt = () => {
     if (!desc.value.trim()) return alert("Paste the donor wallet descriptor first.");
     const args = ["donor", "import", desc.value.trim()];
@@ -1157,9 +1186,9 @@ function viewDonors() {
     );
   });
 
-  const outputs = h("input", { value: "3", class: "w60" });
-  const each = h("input", { placeholder: "even split", class: "w120" });
-  const feeXbt = feeInput();
+  const outputs = keepValue("outputs", h("input", { value: "3", class: "w60" }));
+  const each = keepValue("each", h("input", { placeholder: "even split", class: "w120" }));
+  const feeXbt = keepValue("feeFanout", feeInput());
   const homes = new Set(
     selected.map((k) => coins.find((c) => `${c.txid}:${c.vout}` === k).home ?? "xbt"),
   );
@@ -1172,17 +1201,21 @@ function viewDonors() {
     if (feeXbt.value.trim()) args.push("--fee-rate", `${home}=${feeXbt.value.trim()}`);
     run(args);
   };
-  const batch = h(
-    "select",
-    {},
-    ...[["coin", "one coin per transaction (needs one donor each)"], [
-      "all",
-      "all coins in one transaction (one donor, links the coins)",
-    ]].map(([v, t]) => h("option", { value: v }, t)),
+  const batch = keepValue(
+    "batch",
+    h(
+      "select",
+      {},
+      ...[["coin", "one coin per transaction (needs one donor each)"], [
+        "all",
+        "all coins in one transaction (one donor, links the coins)",
+      ]].map(([v, t]) => h("option", { value: v }, t)),
+    ),
   );
   const alsoEcx = h("input", { type: "checkbox" });
   alsoEcx.checked = true;
-  const feeXbt2 = feeInput();
+  keepValue("alsoEcx", alsoEcx);
+  const feeXbt2 = keepValue("feePlan", feeInput());
   const planWith = () => {
     if (!home) return alert("Select donors of one chain: XBT donors, or BTC donors.");
     const args = ["plan", "--batch", batch.value];
@@ -1263,7 +1296,11 @@ function viewDonors() {
       { class: "card" },
       h("h2", {}, "Donor coins"),
       d.scan
-        ? h("p", { class: "note" }, `Scanned ${d.scan.scannedAt}. Tick the donors to use.`)
+        ? h(
+          "p",
+          { class: "note" },
+          `Scanned ${new Date(d.scan.scannedAt).toLocaleString()}. Tick the donors to use.`,
+        )
         : h("p", { class: "muted" }, "Not scanned yet."),
       ...(d.scan?.warnings ?? []).map((w) => h("div", { class: "note" }, `⚠ ${w}`)),
       coins.length
@@ -1295,8 +1332,11 @@ function viewDonors() {
         h("label", {}, "New donors each", outputs),
         h("label", {}, "Sats per new donor", each),
         h("label", {}, "Fee (sat/vB)", feeXbt),
+        // data-blocked keeps it disabled when setBusy(false) re-enables the other buttons.
         h("button", {
           disabled: !selected.length,
+          "data-blocked": !selected.length,
+          title: selected.length ? undefined : "Tick at least one usable donor above",
           onclick: fanout,
         }, "Create fan-out PSBT(s)…"),
       ),
@@ -1317,8 +1357,13 @@ function viewDonors() {
         { class: "row" },
         h("label", {}, "Batching", batch),
         h("label", {}, "Fee (sat/vB)", feeXbt2),
-        h("label", {}, alsoEcx, " also plan ECX"),
-        h("button", { disabled: !selected.length, onclick: planWith }, "Create plan with donors"),
+        h("label", { class: "check" }, alsoEcx, " also plan ECX"),
+        h("button", {
+          disabled: !selected.length,
+          "data-blocked": !selected.length,
+          title: selected.length ? undefined : "Tick at least one usable donor above",
+          onclick: planWith,
+        }, "Create plan with donors"),
       ),
     ),
   ];
@@ -1738,7 +1783,7 @@ function viewPlans() {
             ? badge("signed file uploaded: press Verify", "pending")
             : badge("not verified", ""),
           pr.broadcast ? h("div", {}, badge(pr.broadcast.status, pr.broadcast.status)) : null,
-          pr.confirmations ? h("div", { class: "muted" }, `${pr.confirmations.depth} conf`) : null,
+          depthText(pr) ? h("div", { class: "muted" }, depthText(pr)) : null,
           t.replaces
             ? h(
               "div",
@@ -1749,13 +1794,26 @@ function viewPlans() {
           pr.replacedBy
             ? h("div", { class: "muted" }, `replaced by plan ${pr.replacedBy.plan}`)
             : null,
+          pr.pendingBump
+            ? h(
+              "div",
+              { class: "muted" },
+              `bump written: plan ${pr.pendingBump.plan} (not sent yet)`,
+            )
+            : null,
           pr.reorgs?.length
-            ? h("div", { class: "muted" }, `${pr.reorgs.length} reorg alert(s), see above`)
+            ? h(
+              "div",
+              { class: "muted" },
+              pr.reorgs.some((r) => !r.resolved)
+                ? `${pr.reorgs.length} reorg alert(s), see above`
+                : `${pr.reorgs.length} reorg alert(s), resolved`,
+            )
             : null,
           t.chain !== "btc" && bumpable(pr)
             ? h("button", {
-              class: "small secondary",
-              onclick: () => bump(p.id, ["--chains", t.chain, "--tx", String(t.order)]),
+              class: "small secondary nowrap",
+              onclick: () => bump(p.id, ["--chains", t.chain, "--tx", String(t.order)], [t]),
             }, "Fee bump…")
             : null,
         ),
@@ -1771,16 +1829,8 @@ function viewPlans() {
         `XBT signer: ${p.xbtSigner ?? "none"} · signed files: ${p.signedFiles.length}`,
       ),
       ...p.warnings.map((w) => h("div", { class: "note" }, `⚠ ${w}`)),
-      ...p.transactions.flatMap((t) =>
-        (t.progress.reorgs ?? []).slice(-1).map((r) =>
-          h(
-            "div",
-            { class: "alert" },
-            `REORG ${t.chain.toUpperCase()} #${t.order} (${r.kind}, ${
-              r.at.slice(0, 19)
-            }): ${r.detail}`,
-          )
-        )
+      ...reorgAlerts(p.transactions).map((a) =>
+        h("div", { class: a.active ? "alert" : "alert resolved" }, a.text)
       ),
       h(
         "table",
@@ -1798,7 +1848,12 @@ function viewPlans() {
         "div",
         { class: "row" },
         h("button", { onclick: () => run(["verify", p.id]) }, "Verify signed files"),
-        h("button", { onclick: () => run(["broadcast", p.id]) }, "Broadcast verified"),
+        h("button", {
+          onclick: () => {
+            state.lastPlan = p.id;
+            run(["broadcast", p.id]);
+          },
+        }, "Broadcast verified"),
         h("button", {
           class: "danger",
           onclick: () =>
@@ -1808,13 +1863,27 @@ function viewPlans() {
         }, "Broadcast all now…"),
         h(
           "button",
-          { class: "secondary", onclick: () => run(["track", p.id]) },
+          {
+            class: "secondary",
+            onclick: () => {
+              state.lastPlan = p.id;
+              run(["track", p.id]);
+            },
+          },
           "Track confirmations",
         ),
         p.transactions.some((t) => t.chain !== "btc" && bumpable(t.progress))
           ? h(
             "button",
-            { class: "secondary", onclick: () => bump(p.id, []) },
+            {
+              class: "secondary",
+              onclick: () =>
+                bump(
+                  p.id,
+                  [],
+                  p.transactions.filter((t) => t.chain !== "btc" && bumpable(t.progress)),
+                ),
+            },
             "Fee bump all unconfirmed…",
           )
           : null,
