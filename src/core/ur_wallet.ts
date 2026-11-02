@@ -94,6 +94,7 @@ export function readCbor(data: Uint8Array): Cbor {
           if (typeof key !== "number" && typeof key !== "string") {
             throw new WalletQrError("Unsupported CBOR map key");
           }
+          if (map.has(key)) throw new WalletQrError("Malformed CBOR: repeated map key");
           map.set(key, item(depth + 1));
         }
         return { map };
@@ -142,7 +143,7 @@ const SCRIPT_TAGS: Record<number, string> = {
 };
 
 /** The script types this tool can import, by name as used in descriptors. */
-export type ScriptKind = "wpkh" | "sh-wpkh" | "tr" | "pkh" | "wsh" | "sh-wsh" | "sh";
+export type ScriptKind = "wpkh" | "sh-wpkh" | "tr" | "pkh" | "wsh" | "sh-wsh";
 
 /** One extended public key with its origin, as a descriptor key expression is built from. */
 export interface WalletKey {
@@ -247,16 +248,22 @@ function hdKey(v: Cbor, network: AddressNetwork, masterFp?: number): WalletKey {
   }
   const sourceFp = origin.sourceFingerprint ?? masterFp;
   if (sourceFp === undefined) throw new WalletQrError("The key has no master fingerprint");
+  checkChildren(field(m, 7));
   const last = origin.steps[origin.steps.length - 1];
   const parent = field(m, 8);
-  const hd = new HDKey({
-    versions: { private: 0, public: XPUB_VERSION[net] },
-    publicKey: key,
-    chainCode,
-    depth: origin.depth ?? origin.steps.length,
-    index: last.index + (last.hardened ? 0x80000000 : 0),
-    parentFingerprint: typeof parent === "number" ? parent : 0,
-  });
+  let hd: HDKey;
+  try {
+    hd = new HDKey({
+      versions: { private: 0, public: XPUB_VERSION[net] },
+      publicKey: key,
+      chainCode,
+      depth: origin.depth ?? origin.steps.length,
+      index: last.index + (last.hardened ? 0x80000000 : 0),
+      parentFingerprint: typeof parent === "number" ? parent : 0,
+    });
+  } catch (error) {
+    throw new WalletQrError(`Malformed HD key: ${(error as Error).message}`);
+  }
   return {
     fingerprint: fp8(sourceFp),
     path: origin.steps.map((s) => `${s.index}${s.hardened ? "h" : ""}`).join("/"),
@@ -265,7 +272,58 @@ function hdKey(v: Cbor, network: AddressNetwork, masterFp?: number): WalletKey {
   };
 }
 
+/**
+ * The derivation below the account key (field 7). splayed always derives receive/change as
+ * `<0;1>/*` (import) or `0/*` (destination), so only exports meaning the same are accepted:
+ * none given, `<0;1>/*`, or `0/*`. Anything else would silently give different addresses.
+ */
+function checkChildren(v: Cbor | undefined): void {
+  if (v === undefined) return;
+  const m = isTag(v) && is(v.tag, "keypath") ? v.value : v;
+  const comps = isMap(m) ? field(m, 1) : undefined;
+  if (!Array.isArray(comps)) throw new WalletQrError("Malformed key derivation (children)");
+  const steps: string[] = [];
+  for (let k = 0; k < comps.length; k++) {
+    const c = comps[k];
+    const hardenedNext = typeof comps[k + 1] === "boolean" ? comps[++k] as boolean : false;
+    if (hardenedNext) {
+      throw new WalletQrError("Hardened steps below the account key aren't supported");
+    }
+    if (typeof c === "number") steps.push(String(c));
+    else if (Array.isArray(c) && c.length === 0) steps.push("*");
+    else if (Array.isArray(c) && c.every((x) => typeof x === "number" || typeof x === "boolean")) {
+      // Multipath: [index, hardened, index, hardened, …]
+      const idx = c.filter((_x, j) => j % 2 === 0);
+      if (c.some((x, j) => j % 2 === 1 && x === true)) {
+        throw new WalletQrError("Hardened steps below the account key aren't supported");
+      }
+      steps.push(`<${idx.join(";")}>`);
+    } else throw new WalletQrError("Unsupported key derivation (children)");
+  }
+  const path = steps.join("/");
+  if (!["<0;1>/*", "0/*"].includes(path)) {
+    throw new WalletQrError(
+      `This export derives addresses as /${path}; splayed only supports /<0;1>/* (receive and change)`,
+    );
+  }
+}
+
 const keyExpr = (k: WalletKey) => `[${k.fingerprint}/${k.path}]${k.xpub}`;
+
+/**
+ * The key suffixes in a descriptor (e.g. `/<0;1>/*`). A whole-wallet descriptor is accepted only
+ * when every key uses receive/change as splayed expects; `/<1;0>/*` or `/1/*` would make the first
+ * "receive" address a change address, or the reverse.
+ */
+export function checkDescriptorBranches(descriptor: string): void {
+  const suffixes = descriptor.match(/\/(?:<[^>]*>|\d+h?)\/\*/gu) ?? [];
+  const bad = suffixes.find((x) => x !== "/<0;1>/*" && x !== "/0/*");
+  if (bad) {
+    throw new WalletQrError(
+      `This descriptor derives addresses as ${bad}; splayed only supports /<0;1>/* (receive and change) or /0/*`,
+    );
+  }
+}
 
 /** A legacy crypto-output expression (nested script tags around a key or multi) → text. */
 function legacyOutput(v: Cbor, network: AddressNetwork, masterFp?: number): string {
@@ -329,6 +387,8 @@ function accountScript(v: Cbor): { script?: ScriptKind; key: Cbor } {
     names.push(SCRIPT_TAGS[cur.tag]);
     cur = cur.value;
   }
+  // Multisig account keys may be marked cosigner(…) inside wsh / sh(wsh).
+  if (names[names.length - 1] === "cosigner") names.pop();
   const kinds: Record<string, ScriptKind> = {
     "wpkh": "wpkh",
     "sh/wpkh": "sh-wpkh",
@@ -336,7 +396,6 @@ function accountScript(v: Cbor): { script?: ScriptKind; key: Cbor } {
     "pkh": "pkh",
     "wsh": "wsh",
     "sh/wsh": "sh-wsh",
-    "sh": "sh",
   };
   return { script: kinds[names.join("/")], key: cur };
 }
@@ -367,7 +426,8 @@ export function decodeWalletUr(type: string, cbor: Uint8Array, network: AddressN
             "pkh(@0)": "pkh",
             "wsh(@0)": "wsh",
             "sh(wsh(@0))": "sh-wsh",
-            "sh(@0)": "sh",
+            "wsh(cosigner(@0))": "wsh",
+            "sh(wsh(cosigner(@0)))": "sh-wsh",
           } as Record<string, ScriptKind>)[src.replace(/\s/gu, "")]
           : undefined;
         if (script && k && isTag(k) && is(k.tag, "hdkey")) {
@@ -388,8 +448,11 @@ export function decodeWalletUr(type: string, cbor: Uint8Array, network: AddressN
     return { kind: "account", fingerprint: fp8(master), keys };
   }
   if (type === "crypto-output" || type === "output-descriptor" || type === "output") {
-    if (isMap(body)) return { kind: "output", ...templateOutput(body, network) };
-    return { kind: "output", descriptor: legacyOutput(body, network) };
+    const out = isMap(body)
+      ? templateOutput(body, network)
+      : { descriptor: legacyOutput(body, network) };
+    checkDescriptorBranches(out.descriptor);
+    return { kind: "output", ...out };
   }
   throw new WalletQrError(
     `This QR code is a "${type}", not a wallet export. Export the xpub or the wallet descriptor.`,
@@ -451,6 +514,10 @@ export function parseWalletText(text: string, network: AddressNetwork): WalletQr
       new Uint8Array([v >>> 24, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff, ...raw.subarray(4)]),
     );
     const path = m[2].slice(1).replace(/['H]/gu, "h");
+    if (path.split("/").some((step) => Number(step.replace(/h$/u, "")) >= 0x80000000)) {
+      throw new WalletQrError("Path step out of range");
+    }
+    if (raw.length !== 78) throw new WalletQrError("Malformed extended public key");
     const script = known.script ?? scriptFromPath(path);
     if (!script) {
       throw new WalletQrError(`Can't tell the script type of a key on path ${path}`);
@@ -458,7 +525,15 @@ export function parseWalletText(text: string, network: AddressNetwork): WalletQr
     const key = { fingerprint: m[1].toLowerCase(), path, xpub };
     return { kind: "account", fingerprint: key.fingerprint, keys: [{ script, key }] };
   }
-  if (/^[a-z]+\(/u.test(t)) return { kind: "output", descriptor: t };
+  if (/^[a-z]+\(/u.test(t)) {
+    checkDescriptorBranches(t);
+    return { kind: "output", descriptor: t };
+  }
+  if (/^([a-z]{3,8}\s+){11,23}[a-z]{3,8}$/u.test(t) || /^\d{48}$|^\d{96}$/u.test(t)) {
+    throw new WalletQrError(
+      "This looks like a SEED (recovery words or a SeedQR). Never show it to any app: export the xpub instead, and keep the seed secret.",
+    );
+  }
   throw new WalletQrError(
     "Not a wallet export: expected an animated UR code, a [fingerprint/path]xpub key, or a descriptor",
   );
@@ -487,6 +562,18 @@ export function singleSigDescriptor(script: ScriptKind, key: WalletKey, purpose:
   }
 }
 
+/** The public key inside an xpub (hex), so the same key with other metadata still matches. */
+export function publicKeyOf(xpub: string): string {
+  let raw: Uint8Array;
+  try {
+    raw = b58.decode(xpub);
+  } catch {
+    throw new WalletQrError("Malformed extended public key");
+  }
+  if (raw.length !== 78) throw new WalletQrError("Malformed extended public key");
+  return Array.from(raw.subarray(45), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
 export function multisigDescriptor(opts: {
   script: ScriptKind;
   threshold: number;
@@ -504,10 +591,11 @@ export function multisigDescriptor(opts: {
   }
   const seen = new Set<string>();
   for (const k of keys) {
-    if (seen.has(k.xpub)) {
+    const id = publicKeyOf(k.xpub);
+    if (seen.has(id)) {
       throw new WalletQrError(`The same key was added twice (fingerprint ${k.fingerprint})`);
     }
-    seen.add(k.xpub);
+    seen.add(id);
   }
   const inner = `${sorted ? "sortedmulti" : "multi"}(${threshold},${
     keys.map((k) => `${keyExpr(k)}${suffix(purpose)}`).join(",")

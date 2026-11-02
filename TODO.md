@@ -167,6 +167,9 @@ Wanted, but this is the work pre-alpha testers help with.
 
 ### Safety follow-ups
 
+- [ ] **`tr(<64 hex>)` in descriptors.** `parseDescriptor` accepts a bare 32-byte hex key in `tr()`
+      as an x-only public key, so a hex private key pasted there isn't recognised as one. Consider
+      refusing bare hex keys in imports (found in the 1c-QR review).
 - [ ] **Coins that turn up later.** Warn when a rescan finds new shared coins, with guidance in the
       UI and not just the CLI.
 - [ ] **Chain upgrades.** Watch for eCash node upgrades after v1.2.0 (may need new checkpoints) and

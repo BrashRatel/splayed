@@ -380,3 +380,148 @@ Deno.test("UI endpoints: /api/wallet/qr decodes in batches; /api/wallet/preview 
     await ui.server.shutdown();
   }
 });
+
+Deno.test("Hummingbird account-descriptor: cosigner(…) multisig keys are kept, BIP45 sh() dropped", () => {
+  // URAccountDescriptorTest.testSeed: pkh, sh(wpkh), wpkh, sh(cosigner), sh(wsh(cosigner)),
+  // wsh(cosigner), tr.
+  const r = decodeWalletUr(
+    "account-descriptor",
+    hex.decode(
+      "a2011a37b5eed40287d99d74a20167706b68284030290281d99d6fa403582103eb3e2863911826374de86c231a4b76f0b89dfa174afb78d7f478199884d9dd320458206456a5df2db0f6d9af72b2a1af4b25f45200ed6fcc29c3440b311d4796b70b5b06d99d70a20186182cf500f500f5021a37b5eed4081a99f9cdf7d99d74a2016c73682877706b6828403029290281d99d6fa403582102c7e4823730f6ee2cf864e2c352060a88e60b51a84e89e4c8c75ec22590ad6b690458209d2f86043276f9251a4a4f577166a5abeb16b6ec61e226b5b8fa11038bfda42d06d99d70a201861831f500f500f5021a37b5eed4081aa80f7cdbd99d74a2016877706b68284030290281d99d6fa403582103fd433450b6924b4f7efdd5d1ed017d364be95ab2b592dc8bddb3b00c1c24f63f04582072ede7334d5acf91c6fda622c205199c595a31f9218ed30792d301d5ee9e3a8806d99d70a201861854f500f500f5021a37b5eed4081a0d5de1d7d99d74a20170736828636f7369676e657228403029290281d99d6fa4035821035ccd58b63a2cdc23d0812710603592e7457573211880cb59b1ef012e168e059a04582088d3299b448f87215d96b0c226235afc027f9e7dc700284f3e912a34daeb1a2306d99d70a20182182df5021a37b5eed4081a37b5eed4d99d74a2017573682877736828636f7369676e65722840302929290281d99d6fa4035821032c78ebfcabdac6d735a0820ef8732f2821b4fb84cd5d6b26526938f90c0507110458207953efe16a73e5d3f9f2d4c6e49bd88e22093bbd85be5a7e862a4b98a16e0ab606d99d70a201881830f500f500f501f5021a37b5eed4081a59b69b2ad99d74a2017177736828636f7369676e657228403029290281d99d6fa40358210260563ee80c26844621b06b74070baf0e23fb76ce439d0237e87502ebbd3ca3460458202fa0e41c9dc43dc4518659bfcef935ba8101b57dbc0812805dd983bc1d34b81306d99d70a201881830f500f500f502f5021a37b5eed4081a59b69b2ad99d74a201667472284030290281d99d6fa403582102bbb97cf9efa176b738efd6ee1d4d0fa391a973394fbc16e4c5e78e536cd14d2d0458204b4693e1f794206ed1355b838da24949a92b63d02e58910bf3bd3d9c242281e606d99d70a201861856f500f500f5021a37b5eed4081acec7070c",
+    ),
+    MAIN_NETWORK,
+  );
+  assert(r.kind === "account");
+  if (r.kind !== "account") return;
+  assertEquals(r.keys.map((k) => k.script), ["pkh", "sh-wpkh", "wpkh", "sh-wsh", "wsh", "tr"]);
+  assertEquals(r.keys.find((k) => k.script === "wsh")!.key.path, "48h/0h/0h/2h");
+  assertEquals(r.keys.find((k) => k.script === "sh-wsh")!.key.path, "48h/0h/0h/1h");
+});
+
+Deno.test("review fixes: children paths, branch suffixes, duplicates, ranges, seeds", async () => {
+  const { checkDescriptorBranches, publicKeyOf } = await import("../src/core/ur_wallet.ts");
+  // Children other than <0;1>/* or 0/* would silently change the addresses: refused.
+  const withChildren = (children: W) =>
+    account({ m: [[3, pub], [4, cc], [6, origin], [7, { t: 304, v: { m: [[1, children]] } }]] });
+  for (
+    const [children, ok] of [
+      [[[0, false, 1, false], [], false], true], // <0;1>/*
+      [[0, false, [], false], true], // 0/*
+      [[1, false, [], false], false], // 1/*
+      [[[1, false, 0, false], [], false], false], // <1;0>/*
+      [[[], false], false], // *
+      [[0, true, [], false], false], // hardened below the account
+    ] as [W, boolean][]
+  ) {
+    let accepted = true;
+    try {
+      decodeWalletUr("crypto-account", withChildren(children), MAIN_NETWORK);
+    } catch (e) {
+      assert(e instanceof WalletQrError, String(e));
+      accepted = false;
+    }
+    assertEquals(accepted, ok, JSON.stringify(children));
+  }
+  // Whole-wallet descriptors with swapped or change-only branches are refused.
+  const c = fixtures.cases.find((x) => x.kind === "output")!;
+  checkDescriptorBranches(c.descriptor);
+  for (
+    const bad of [
+      c.descriptor.replaceAll("<0;1>", "<1;0>"),
+      asDestination(c.descriptor).replaceAll("/0/*", "/1/*"),
+    ]
+  ) {
+    try {
+      parseWalletText(bad, MAIN_NETWORK);
+      throw new Error("expected a refusal");
+    } catch (e) {
+      assert(e instanceof WalletQrError && /only supports/u.test(e.message), String(e));
+    }
+  }
+  // Repeated CBOR map keys can't hide a flag.
+  try {
+    readCbor(new Uint8Array(enc({ m: [[2, true], [2, false]] })));
+    throw new Error("expected a refusal");
+  } catch (e) {
+    assert(e instanceof WalletQrError && /repeated/u.test(e.message), String(e));
+  }
+  // The same key with different metadata is still the same cosigner.
+  const cos = fixtures.cases.find((x) => x.kind === "cosigners")!.cosigners![0];
+  const raw = (await import("@scure/base")).createBase58check(
+    (await import("@noble/hashes/sha2.js")).sha256,
+  );
+  const bytes = raw.decode(cos.xpub);
+  bytes.set([0, 0, 0, 0], 5); // parent fingerprint zeroed
+  const variant = raw.encode(bytes);
+  assert(variant !== cos.xpub);
+  assertEquals(publicKeyOf(variant), publicKeyOf(cos.xpub));
+  try {
+    multisigDescriptor({
+      script: "wsh",
+      threshold: 1,
+      sorted: true,
+      keys: [{ ...cos, xpub: cos.xpub }, { ...cos, xpub: variant }],
+      purpose: "import",
+    });
+    throw new Error("expected a refusal");
+  } catch (e) {
+    assert(e instanceof WalletQrError && /twice/u.test(e.message), String(e));
+  }
+  // Origin steps of 2^31 or more are refused, in static text and in descriptors.
+  try {
+    parseWalletText(`[73c5da0a/84h/0h/2147483648h]${fixtures.cases[4].xpub}`, MAIN_NETWORK);
+    throw new Error("expected a refusal");
+  } catch (e) {
+    assert(e instanceof WalletQrError, String(e));
+  }
+  try {
+    parseDescriptor(
+      `wpkh([73c5da0a/84h/0h/4294967295h]${fixtures.cases[0].xpub}/0/*)`,
+      MAIN_NETWORK,
+    );
+    throw new Error("expected a refusal");
+  } catch (e) {
+    assert(/out of range/u.test((e as Error).message), String(e));
+  }
+  // A seed phrase or SeedQR digits get a clear warning, not "not a wallet export".
+  for (
+    const text of [
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "0".repeat(48),
+    ]
+  ) {
+    try {
+      parseWalletText(text, MAIN_NETWORK);
+      throw new Error("expected a refusal");
+    } catch (e) {
+      assert(e instanceof WalletQrError && /SEED/u.test(e.message), String(e));
+    }
+  }
+});
+
+Deno.test("UI endpoint: a stray plain-text code doesn't throw away an animated scan", async () => {
+  const { startUi } = await import("../src/ui/server.ts");
+  const { main } = await import("../src/cli/main.ts");
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-walletqr-" });
+  const ui = startUi({ dataDir, run: main, baseIO: { env: {} } });
+  const call = async (body: unknown) =>
+    await (await fetch(`http://127.0.0.1:${ui.port}/api/wallet/qr`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ui.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })).json();
+  try {
+    const c = fixtures.cases.find((x) => x.kind === "account")!;
+    const st = fixtures.cases.find((x) => x.kind === "static")!;
+    const first = await call({ session: "stray-0001", frames: c.frames!.slice(0, 2) });
+    assertEquals(first.complete, false);
+    const rest = await call({
+      session: "stray-0001",
+      frames: [st.frames![0], ...c.frames!.slice(2)],
+    });
+    assertEquals(rest.complete, true);
+    assertEquals(rest.result.keys[0].key.xpub, c.xpub);
+  } finally {
+    await ui.server.shutdown();
+  }
+});

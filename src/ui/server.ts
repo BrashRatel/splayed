@@ -9,9 +9,10 @@ import { base64 } from "@scure/base";
 import { type CliIO, describeTor } from "../cli/main.ts";
 import { privacyLevel } from "../cli/format.ts";
 import { type Config, loadConfig, networkConfirmed, routeForBackend } from "../core/config.ts";
-import { DescriptorError, networkForProfile, parseDescriptor } from "../core/descriptors.ts";
+import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import {
   asDestination,
+  checkDescriptorBranches,
   decodeWalletUr,
   multisigDescriptor,
   parseWalletText,
@@ -57,6 +58,8 @@ const walletSessions = new Map<string, URDecoder>();
 
 const FP = /^[0-9a-f]{8}$/u;
 const ORIGIN_PATH = /^\d{1,10}h?(\/\d{1,10}h?){0,9}$/u;
+const pathInRange = (path: string) =>
+  path.split("/").every((step) => Number(step.replace(/h$/u, "")) < 0x8000_0000);
 const XPUB = /^[xt]pub[1-9A-HJ-NP-Za-km-z]{100,115}$/u;
 const SCRIPTS = new Set(["wpkh", "sh-wpkh", "tr", "pkh", "wsh", "sh-wsh"]);
 
@@ -65,7 +68,8 @@ function walletKeyFrom(v: unknown): WalletKey {
   const k = v as Partial<WalletKey> | null;
   if (
     !k || typeof k.fingerprint !== "string" || !FP.test(k.fingerprint) ||
-    typeof k.path !== "string" || !ORIGIN_PATH.test(k.path) || typeof k.xpub !== "string" ||
+    typeof k.path !== "string" || !ORIGIN_PATH.test(k.path) || !pathInRange(k.path) ||
+    typeof k.xpub !== "string" ||
     !XPUB.test(k.xpub)
   ) throw new JobError("Malformed key");
   return { fingerprint: k.fingerprint, path: k.path, xpub: k.xpub };
@@ -99,6 +103,7 @@ function walletPreview(
     if (typeof body.descriptor !== "string" || body.descriptor.length > 8192) {
       throw new JobError("Bad descriptor");
     }
+    checkDescriptorBranches(body.descriptor);
     descriptor = purpose === "dest" ? asDestination(body.descriptor) : body.descriptor;
   } else {
     throw new JobError("Unknown preview mode");
@@ -584,8 +589,11 @@ export function startUi(
         const config = await loadConfig({ dataDir: options.dataDir, env: options.baseIO.env });
         const network = networkForProfile(config.profile);
         if (body.reset) walletSessions.delete(body.session);
-        const frames = body.frames.map((f) => String(f).trim()).filter(Boolean);
-        // One plain-text code (SeedSigner "Static" export, or a descriptor): no UR session.
+        let frames = body.frames.map((f) => String(f).trim()).filter(Boolean);
+        // One plain-text code (SeedSigner "Static" export, or a descriptor): no UR session. Once an
+        // animated scan has made progress, a stray plain-text code in view is ignored instead.
+        const inProgress = (walletSessions.get(body.session)?.progress.known ?? 0) > 0;
+        if (inProgress) frames = frames.filter((f) => /^ur:/iu.test(f));
         const plain = frames.find((f) => !/^ur:/iu.test(f));
         if (plain !== undefined) {
           walletSessions.delete(body.session);
@@ -637,10 +645,9 @@ export function startUi(
         try {
           return json(walletPreview(body, networkForProfile(config.profile)));
         } catch (error) {
-          if (error instanceof WalletQrError || error instanceof DescriptorError) {
-            throw new JobError(error.message);
-          }
-          throw error;
+          if (error instanceof JobError) throw error;
+          // Builder, parser and address-library errors are all about the input: say so plainly.
+          throw new JobError((error as Error).message);
         }
       }
       return json({ error: "Not found" }, 404);

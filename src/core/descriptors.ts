@@ -239,6 +239,10 @@ class Parser {
       if (!/^[0-9a-fA-F]{8}(\/\d+h?)*$/u.test(body)) {
         throw new DescriptorError(`Invalid key origin [${body}]`);
       }
+      // Each step is below 2^31; the hardened flag is what adds 2^31.
+      if (body.split("/").slice(1).some((step) => Number(step.replace(/h$/u, "")) >= 0x8000_0000)) {
+        throw new DescriptorError(`Invalid key origin [${body}]: path step out of range`);
+      }
       origin = `[${body.toLowerCase()}]`;
     }
     const token = this.until("/,)");

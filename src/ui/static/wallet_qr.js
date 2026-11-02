@@ -42,8 +42,12 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
   const descriptorBlock = (descriptor) => h("pre", { class: "wallet-qr-desc" }, descriptor);
 
   /** One scan (camera, or pasted text). Resolves with the decoded result. */
-  function scan(intro) {
+  let scanNumber = 0;
+  /** One scan (camera, or pasted text). Resolves with the decoded result, or null if cancelled. */
+  function scan(intro, onCancel) {
     camera?.stop();
+    camera = null;
+    const mine = ++scanNumber;
     const session = crypto.randomUUID();
     const status = h("p", { class: "note" }, "Starting the camera…");
     const bar = h("progress", { max: "100", value: "0", class: "qr-progress" });
@@ -88,6 +92,21 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
       };
       scanArea.replaceChildren(
         h("p", { class: "note" }, intro),
+        onCancel
+          ? h(
+            "div",
+            { class: "row" },
+            h("button", {
+              class: "secondary",
+              onclick: () => {
+                done = true;
+                camera?.stop();
+                resolve(null);
+                onCancel();
+              },
+            }, "Back to the cosigners"),
+          )
+          : null,
         video,
         bar,
         status,
@@ -121,9 +140,10 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
         },
         otherwise: "Use the paste box below instead.",
       }).then((c) => {
-        camera = c;
-        if (closed || done) c?.stop();
-      });
+        // A late start from an earlier scan must not take over (or leave the camera on).
+        if (closed || done || mine !== scanNumber) c?.stop();
+        else camera = c;
+      }).catch((e) => (status.textContent = e.message));
       const timer = setInterval(() => {
         if (done || closed) clearInterval(timer);
         else flush();
@@ -255,8 +275,11 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
         h("button", {
           class: "secondary",
           onclick: async () => {
-            const r = await scan("Scan the next cosigner's xpub export (its multisig key).");
-            add(r);
+            const r = await scan(
+              "Scan the next cosigner's xpub export (its multisig key).",
+              renderBuilder,
+            );
+            if (r) add(r);
           },
         }, "Add cosigner"),
       ),
@@ -294,7 +317,19 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
     }).catch((e) => out.replaceChildren(error(e.message)));
   }
 
+  /** While building a multisig: back to the builder, with the problem shown under it. */
+  function builderError(text) {
+    renderBuilder();
+    resultArea.replaceChildren(error(text));
+  }
+
   function add(result) {
+    if (cosigners.length && result.kind === "output") {
+      builderError(
+        "That's a whole wallet descriptor, not one cosigner's key. Scan each device's multisig xpub export, or close this and scan the coordinator's wallet on its own.",
+      );
+      return;
+    }
     if (result.kind === "output") {
       showDescriptor(
         { mode: "output", descriptor: result.descriptor },
@@ -308,22 +343,22 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
       const want = cosigners[0].script;
       const k = multi.find((x) => x.script === want);
       if (!k) {
-        resultArea.replaceChildren(error(
+        builderError(
           `That code has no ${
             SCRIPT_NAMES[want]
           } key. On the device, export the multisig xpub for the same script type.`,
-        ));
+        );
         return;
       }
       if (cosigners.some((c) => c.key.xpub === k.key.xpub)) {
-        resultArea.replaceChildren(error("That cosigner was already added."));
+        builderError("That cosigner was already added.");
         return;
       }
       cosigners.push(k);
       renderBuilder();
       return;
     }
-    if (multi.length && !single.length) {
+    if (multi.length === 1 && !single.length) {
       cosigners.push(multi[0]);
       renderBuilder();
       return;
@@ -352,6 +387,15 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
                 `${SCRIPT_NAMES[k.script]} · ${k.key.fingerprint}`,
               ),
           }, SCRIPT_NAMES[k.script])
+        ),
+        ...multi.map((k) =>
+          h("button", {
+            class: "secondary",
+            onclick: () => {
+              cosigners.push(k);
+              renderBuilder();
+            },
+          }, `Start a multisig: ${SCRIPT_NAMES[k.script]}`)
         ),
       ),
     );

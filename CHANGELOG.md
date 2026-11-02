@@ -24,6 +24,15 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   multisig, a coordinator `crypto-output`) and Sparrow's Hummingbird vectors, with addresses
   cross-checked in embit (`tests/fixtures/seedsigner/generate.py`, `testdata/seedsigner_ur.json`).
   The camera scan is shared with **Scan signed** (`startCamera` in `qr.js`).
+- **QR import review fixes** (independent review): multisig keys marked `cosigner(…)` in
+  `account-descriptor` / legacy exports are kept, BIP45 `sh()` keys dropped; exports with both
+  single-sig and multisig keys can start a multisig; a wrong scan while building returns to the
+  builder (and scans have **Back to the cosigners**); key derivations other than `<0;1>/*` or `0/*`,
+  and whole-wallet descriptors with swapped or change-only branches, are refused instead of silently
+  giving other addresses; duplicate cosigners are found by public key; origin path steps of 2^31 or
+  more are refused (also in `parseDescriptor`); repeated CBOR map keys are refused; a seed phrase or
+  SeedQR gets a clear warning; a stray plain-text code no longer discards an animated scan in
+  progress; a late camera start can't leave the camera on.
 
 - **Archive and delete plans** (`plans archive|unarchive|delete <plan>`, and **Archive** /
   **Delete…** buttons on the Plans tab with an "Archived plans" section). Archiving leaves a marker
