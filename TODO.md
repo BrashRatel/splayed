@@ -162,8 +162,12 @@ Wanted, but this is the work pre-alpha testers help with.
 
 ### Browser checks
 
-- [ ] Look at these in a real browser: reorg alerts, fee bump buttons, and the donor screen (these
-      were rendered only against a stub DOM or not looked at).
+- [x] Look at these in a real browser: reorg alerts, fee bump buttons, and the donor screen. Done in
+      Chromium (Playwright) against fake chains with mining/reorg controls; the findings are fixed
+      (see CHANGELOG, Unreleased → Fixed).
+- [ ] An accepted split that was never confirmed and then falls out of every mempool is not flagged
+      by `track` (only a split seen in a block is); `broadcast` re-sends only a TEST FIRST one in
+      that state.
 
 ### Safety follow-ups
 

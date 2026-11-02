@@ -85,6 +85,54 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   is unchanged. (`src/core/progress.ts`; `progress` on `CliIO` and on job snapshots from
   `GET /api/jobs/<id>`.)
 
+### Fixed
+
+Findings from a real-browser check of reorgs, fee bumps and the donor screen.
+
+- **A split that left its block kept its old depth.** `track` only ever wrote the depth when a split
+  was confirmed, so after a reorg (back in the mempool, dropped, or a conflict) the row still said
+  "2 conf", the web UI hid **Fee bump…**, and `plans delete` could treat a split that had left the
+  chain as settled. `track` now records the depth as it is: 0 with where the split is instead
+  (`state`: mempool / absent / conflict) and the block it was last in (`previous`). A split that was
+  never in a block still gets no record. The reorg alert repeats on every `track` while the split is
+  out of a block, and is marked **resolved** once it (or the fee bump that replaced it) is confirmed
+  deep enough again. A split whose earlier send ended `unknown` and that `track` sees on the network
+  again goes back to `accepted`.
+- **The rest of a plan never went out after its TEST FIRST transaction was fee-bumped.** `broadcast`
+  treated the TEST FIRST spend as done only while its status was `accepted`, so once a bump had
+  replaced it (status `replaced`) "Broadcast verified" said "Nothing to broadcast" forever. The rule
+  is now: on each chain the rest waits until the TEST FIRST transaction **or the bump that replaced
+  it** is in a block (asked on the chain each time, so a test spend that left the chain in a reorg
+  closes the gate again). A TEST FIRST transaction that is not verified yet now holds the rest back
+  too (it used to be skipped, sending the rest without a test). A TEST FIRST transaction that was
+  sent but is no longer on the network is sent again. When something isn't sent, `broadcast` says
+  why for each transaction (not verified, already sent, replaced, waiting for the test spend, held
+  by the BTC-first gate, rejected, conflict) instead of only "Nothing to broadcast right now.".
+- **A second fee bump for the same transaction.** The **Fee bump…** buttons stayed on the original
+  until the replacement was broadcast, so `-bump2`, `-bump3`… could pile up. The row now says "bump
+  written: plan <id> (not sent yet)" and offers no bump while one is waiting, and `bump` refuses a
+  transaction that already has an unsent replacement (a bump plan that isn't archived and whose
+  replacement was never sent, or whose send ended `sending`/`unknown`), naming the plan to send or
+  delete; `--yes` writes another one anyway, with a warning. The bump prompt shows each
+  transaction's current rate and the BIP125 minimum.
+- **Reorg alerts.** Block hashes are shown as height plus their last 8 hex digits (the first digits
+  are zeros on real chains, so "moved" printed the same text for both blocks); the same goes for the
+  "wrong chain" identity message. The duplicated "ECX: REORG." prefix is gone (`REORG` or `CONFLICT`
+  is said once, by `track` and by the web UI). In the web UI each alert shows its kind, the number
+  of alerts for that transaction and a UTC time, and turns muted once resolved.
+- **Donor screen.** "Create fan-out PSBT(s)…" and "Create plan with donors" stay disabled while no
+  donor is ticked (a finished job used to re-enable every button); ticking a donor, or a job
+  finishing, no longer wipes what was typed in the donor fields; a refused donor import keeps the
+  pasted descriptor. "Scanned …" shows a local time instead of a raw ISO string, and "also plan ECX"
+  sits next to its checkbox.
+- **Refusals no longer dump the usage text.** `donor import` of a descriptor that is already the
+  main wallet (and "import a donor wallet first", "run donor scan first", "import a descriptor
+  first", "run scan first") print only the reason and exit 1, not 2 with ~100 lines of usage.
+- **Smaller things.** `plan` no longer says "Sign the TEST FIRST transaction" when the plan has none
+  (e.g. a single BTC-first transaction); the Status column keeps **Fee bump…** on one line; TEST
+  FIRST and pending badges are readable in the light theme; the regtest **Mine** buttons track the
+  plan you last broadcast, tracked or bumped rather than the newest one.
+
 ## 0.1.0-pre-alpha.1 (2026-11-01)
 
 ### Changed

@@ -249,7 +249,8 @@ be spent normally from your original wallet.
 
 - **A banner appears above the table saying REORG or CONFLICT.** A confirmed split changed
   (re-mined, dropped, or its coin was spent another way). Leave the BTC copies alone and read
-  [Recovery](recovery.md#reorgs).
+  [Recovery](recovery.md#reorgs). A dropped split is sent again with **Broadcast verified**. Once
+  the split is confirmed deep enough again, the banner turns grey and says **Resolved**.
 - **A transaction is stuck unconfirmed.** Use **Fee bump…** on its row (or **Fee bump all
   unconfirmed…**) to create a higher-fee replacement. Sign, verify and broadcast the new plan
   exactly as above. See [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).

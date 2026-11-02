@@ -84,9 +84,12 @@ See [Advanced donor routes](../user/advanced-donor-routes.md).
 - It saves progress to disk before sending.
 - Each transaction goes only to its own chain, over its own Tor circuit.
 - On each chain it sends the **TEST FIRST** (smallest) transaction alone and waits for it to confirm
-  before sending the rest (`--all` overrides).
+  before sending the rest (`--all` overrides). A fee bump that replaced the TEST FIRST transaction
+  counts once it is in a block; a TEST FIRST transaction that isn't verified yet holds the rest
+  back. The chain is asked each time, so a test spend that left the chain closes the gate again.
 - An unknown result (timeout, Tor failure) is recorded as unknown, never as failed, and is safe to
-  retry. Re-running is idempotent.
+  retry. Re-running is idempotent; a split that `track` saw leave the chain is sent again.
+- Whatever it doesn't send, it says why, per transaction.
 - In the BTC-first route, the XBT transaction is held back until the coin is gone from BTC and ECX.
 
 ## Esplora and spend detection

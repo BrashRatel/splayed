@@ -12,6 +12,19 @@ was confirmed has changed, it says so loudly and exits with status 1:
 | Gone from the chain and the mempool, input unspent again                                         | `REORG`: the coin is shared with BTC again. `broadcast` can send it again |
 | Input spent by a different transaction (an outside spend, or a BTC spend replayed onto the fork) | `CONFLICT`. The split is marked conflicting and will not be re-sent       |
 
+Blocks are named by height and the last 8 hex digits of their hash (the first digits are zeros on
+every real block).
+
+`track` records the depth as it is now: a split that left its block shows depth 0 (in the web UI
+"back in the mempool (was N conf)" or "not on the chain (was N conf)"), so it can be fee-bumped
+again and `plans delete` keeps refusing the plan. The warning repeats on every `track` until the
+split is in a block again; once it (or the fee bump that replaced it) is confirmed to the required
+depth, the alert is marked resolved (muted in the web UI).
+
+A split that left the chain is sent again by **Broadcast verified** (`broadcast <plan>`): its bytes
+are verified again, the backend's identity is checked and its inputs must be unspent, as for any
+broadcast.
+
 Until every split is confirmed again, leave the BTC copies alone. `scan` also warns when a spend it
 saw last time has disappeared or been replaced by a different transaction.
 
@@ -43,6 +56,12 @@ replay-protected exactly like the original. Sign it in your wallet and `verify` 
 - When the replacement is sent, the original is marked `replaced` and `track` shows
   `REPLACED by plan ...`. If the original confirms first, the replacement is refused and `track`
   says so.
+- One replacement at a time: while a bump plan for a transaction is written but not sent, `bump`
+  refuses that transaction and names the plan (sign and broadcast it, or `plans delete` it first;
+  `--yes` writes another anyway). The web UI shows "bump written: plan … (not sent yet)" instead of
+  the **Fee bump…** button.
+- Bumping the TEST FIRST transaction is fine: the rest of the original plan goes out (with
+  **Broadcast verified** on the original plan) once the replacement is confirmed.
 - Fee bumps are not supported for BTC transactions yet.
 
 ### Dropping a coin from a batch
