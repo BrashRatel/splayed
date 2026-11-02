@@ -77,11 +77,11 @@ beyond the gap limit of an earlier scan. Such a coin is still shared, so spendin
 replay onto the forks. Every `scan` compares itself with the previous one and prints a **NEW SHARED
 COINS** block (also shown by `status`) for coins that are shared now but weren't in the previous
 scan, or weren't shared then (a split that left the chain shows up here too). Don't spend them on
-BTC until they are split: plan them like the others (`plan --coin txid:vout` plans only them). They
-stay listed, with when they were first seen, until the split shows on the chains. They are saved in
-`scan.json` under `newShared`; the exit code doesn't change for them. The first scan has nothing to
-compare with, and a scan right after importing another wallet or raising the gap limit lists that
-wallet's shared coins: expected.
+BTC until they are split: plan them like the others (`plan --coin txid:vout` plans only them; in the
+web UI, **Plan these coins** on the Coins tab's banner). They stay listed, with when they were first
+seen, until the split shows on the chains. They are saved in `scan.json` under `newShared`; the exit
+code doesn't change for them. The first scan has nothing to compare with, and a scan right after
+importing another wallet or raising the gap limit lists that wallet's shared coins: expected.
 
 ## Plan the splits (unsigned PSBTs)
 

@@ -625,3 +625,29 @@ tr.new-shared-row td {
 .guide-alert button {
   margin-left: 8px;
 }
+
+/* Coin picker in the New plan form. */
+.coin-picker {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.coin-picker label {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.coin-picker th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.picker-reason {
+  font-size: 13px;
+}
+.picker-reason.bad {
+  color: var(--bad);
+}

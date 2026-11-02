@@ -2,6 +2,7 @@ import { assert, assertEquals } from "./assert.ts";
 import { join } from "node:path";
 import { type CliIO, main } from "../src/cli/main.ts";
 import { protectedTxids } from "../src/core/donors.ts";
+import { plannedOutpoints } from "../src/core/plan_admin.ts";
 
 const ID = "20261101T120000000-abc123";
 
@@ -25,7 +26,12 @@ function io(answer = true) {
 async function writePlan(
   dataDir: string,
   id: string,
-  txs: { chain: string; file: string; replaces?: unknown }[],
+  txs: {
+    chain: string;
+    file: string;
+    replaces?: unknown;
+    inputs?: { txid: string; vout: number }[];
+  }[],
   progress: Record<string, unknown> = {},
 ) {
   const dir = join(dataDir, "plans", id);
@@ -162,4 +168,46 @@ Deno.test("archived plans still count for the donor rules", async () => {
   assertEquals([...before], [txid]);
   assertEquals(await main(["--data-dir", dataDir, "plans", "archive", ID], io().cli), 0);
   assertEquals(await protectedTxids(dataDir, "xbt"), before);
+});
+
+Deno.test("plannedOutpoints: which plans spend each coin, newest first, and whether one was sent", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const coin = (n: number) => ({ txid: String(n).repeat(64).slice(0, 64), vout: n });
+  const key = (n: number) => `${coin(n).txid}:${n}`;
+  const sent = (status: string, confirmations?: unknown) => ({
+    broadcast: { status, at: "2026-11-01T12:00:00Z", backend: "b", attempts: 1 },
+    ...(confirmations ? { confirmations } : {}),
+  });
+  assertEquals((await plannedOutpoints(dataDir)).size, 0, "no plans folder yet");
+  const OLD = "20261101T120000000-aaaaaa";
+  const NEW = "20261102T120000000-bbbbbb";
+  const GONE = "20261103T120000000-cccccc";
+  // Old plan: coin 1 on ECX (sent) and XBT (not); coin 2 rejected; coin 3 conflict but confirmed.
+  await writePlan(dataDir, OLD, [
+    { chain: "ecx", file: "ecx/001.psbt", inputs: [coin(1)] },
+    { chain: "xbt", file: "xbt/001.psbt", inputs: [coin(1)] },
+    { chain: "ecx", file: "ecx/002.psbt", inputs: [coin(2)] },
+    { chain: "ecx", file: "ecx/003.psbt", inputs: [coin(3)] },
+  ], {
+    "ecx/001.psbt": sent("accepted"),
+    "ecx/002.psbt": sent("rejected"),
+    "ecx/003.psbt": sent("conflict", { depth: 3, at: "2026-11-01T13:00:00Z" }),
+  });
+  // Newer plan spends coin 1 and 4, nothing sent; archived plan spends coin 5.
+  await writePlan(dataDir, NEW, [
+    { chain: "ecx", file: "ecx/001.psbt", inputs: [coin(1), coin(4)] },
+  ], { "ecx/001.psbt": sent("sending") });
+  const gone = await writePlan(dataDir, GONE, [
+    { chain: "ecx", file: "ecx/001.psbt", inputs: [coin(5)] },
+  ]);
+  await Deno.writeTextFile(join(gone, "archived.json"), JSON.stringify({ at: "x" }));
+  await Deno.mkdir(join(dataDir, "plans", "not-a-plan"), { recursive: true });
+
+  const planned = await plannedOutpoints(dataDir);
+  assertEquals(planned.get(key(1)), [{ plan: NEW, sent: true }, { plan: OLD, sent: true }]);
+  assertEquals(planned.get(key(2)), [{ plan: OLD, sent: false }]);
+  assertEquals(planned.get(key(3)), [{ plan: OLD, sent: true }]);
+  assertEquals(planned.get(key(4)), [{ plan: NEW, sent: true }]);
+  assertEquals(planned.has(key(5)), false, "archived plans don't count");
+  assertEquals(planned.size, 4);
 });

@@ -24,12 +24,12 @@ import {
 } from "../core/ur_wallet.ts";
 import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
-import { archivedAt } from "../core/plan_admin.ts";
+import { archivedAt, plannedOutpoints, type PlannedSpend } from "../core/plan_admin.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
 import { loadDonorScan } from "../core/donors.ts";
 import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
 import { decodePsbt } from "../core/psbt.ts";
-import { loadScan, type NewSharedCoin } from "../core/scan.ts";
+import { loadScan } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { ensureDir } from "../core/store.ts";
 import { loadWallet } from "../core/wallet.ts";
@@ -278,6 +278,7 @@ async function statusView(dataDir: string, env: Record<string, string | undefine
   const config = await loadConfig({ dataDir, env });
   const scan = await loadScan(dataDir);
   if (!scan) return { scan: null };
+  const planned = await plannedOutpoints(dataDir);
   const ctx = {
     tips: scan.tips,
     confirmations: Object.fromEntries(
@@ -293,38 +294,32 @@ async function statusView(dataDir: string, env: Record<string, string | undefine
       tips: scan.tips,
       addressesRevealed: scan.addressesRevealed,
       warnings: scan.warnings,
-      coins: scan.coins.map((c) => ({ ...c, classification: classify(c, ctx) })),
-      newShared: await withPlans(dataDir, scan.newShared ?? []),
+      coins: withPlans(
+        scan.coins.map((c) => ({ ...c, classification: classify(c, ctx) })),
+        planned,
+      ),
+      newShared: withPlans(scan.newShared ?? [], planned),
     },
   };
 }
 
-/** Adds the (not archived) plans that already spend each coin, so the UI can say what's left. */
-async function withPlans(dataDir: string, coins: NewSharedCoin[]) {
-  if (!coins.length) return [];
-  const plannedIn = new Map<string, string[]>();
-  try {
-    for await (const e of Deno.readDir(join(dataDir, PLANS_DIR))) {
-      if (!e.isDirectory) continue;
-      try {
-        const { dir, plan } = await loadPlanDir(dataDir, e.name);
-        if (await archivedAt(dir)) continue;
-        for (const t of plan.transactions) {
-          for (const i of t.inputs) {
-            const ids = plannedIn.get(`${i.txid}:${i.vout}`) ?? [];
-            if (!ids.includes(plan.id)) ids.push(plan.id);
-            plannedIn.set(`${i.txid}:${i.vout}`, ids);
-          }
-        }
-      } catch { /* skip unreadable plan dirs, as plansView does */ }
-    }
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
-  return coins.map((c) => ({
-    ...c,
-    plannedIn: (plannedIn.get(`${c.txid}:${c.vout}`) ?? []).sort().reverse(),
-  }));
+/**
+ * Adds the plans (not archived) that already spend a coin: `plannedIn` lists their ids, newest
+ * first, and `broadcastIn` those of them that sent a transaction spending it. Read-only; the plan
+ * form and the new-shared-coins banner use it to say what's left to plan.
+ */
+function withPlans<T extends { txid: string; vout: number }>(
+  coins: T[],
+  planned: Map<string, PlannedSpend[]>,
+) {
+  return coins.map((c) => {
+    const spends = planned.get(`${c.txid}:${c.vout}`) ?? [];
+    return {
+      ...c,
+      plannedIn: spends.map((s) => s.plan),
+      broadcastIn: spends.filter((s) => s.sent).map((s) => s.plan),
+    };
+  });
 }
 
 async function plansView(dataDir: string) {

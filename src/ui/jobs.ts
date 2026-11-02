@@ -50,10 +50,17 @@ export class JobError extends Error {
   }
 }
 
+/**
+ * Most args one command takes: room for the plan form's coin picker, which passes
+ * `--coin txid:vout` per selected coin (about 250 coins). Request bodies stay capped at 4 MiB.
+ */
+export const MAX_ARGS = 512;
+
 export function validateArgs(args: unknown): string[] {
-  if (!Array.isArray(args) || args.length === 0 || args.length > 64) {
+  if (!Array.isArray(args) || args.length === 0) {
     throw new JobError("args must be a non-empty list");
   }
+  if (args.length > MAX_ARGS) throw new JobError(`at most ${MAX_ARGS} args`);
   for (const a of args) {
     if (typeof a !== "string" || a.length > 8192) throw new JobError("each arg must be a string");
     if (FORBIDDEN_FLAGS.some((f) => a === f || a.startsWith(`${f}=`))) {

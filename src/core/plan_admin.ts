@@ -11,7 +11,7 @@
  */
 import { join } from "node:path";
 import type { Config } from "./config.ts";
-import { loadProgress } from "./execute.ts";
+import { loadProgress, type Progress } from "./execute.ts";
 import { type Plan, PLANS_DIR } from "./planner.ts";
 import type { ChainId } from "./profiles.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
@@ -79,6 +79,51 @@ export async function unsettledTransactions(
         (p.replacedBy ? ` (replaced by plan ${p.replacedBy.plan})` : "") +
         `, ${depth} of ${required} confirmations`,
     );
+  }
+  return out;
+}
+
+/** One plan (not archived) that spends a coin. */
+export interface PlannedSpend {
+  plan: string;
+  /** A transaction of this plan spending the coin was sent (or may have been). */
+  sent: boolean;
+}
+
+/**
+ * Which plans already spend each outpoint ("txid:vout"), newest plan first. Archived plans and
+ * unreadable plan folders don't count. "Sent" follows unsettledTransactions: a broadcast refused
+ * by every backend (rejected, or conflicting with another spend) and never seen confirmed is not
+ * out there.
+ */
+export async function plannedOutpoints(dataDir: string): Promise<Map<string, PlannedSpend[]>> {
+  const out = new Map<string, PlannedSpend[]>();
+  const root = join(dataDir, PLANS_DIR);
+  const ids: string[] = [];
+  try {
+    for await (const e of Deno.readDir(root)) if (e.isDirectory) ids.push(e.name);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  ids.sort().reverse();
+  for (const id of ids) {
+    const dir = join(root, id);
+    const plan = await readJson<Plan>(join(dir, "plan.json")).catch(() => undefined);
+    if (!plan?.transactions || await archivedAt(dir)) continue;
+    const progress: Progress = await loadProgress(dir).catch(() => ({ version: 1, txs: {} }));
+    const spends = new Map<string, boolean>();
+    for (const t of plan.transactions) {
+      const p = progress.txs[t.file];
+      const sent = !!p?.broadcast &&
+        (!["rejected", "conflict"].includes(p.broadcast.status) || !!p.confirmations);
+      for (const i of t.inputs ?? []) {
+        const key = `${i.txid}:${i.vout}`;
+        spends.set(key, (spends.get(key) ?? false) || sent);
+      }
+    }
+    for (const [key, sent] of spends) {
+      out.set(key, [...(out.get(key) ?? []), { plan: plan.id ?? id, sent }]);
+    }
   }
   return out;
 }

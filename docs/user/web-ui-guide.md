@@ -133,7 +133,8 @@ Click **details** under a shared coin to see its next steps.
 When a later scan finds shared coins that weren't there before (a deposit to an old address, a coin
 beyond the earlier gap limit, a split that left the chain), a red banner at the top of **Coins**
 lists them, their rows get a **new** badge, and once you have a plan a pill in the header points to
-them. Don't spend those coins on BTC until they are split; plan them like the others.
+them. Don't spend those coins on BTC until they are split; plan them like the others: **Plan these
+coins** on the banner opens the plan form with only those coins ticked.
 
 ## 5. Plan: create the transactions
 
@@ -148,9 +149,16 @@ Choose:
 - **Batching:** _one coin per transaction_ keeps your coins unlinked (recommended). The other
   options combine coins into fewer transactions, which publicly links their addresses.
 - **Fees (sat/vB):** leave blank for an automatic estimate, or set your own per chain.
+- **Coins:** the coins that are still shared, with the forks each one is split from. Every coin that
+  isn't in a plan yet starts ticked; untick the ones to leave for later. A coin already in a plan
+  shows "in plan …" and whether that plan was broadcast. It starts unticked, because planning it
+  again makes a second transaction spending the same coin and only one of the two can confirm.
+  **Select all**, **Select none** and **Only new shared coins** change the pick; the line under the
+  list shows how many coins are picked and their value.
 
-Press **Create plan**. splayed re-checks each coin, fetches its previous transaction, and writes one
-unsigned file (PSBT) per transaction.
+Press **Create plan** (it stays disabled, with the reason, while no coin is picked). splayed
+re-checks each coin, fetches its previous transaction, and writes one unsigned file (PSBT) per
+transaction.
 
 ![Plan created](../images/web-ui/08-plan-created.png)
 

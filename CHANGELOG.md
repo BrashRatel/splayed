@@ -6,6 +6,22 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Coin picker in the web UI's plan form.** The New plan card lists the coins a plan could take
+  (shared per the last scan, with the forks each is split from), each with a checkbox, value, short
+  outpoint, a **new** badge for new shared coins, and "in plan <id> · broadcast / not broadcast"
+  when a plan that isn't archived already spends it. Coins not in a plan yet start ticked; **Select
+  all / Select none / Only new shared coins / Only coins not in a plan**, a running total, and
+  **Create plan** disabled with the reason while nothing is picked (or only XBT-only coins without
+  an XBT signer). The pick is kept across re-renders until a plan is created and is passed as one
+  `plan --coin txid:vout` per coin (omitted when it is every coin and none was planned before).
+  `/api/status` now gives every coin `plannedIn` (non-archived plan ids, newest first) and
+  `broadcastIn` (those that sent a transaction spending it), computed read-only by
+  `plannedOutpoints()` in `src/core/plan_admin.ts`; `newShared` entries get `broadcastIn` too. The
+  new-shared-coins banner on the Coins tab has a **Plan these coins** button (the plan form with
+  exactly those coins ticked, skipping any already in a plan) next to **Go to Plans**, and no longer
+  sends you to the command line. A UI job may now take up to 512 args (was 64), room for about 250
+  picked coins; the form refuses more than 250 unless it is every coin.
+
 - **Coins that turn up later.** Each `scan` compares itself with the previous one
   (`newSharedCoins()` in `src/core/scan.ts`) and lists coins that are shared now but weren't in the
   previous scan, or weren't shared then: a deposit to an old address, a pre-fork coin beyond the

@@ -204,6 +204,8 @@ Wanted, but this is the work pre-alpha testers help with.
         but is just slow, especially noticeable on re-scans after a split;
   - [x] edit scan gap limit and jitter;
   - [x] archive or delete plans;
+  - [x] pick which coins go in a plan (coin picker; **Plan these coins** from the new-shared-coins
+        banner);
   - [ ] show the per-coin plan, verify and broadcast state on the Coins tab;
   - [ ] an opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just

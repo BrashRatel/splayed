@@ -27,12 +27,19 @@ appear as dialogs in the browser.
    coordinator before using it. Private keys are refused.
 3. **Coins:** scan, plus per-coin status on all three chains. When a rescan finds shared coins that
    weren't in the previous scan (or weren't shared then), a red banner lists them with what to do
-   and whether a plan already spends them, with a **Go to Plans** button; their rows carry a **new**
-   badge. Once any plan exists, a **N new shared coins** pill in the header (and a line in the setup
-   guide) points back to them from every tab. See
-   [Coins that turn up later](guide.md#coins-that-turn-up-later).
+   and whether a plan already spends them (and whether it was broadcast). **Plan these coins** opens
+   the plan form with exactly those coins ticked (any already in a plan are left out); **Go to
+   Plans** opens it with the form's selection unchanged. Their rows carry a **new** badge. Once any
+   plan exists, a **N new shared coins** pill in the header (and a line in the setup guide) points
+   back to them from every tab. See [Coins that turn up later](guide.md#coins-that-turn-up-later).
 4. **Plans & signing:** create a plan, download the unsigned PSBTs (binary or base64), upload signed
-   files, then verify, broadcast and track. Each transaction has **QR** and **Scan signed** buttons
+   files, then verify, broadcast and track. The **Coins** list in the New plan form shows every coin
+   that is still shared per the last scan, the forks it is split from, and whether a plan (not
+   archived) already spends it and was broadcast. Coins not in a plan yet start ticked; **Select
+   all**, **Select none**, **Only new shared coins** and **Only coins not in a plan** change the
+   pick, and a running total shows its value. The pick is passed as `plan --coin txid:vout` per coin
+   (left out when it is every coin and none was planned before), and **Create plan** stays disabled,
+   with the reason, while nothing is picked. Each transaction has **QR** and **Scan signed** buttons
    for [air-gapped signers](signers.md#air-gapped-signers-animated-qr).
 
 Reorg alerts appear above a plan's table, and each broadcast split has a "Fee bump…" button (plus

@@ -33,6 +33,7 @@ async function withUi(
       answers?: boolean[],
     ) => Promise<{ exitCode: number; text: string; questions: string[] }>;
     chains: Record<ChainId, FakeChain>;
+    dataDir: string;
   }) => Promise<void>,
 ) {
   const btc = fakeChain("btc", 975_000);
@@ -89,7 +90,7 @@ async function withUi(
     };
   };
   try {
-    await fn({ base, token: ui.token, port: ui.port, api, runJob, chains });
+    await fn({ base, token: ui.token, port: ui.port, api, runJob, chains, dataDir });
   } finally {
     await ui.server.shutdown();
   }
@@ -265,9 +266,135 @@ Deno.test("UI status: shared coins that turn up on a rescan are exposed, with th
     assertEquals(plan.exitCode, 0, plan.text);
     const planId = (await (await api("/api/plans")).json()).plans[0].id;
     assertEquals((await status()).newShared[0].plannedIn, [planId]);
+    assertEquals((await status()).newShared[0].broadcastIn, []);
     // Archived plans don't count.
     assertEquals((await runJob(["plans", "archive", planId])).exitCode, 0);
     assertEquals((await status()).newShared[0].plannedIn, []);
+  });
+});
+
+Deno.test("UI plan form: --coin plans only the picked coins; status says which plan has each", async () => {
+  const { saveProgress } = await import("../src/core/execute.ts");
+  await withUi(async ({ runJob, api, chains, dataDir }) => {
+    const all = [chains.btc, chains.xbt, chains.ecx];
+    const branch = parseDescriptor(SRC_DESC).branches[0];
+    const b = fund(all, [{ ...branch.derive(1), value: 50_000 }], 900_000, 2);
+    const c = fund(all, [{ ...branch.derive(2), value: 70_000 }], 900_000, 3);
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    const status = async () => {
+      const s = (await (await api("/api/status")).json()).scan;
+      return new Map<string, { plannedIn: string[]; broadcastIn: string[]; value: number }>(
+        s.coins.map((x: { txid: string; vout: number }) => [`${x.txid}:${x.vout}`, x]),
+      );
+    };
+    const before = await status();
+    assertEquals(before.size, 3);
+    for (const coin of before.values()) {
+      assertEquals([coin.plannedIn, coin.broadcastIn], [[], []]);
+    }
+    const first = [...before.keys()].find((k) => ![`${b}:0`, `${c}:0`].includes(k))!;
+    const inputsOf = async (id: string) => {
+      const plan = JSON.parse(await Deno.readTextFile(`${dataDir}/plans/${id}/plan.json`));
+      return plan.transactions.flatMap((t: { inputs: { txid: string; vout: number }[] }) =>
+        t.inputs.map((i) => `${i.txid}:${i.vout}`)
+      ).sort();
+    };
+
+    // One picked coin: the plan spends only it.
+    const one = await runJob(
+      ["plan", "--chains", "ecx", "--fee-rate", "ecx=2", "--coin", `${b}:0`],
+      [true],
+    );
+    assertEquals(one.exitCode, 0, one.text);
+    const id1 = (await (await api("/api/plans")).json()).plans[0].id;
+    assertEquals(await inputsOf(id1), [`${b}:0`]);
+    let s = await status();
+    assertEquals(s.get(`${b}:0`)!.plannedIn, [id1]);
+    assertEquals(s.get(`${b}:0`)!.broadcastIn, []);
+    assertEquals(s.get(`${c}:0`)!.plannedIn, []);
+    assertEquals(s.get(first)!.plannedIn, []);
+
+    // Two picked coins, batched together: exactly those two, never the planned one.
+    const two = await runJob(
+      [
+        "plan",
+        "--chains",
+        "ecx",
+        "--batch",
+        "all",
+        "--fee-rate",
+        "ecx=2",
+        "--coin",
+        first,
+        "--coin",
+        `${c}:0`,
+      ],
+      [true],
+    );
+    assertEquals(two.exitCode, 0, two.text);
+    const id2 = (await (await api("/api/plans")).json()).plans[0].id;
+    assert(id2 !== id1);
+    assertEquals(await inputsOf(id2), [first, `${c}:0`].sort());
+    s = await status();
+    assertEquals(s.get(first)!.plannedIn, [id2]);
+    assertEquals(s.get(`${c}:0`)!.plannedIn, [id2]);
+    assertEquals(s.get(`${b}:0`)!.plannedIn, [id1]);
+    // The same coin in two plans: newest first.
+    const again = await runJob(
+      ["plan", "--chains", "ecx", "--fee-rate", "ecx=3", "--coin", `${b}:0`],
+      [true],
+    );
+    assertEquals(again.exitCode, 0, again.text);
+    const id3 = (await (await api("/api/plans")).json()).plans[0].id;
+    assertEquals((await status()).get(`${b}:0`)!.plannedIn, [id3, id1]);
+
+    // A sent transaction marks its plan as broadcast for that coin.
+    const plan1 = JSON.parse(await Deno.readTextFile(`${dataDir}/plans/${id1}/plan.json`));
+    await saveProgress(`${dataDir}/plans/${id1}`, {
+      version: 1,
+      txs: {
+        [plan1.transactions[0].file]: {
+          broadcast: { status: "accepted", at: "2026-11-02T00:00:00Z", backend: "x", attempts: 1 },
+        },
+      },
+    });
+    s = await status();
+    assertEquals(s.get(`${b}:0`)!.plannedIn, [id3, id1]);
+    assertEquals(s.get(`${b}:0`)!.broadcastIn, [id1]);
+    assertEquals(s.get(`${c}:0`)!.broadcastIn, []);
+
+    // Archived plans don't count.
+    assertEquals((await runJob(["plans", "archive", id2])).exitCode, 0);
+    s = await status();
+    assertEquals(s.get(first)!.plannedIn, []);
+    assertEquals(s.get(`${c}:0`)!.plannedIn, []);
+  });
+});
+
+Deno.test("UI jobs: room for one --coin per picked coin, but still a limit", async () => {
+  await withUi(async ({ api, runJob }) => {
+    const coins = (n: number) =>
+      Array.from({ length: n }, (_, i) => ["--coin", `${"ab".repeat(32)}:${i}`]).flat();
+    const tooMany = await api("/api/run", {
+      method: "POST",
+      body: JSON.stringify({ args: ["plan", ...coins(256)] }),
+    });
+    assertEquals(tooMany.status, 400);
+    assert((await tooMany.json()).error.includes("at most 512"));
+    // 250 coins fit (the form's own cap): the command runs, and stops only for lack of setup.
+    const fits = await runJob([
+      "plan",
+      "--chains",
+      "ecx,xbt",
+      "--xbt-signer",
+      "knots",
+      ...coins(250),
+    ]);
+    assert(fits.exitCode !== 0);
+    assert(!fits.text.includes("at most"), fits.text);
   });
 });
 

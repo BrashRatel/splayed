@@ -38,6 +38,8 @@ const state = {
   plans: null,
   donors: null,
   donorSel: new Set(),
+  /** Coins picked in the New plan form ("txid:vout"); null = the default (not yet in a plan). */
+  planSel: null,
   job: null,
   after: 0,
 };
@@ -155,6 +157,7 @@ function progressMarks() {
   return {
     confirmed: !!o.confirmed,
     walletReady: (o.descriptors ?? []).length > 0 && !!dests.ecx && !!dests.xbt,
+    plans: (state.plans?.plans ?? []).length,
   };
 }
 
@@ -194,7 +197,13 @@ async function pollJob() {
     setBusy(false);
     const before = progressMarks();
     await refresh();
-    autoAdvance(job, before, progressMarks());
+    const after = progressMarks();
+    if (job.args[0] === "plan" && after.plans > before.plans) {
+      // The new plan took the picked coins: back to the default (coins not in a plan yet).
+      state.planSel = null;
+      render();
+    }
+    autoAdvance(job, before, after);
     return;
   }
   setTimeout(pollJob, 400);
@@ -270,7 +279,10 @@ function progressText(job) {
 function setBusy(busy) {
   document.getElementById("job-state").textContent = busy ? "running…" : "idle";
   if (!busy) showProgress(null);
-  for (const b of document.querySelectorAll("section#view button")) b.disabled = busy;
+  // A button marked data-blocked (e.g. "Create plan" with no coins picked) stays disabled.
+  for (const b of document.querySelectorAll("section#view button")) {
+    b.disabled = busy || b.hasAttribute("data-blocked");
+  }
 }
 
 // ---------- data ----------
@@ -826,6 +838,7 @@ const PREVIOUSLY = {
 /** The "coins that turn up later" banner at the top of the Coins tab. */
 function newSharedBanner(coins) {
   const n = coins.length;
+  const toPlan = newSharedToPlan(plannableCoins());
   return h(
     "div",
     { class: "banner bad new-shared", role: "alert" },
@@ -852,7 +865,9 @@ function newSharedBanner(coins) {
           h("span", { class: "muted" }, ` · first seen ${new Date(c.firstSeen).toLocaleString()}`),
           " ",
           c.plannedIn?.length
-            ? badge(`in plan ${c.plannedIn[0]}`, "pending")
+            ? c.broadcastIn?.includes(c.plannedIn[0])
+              ? badge(`in plan ${c.plannedIn[0]} · broadcast`, "accepted")
+              : badge(`in plan ${c.plannedIn[0]} · not broadcast`, "pending")
             : badge("not in a plan yet", "shared"),
         )
       ),
@@ -860,9 +875,29 @@ function newSharedBanner(coins) {
     h(
       "p",
       { class: "note" },
-      "Next: plan them on the Plans tab, then sign, verify and broadcast as before. A new plan takes every coin that is still shared; to plan only these, use `splayed plan --coin txid:vout` on the command line. Expected after importing another wallet or raising the gap limit; a deposit to an old address or a split that left the chain also shows up here.",
+      "Next: plan them, then sign, verify and broadcast as before. “Plan these coins” opens the New plan form with only these coins ticked (those already in a plan are left out); “Go to Plans” leaves the form's selection as it is (by default, every shared coin not in a plan yet). Expected after importing another wallet or raising the gap limit; a deposit to an old address or a split that left the chain also shows up here.",
     ),
-    h("button", { onclick: () => selectTab("plans") }, "Go to Plans"),
+    h(
+      "div",
+      { class: "row" },
+      toPlan.size ? h("button", { onclick: () => planNewShared(toPlan) }, "Plan these coins") : h(
+        "span",
+        { class: "muted" },
+        "Nothing here to plan again: each coin is in a plan already, or wasn't checked on every chain (scan again).",
+      ),
+      h("button", { class: "secondary", onclick: () => selectTab("plans") }, "Go to Plans"),
+    ),
+  );
+}
+
+/** "Plan these coins": the New plan form with exactly these coins ticked. */
+function planNewShared(keys) {
+  state.planSel = new Set(keys);
+  selectTab("plans");
+  flash(
+    `${keys.size} new shared coin${
+      keys.size === 1 ? "" : "s"
+    } selected in the New plan form. Pick the XBT signer and fees, then Create plan.`,
   );
 }
 
@@ -1341,6 +1376,187 @@ function archivedPlansCard(plans) {
   );
 }
 
+const outpoint = (c) => `${c.txid}:${c.vout}`;
+
+/**
+ * Coins a new guided plan could take: still shared per the last scan and unspent on a fork (the
+ * planner's own candidates, before its live re-check). `forks` = the chains to split it from.
+ */
+function plannableCoins() {
+  return (state.status?.scan?.coins ?? [])
+    .filter((c) => c.classification.status === "shared")
+    .map((c) => ({ ...c, forks: c.classification.unspentOn.filter((ch) => ch !== "btc") }))
+    .filter((c) => c.forks.length);
+}
+
+/** The default pick: every plannable coin that no plan (archived ones aside) spends yet. */
+function defaultPlanSelection(coins) {
+  return new Set(coins.filter((c) => !c.plannedIn?.length).map(outpoint));
+}
+
+/** New shared coins (see the Coins tab banner) that can be planned and aren't in a plan yet. */
+function newSharedToPlan(coins) {
+  const fresh = new Set(newShared().map(outpoint));
+  return new Set(
+    coins.filter((c) => fresh.has(outpoint(c)) && !c.plannedIn?.length).map(outpoint),
+  );
+}
+
+/** The coins picked now: the user's choice (minus coins no longer plannable), or the default. */
+function planSelection(coins) {
+  if (!state.planSel) return defaultPlanSelection(coins);
+  const keys = new Set(coins.map(outpoint));
+  return new Set([...state.planSel].filter((k) => keys.has(k)));
+}
+
+/** Coins per plan the form can pass: one `--coin txid:vout` each, within the job's arg limit. */
+const MAX_PICKED_COINS = 250;
+
+/**
+ * The "Coins" part of the New plan form. The selection lives in state.planSel, so it survives the
+ * re-render after every job; ticking a box only updates the summary, not the whole view.
+ */
+function coinPicker(coins, signer, onCreate) {
+  const fresh = new Set(newShared().map(outpoint));
+  const somePlanned = coins.some((c) => c.plannedIn?.length);
+  /** CLI args for the picked coins: none when that is every coin and none was planned before. */
+  const coinArgs = () => {
+    const picked = planSelection(coins);
+    if (picked.size === coins.length && !somePlanned) return [];
+    return coins.filter((c) => picked.has(outpoint(c))).flatMap((c) => ["--coin", outpoint(c)]);
+  };
+  const boxes = new Map();
+  const summary = h("span", { class: "muted" });
+  const reason = h("span", { class: "picker-reason" });
+  const createBtn = h("button", { onclick: () => onCreate(coinArgs()) }, "Create plan");
+  const update = () => {
+    const sel = planSelection(coins);
+    const picked = coins.filter((c) => sel.has(outpoint(c)));
+    const total = picked.reduce((sum, c) => sum + c.value, 0);
+    summary.textContent = coins.length
+      ? `${picked.length} of ${coins.length} coin${coins.length === 1 ? "" : "s"} selected · ${
+        btc(total)
+      }`
+      : "";
+    const xbtOnly = picked.filter((c) => !c.forks.includes("ecx")).length;
+    let why = "";
+    if (!state.status?.scan) why = "Scan first (Coins tab): a plan uses the last scan.";
+    else if (!coins.length) why = "No shared coins left to split, per the last scan.";
+    else if (!picked.length) why = "Select at least one coin.";
+    else if (picked.length > MAX_PICKED_COINS && coinArgs().length) {
+      why = `Select at most ${MAX_PICKED_COINS} coins per plan (or all of them).`;
+    } else if (!signer.value && xbtOnly === picked.length) {
+      why = "The selected coins are only shared with XBT: pick an XBT signer.";
+    }
+    reason.textContent = why ||
+      (!signer.value && xbtOnly
+        ? `${xbtOnly} selected coin${
+          xbtOnly === 1 ? " is" : "s are"
+        } only shared with XBT and left out without an XBT signer.`
+        : "");
+    reason.className = why ? "picker-reason bad" : "picker-reason muted";
+    createBtn.toggleAttribute("data-blocked", !!why);
+    createBtn.disabled = !!why || !!(state.job && !state.job.done);
+    createBtn.title = why;
+  };
+  const choose = (keys) => {
+    state.planSel = new Set(keys);
+    for (const [k, box] of boxes) box.checked = state.planSel.has(k);
+    update();
+  };
+  signer.addEventListener("change", update);
+  const sel = planSelection(coins);
+  const rows = coins.map((c) => {
+    const k = outpoint(c);
+    const box = h("input", {
+      type: "checkbox",
+      "aria-label": `Include ${k}`,
+      onchange: () => {
+        const next = planSelection(coins);
+        if (box.checked) next.add(k);
+        else next.delete(k);
+        state.planSel = next;
+        update();
+      },
+    });
+    box.checked = sel.has(k);
+    boxes.set(k, box);
+    const latest = c.plannedIn?.[0];
+    const unconfirmed = c.forks.some((ch) => c.observations[ch]?.createdHeight === undefined);
+    return h(
+      "tr",
+      { class: fresh.has(k) ? "new-shared-row" : null },
+      h("td", {}, h("label", { class: "inline mono" }, box, short(c.txid, c.vout))),
+      h("td", {}, btc(c.value)),
+      h("td", {}, c.forks.join("+").toUpperCase()),
+      h(
+        "td",
+        {},
+        fresh.has(k) ? [badge("new", "new"), " "] : null,
+        latest
+          ? h(
+            "span",
+            {
+              class: `badge ${c.broadcastIn?.includes(latest) ? "accepted" : "pending"}`,
+              title: c.plannedIn.length > 1 ? `Also in: ${c.plannedIn.slice(1).join(", ")}` : null,
+            },
+            `in plan ${latest} · ${
+              c.broadcastIn?.includes(latest) ? "broadcast" : "not broadcast"
+            }${c.plannedIn.length > 1 ? ` (+${c.plannedIn.length - 1} more)` : ""}`,
+          )
+          : null,
+        unconfirmed
+          ? h("div", { class: "muted" }, "unconfirmed: the plan skips it until it confirms")
+          : null,
+      ),
+    );
+  });
+  const someNew = newSharedToPlan(coins).size > 0;
+  const section = coins.length
+    ? [
+      h("h3", {}, "Coins"),
+      h(
+        "p",
+        { class: "note" },
+        "Coins still shared per the last scan, and the forks each one is split from. Coins already in a plan start unticked: planning them again makes a second transaction spending the same coin, and only one of the two can confirm.",
+      ),
+      h(
+        "div",
+        { class: "row" },
+        h("button", {
+          class: "small secondary",
+          onclick: () => choose(coins.map(outpoint)),
+        }, "Select all"),
+        h("button", { class: "small secondary", onclick: () => choose([]) }, "Select none"),
+        someNew
+          ? h("button", {
+            class: "small secondary",
+            onclick: () => choose(newSharedToPlan(coins)),
+          }, "Only new shared coins")
+          : null,
+        somePlanned
+          ? h("button", {
+            class: "small secondary",
+            onclick: () => choose(defaultPlanSelection(coins)),
+          }, "Only coins not in a plan")
+          : null,
+      ),
+      h(
+        "div",
+        { class: "coin-picker" },
+        h(
+          "table",
+          {},
+          h("tr", {}, ...["Coin", "Value", "Split from", ""].map((t) => h("th", {}, t))),
+          ...rows,
+        ),
+      ),
+    ]
+    : [];
+  update();
+  return { section, footer: h("div", { class: "row" }, createBtn, summary, reason) };
+}
+
 function viewPlans() {
   const o = state.overview;
   const signer = h(
@@ -1361,7 +1577,7 @@ function viewPlans() {
   );
   const feeEcx = feeInput();
   const feeXbt = feeInput();
-  const create = () => {
+  const picker = coinPicker(plannableCoins(), signer, (coinArgs) => {
     const chains = signer.value ? "ecx,xbt" : "ecx";
     const args = ["plan", "--chains", chains, "--batch", batch.value];
     if (signer.value) args.push("--xbt-signer", signer.value);
@@ -1370,8 +1586,8 @@ function viewPlans() {
       signer.value && feeXbt.value.trim() ? `xbt=${feeXbt.value.trim()}` : "",
     ].filter(Boolean);
     if (fees.length) args.push("--fee-rate", fees.join(","));
-    run(args);
-  };
+    run([...args, ...coinArgs]);
+  });
   const view = [h(
     "div",
     { class: "card" },
@@ -1388,8 +1604,11 @@ function viewPlans() {
       h("label", {}, "Batching", batch),
       h("label", {}, "ECX fee (sat/vB)", feeEcx),
       h("label", {}, "XBT fee (sat/vB)", feeXbt),
-      h("button", { onclick: create }, "Create plan"),
     ),
+    // After the signer and fee fields: docs_screenshots.ts finds those as the tab's first select
+    // and first input.
+    ...picker.section,
+    picker.footer,
   )];
   const allPlans = state.plans?.plans ?? [];
   for (const p of allPlans.filter((x) => !x.archivedAt)) {
