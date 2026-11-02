@@ -38,3 +38,6 @@ path.
 
 [TODO.md](../TODO.md) (open work and release blockers), [CHANGELOG.md](../CHANGELOG.md),
 [SECURITY.md](../SECURITY.md).
+
+Work in progress on the `ui-deploy` branch:
+[plan, status and handoff notes](dev/ui-deploy-handoff.md).
