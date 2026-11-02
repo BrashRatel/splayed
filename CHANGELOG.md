@@ -4,6 +4,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Added (Phase 3)
+
+- **`config backend detect`** (and **Detect chain & add** on the Network tab): asks a backend which
+  chain it follows by running each chain's identity checks, and with `--add` adds it to that chain.
+  Refuses a backend that matches no chain (or more than one). Useful for a node whose flavour you
+  don't control (StartOS runs Core, Knots or Knots RDTS under one `bitcoind` package).
+
 ### Fixed (review of the track/broadcast fixes)
 
 - **A stranger's spend is no longer passed off as one of your plans on node RPC.** When the backend

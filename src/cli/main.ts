@@ -138,6 +138,10 @@ Setup (nothing about your coins is sent anywhere until you confirm):
                      [--role read|broadcast|both] [--priority N]
                      (Electrum URLs: ssl://host:50002 or tcp://host:50001)
                      [--cookie-file PATH | --user U --password-env VAR] [--label TEXT]
+  config backend detect --kind esplora|rpc|electrum --url URL [options] [--add]
+                                  Find out which chain a backend follows (checkpoints and,
+                                  for nodes, the BLAKE2b deployment), using identity queries
+                                  only; --add adds it to that chain
   config backend remove <chain> <url>
   config backend reset <chain>    Go back to the profile's default backend
   config backend fallback <chain> Add the profile's fallback backend to the list
@@ -306,6 +310,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         cpfp: { type: "boolean" },
         another: { type: "boolean" },
         ack: { type: "boolean" },
+        add: { type: "boolean" },
         drop: { type: "string", multiple: true },
         tx: { type: "string", multiple: true },
       },
@@ -323,7 +328,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
   const dataDir = flags["data-dir"] ?? io.env.SPLAYED_DATA_DIR ?? defaultDataDir();
   try {
     await ensureDir(dataDir);
-    if (command === "config" && args[0] !== "show") {
+    const detecting = command === "config" && args[0] === "backend" && args[1] === "detect";
+    if (command === "config" && args[0] !== "show" && !detecting) {
       await editConfig(dataDir, args, flags, io);
       io.out("Saved. Network settings changed: run `splayed init` to review and confirm them.");
       return 0;
@@ -338,6 +344,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
       case "init":
         return await cmdInit(config, io, flags.yes === true);
       case "config":
+        if (detecting) return await cmdDetectBackend(config, dataDir, args, flags, io);
         showConfig(config, io, await networkConfirmed(config));
         return 0;
       case "import":
@@ -464,6 +471,103 @@ function showConfig(config: Config, io: CliIO, confirmed: boolean): void {
   }
 }
 
+/** A backend described by `config backend add|detect` flags. */
+function backendFromFlags(flags: Record<string, unknown>, command: string): BackendConfig {
+  if (typeof flags.kind !== "string" || typeof flags.url !== "string") {
+    throw new UsageError(`${command} needs --kind and --url`);
+  }
+  if (!["esplora", "rpc", "electrum"].includes(flags.kind)) {
+    throw new UsageError("--kind must be esplora, rpc or electrum");
+  }
+  return {
+    kind: flags.kind as BackendConfig["kind"],
+    url: String(flags.url).replace(/\/+$/u, ""),
+    proxy: parseProxy(flags.proxy),
+    role: (flags.role as BackendConfig["role"]) ?? "both",
+    priority: flags.priority ? Number(flags.priority) : 0,
+    label: flags.label as string | undefined,
+    auth: flags["cookie-file"] || flags.user
+      ? {
+        cookieFile: flags["cookie-file"] as string | undefined,
+        user: flags.user as string | undefined,
+        passwordEnv: flags["password-env"] as string | undefined,
+      }
+      : undefined,
+    caFile: flags["ca-file"] as string | undefined,
+    origin: "user",
+  };
+}
+
+/**
+ * `config backend detect`: which chain does this backend follow? Tries it as each chain's backend
+ * and runs that chain's identity checks (pinned checkpoint hashes; for nodes also the BLAKE2b
+ * deployment and the eCash version). Only the identity queries `init` makes are sent: the tip and
+ * a few fixed block hashes, nothing about your coins. Exactly one chain must match; with --add the
+ * backend is added to it (like `config backend add`, which re-locks until `init`).
+ */
+async function cmdDetectBackend(
+  config: Config,
+  dataDir: string,
+  args: string[],
+  flags: Record<string, unknown>,
+  io: CliIO,
+): Promise<number> {
+  if (args.length > 2) {
+    throw new UsageError("config backend detect --kind K --url URL [options] [--add]");
+  }
+  const backend = backendFromFlags(flags, "config backend detect");
+  io.out(
+    `Checking which chain ${backend.url} follows. Only the chain tip and a few fixed block ` +
+      "hashes are requested.",
+  );
+  const matches: ChainId[] = [];
+  for (const chain of CHAIN_IDS) {
+    let detail: string;
+    let ok = false;
+    try {
+      await torFor(config, chain, backend, io);
+      const b = await createBackend(config, chain, backend, {
+        transportFactory: io.transportFactory,
+        streamFactory: io.streamFactory,
+        env: io.env,
+      });
+      try {
+        const r = await verifyIdentity(b, config.profile.chains[chain]);
+        ok = r.ok;
+        detail = r.detail;
+      } finally {
+        await b.close?.();
+      }
+    } catch (error) {
+      detail = (error as Error).message;
+    }
+    if (ok) matches.push(chain);
+    io.out(`  ${ok ? "MATCH" : "no   "} ${CHAIN_NAMES[chain]}: ${detail}`);
+  }
+  if (matches.length !== 1) {
+    io.err(
+      matches.length
+        ? `It matched more than one chain (${matches.join(", ")}); not adding it anywhere.`
+        : "It doesn't follow any of the three chains as pinned here (see above).",
+    );
+    return 1;
+  }
+  const [chain] = matches;
+  io.out(`${backend.url} follows ${CHAIN_NAMES[chain]}.`);
+  if (flags.add !== true) {
+    io.out(
+      `Add it with the same options: splayed config backend add ${chain} ... (or rerun with --add).`,
+    );
+    return 0;
+  }
+  await editConfig(dataDir, ["backend", "add", chain], flags, io);
+  io.out(
+    `Added to ${chain.toUpperCase()}. Network settings changed: run \`splayed init\` to review and ` +
+      "confirm them.",
+  );
+  return 0;
+}
+
 async function editConfig(
   dataDir: string,
   args: string[],
@@ -500,26 +604,7 @@ async function editConfig(
     const [action, chainArg, urlArg] = rest;
     const chain = requireChain(chainArg);
     if (action === "add") {
-      if (typeof flags.kind !== "string" || typeof flags.url !== "string") {
-        throw new UsageError("config backend add needs --kind and --url");
-      }
-      const backend: BackendConfig = {
-        kind: flags.kind as BackendConfig["kind"],
-        url: String(flags.url).replace(/\/+$/u, ""),
-        proxy: parseProxy(flags.proxy),
-        role: (flags.role as BackendConfig["role"]) ?? "both",
-        priority: flags.priority ? Number(flags.priority) : 0,
-        label: flags.label as string | undefined,
-        auth: flags["cookie-file"] || flags.user
-          ? {
-            cookieFile: flags["cookie-file"] as string | undefined,
-            user: flags.user as string | undefined,
-            passwordEnv: flags["password-env"] as string | undefined,
-          }
-          : undefined,
-        caFile: flags["ca-file"] as string | undefined,
-        origin: "user",
-      };
+      const backend = backendFromFlags(flags, "config backend add");
       const list = explicit(chain, false).filter((b) => b.url !== backend.url);
       list.push(backendToToml(backend));
       chains[chain].backends = list;

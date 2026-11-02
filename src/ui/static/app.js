@@ -608,12 +608,12 @@ function viewNetwork() {
     pwenv: h("input", { placeholder: "BTC_RPC_PASSWORD" }),
     ca: h("input", { placeholder: "server-cert.pem" }),
   };
-  const add = () => {
+  // detect: ask the backend which chain it follows and add it there (the chain field is ignored).
+  const add = (detect = false) => {
     const args = [
       "config",
       "backend",
-      "add",
-      f.chain.value,
+      ...(detect ? ["detect"] : ["add", f.chain.value]),
       "--kind",
       f.kind.value,
       "--url",
@@ -629,6 +629,7 @@ function viewNetwork() {
     if (f.user.value.trim()) args.push("--user", f.user.value.trim());
     if (f.pwenv.value.trim()) args.push("--password-env", f.pwenv.value.trim());
     if (f.ca.value.trim()) args.push("--ca-file", f.ca.value.trim());
+    if (detect) args.push("--add");
     run(args);
   };
   view.push(h(
@@ -667,7 +668,17 @@ function viewNetwork() {
         h("label", {}, "CA file (PEM)", f.ca),
       ),
     ),
-    h("div", { class: "row" }, h("button", { onclick: add }, "Add backend")),
+    h(
+      "div",
+      { class: "row" },
+      h("button", { onclick: () => add() }, "Add backend"),
+      h("button", {
+        class: "secondary",
+        title:
+          "Ask the backend which chain it follows (checkpoint hashes only) and add it to that chain",
+        onclick: () => add(true),
+      }, "Detect chain & add"),
+    ),
   ));
   return view;
 }
