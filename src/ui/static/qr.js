@@ -26,7 +26,7 @@ function drawQr(canvas, text) {
   }
 }
 
-function overlay(h, title, onClose) {
+export function overlay(h, title, onClose) {
   const box = h("div", { class: "modal-box qr-box" });
   const wrap = h("div", { class: "modal qr-modal" }, box);
   const close = () => {
@@ -115,13 +115,67 @@ export async function showPsbtQr({ api, h, planId, file, label }) {
   await load();
 }
 
+/**
+ * Starts the camera in `video` and calls `onText(text)` for each QR code text not seen before that
+ * `accept(text)` allows. Returns { stop, forget }, or null when the camera can't be used here (the
+ * reason goes into `status`, followed by `otherwise`).
+ */
+export async function startCamera({ video, status, accept, onText, otherwise = "" }) {
+  if (!navigator.mediaDevices?.getUserMedia || !globalThis.isSecureContext) {
+    status.textContent =
+      "The camera needs a secure page: open the UI at http://127.0.0.1 or localhost on the machine with the camera (a LAN address over plain http is blocked by the browser)." +
+      (otherwise ? ` ${otherwise}` : "");
+    return null;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  } catch (e) {
+    status.textContent = `No camera access: ${e.message}` + (otherwise ? ` ${otherwise}` : "");
+    return null;
+  }
+  let stopped = false;
+  video.srcObject = stream;
+  await video.play();
+  status.textContent = "Looking for QR codes…";
+  const canvas = document.createElement("canvas");
+  const g = canvas.getContext("2d", { willReadFrequently: true });
+  const seen = new Set();
+  const loop = () => {
+    if (stopped) return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      g.drawImage(video, 0, 0);
+      const img = g.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+      const text = code?.data?.trim();
+      if (text && accept(text) && !seen.has(text)) {
+        seen.add(text);
+        onText(text);
+      }
+    }
+    setTimeout(loop, 60);
+  };
+  loop();
+  return {
+    stop() {
+      stopped = true;
+      stream.getTracks().forEach((t) => t.stop());
+    },
+    forget() {
+      seen.clear();
+    },
+  };
+}
+
 /** Reads the signer's animated QR codes through the camera and hands the frames to the server. */
 export async function scanSignedPsbt({ api, h, planId, file, label, onSaved }) {
-  let stream;
+  let camera = null;
   let stopped = false;
   const stop = () => {
     stopped = true;
-    stream?.getTracks().forEach((t) => t.stop());
+    camera?.stop();
   };
   const { box, close } = overlay(h, `Scan the signed PSBT: ${label}`, stop);
   const status = h("p", { class: "note" }, "Starting the camera…");
@@ -137,23 +191,6 @@ export async function scanSignedPsbt({ api, h, planId, file, label, onSaved }) {
     bar,
     status,
   );
-  if (!navigator.mediaDevices?.getUserMedia || !globalThis.isSecureContext) {
-    status.textContent =
-      "The camera needs a secure page: open the UI at http://127.0.0.1 or localhost on the machine with the camera (a LAN address over plain http is blocked by the browser). You can also upload the signed file instead.";
-    return;
-  }
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-  } catch (e) {
-    status.textContent = `No camera access: ${e.message}`;
-    return;
-  }
-  video.srcObject = stream;
-  await video.play();
-  status.textContent = "Looking for QR codes…";
-  const canvas = document.createElement("canvas");
-  const g = canvas.getContext("2d", { willReadFrequently: true });
-  const seen = new Set();
   let queue = [];
   let sending = false;
   const flush = async () => {
@@ -180,28 +217,22 @@ export async function scanSignedPsbt({ api, h, planId, file, label, onSaved }) {
         (r.rejected ? ` (${r.rejected} unreadable frame(s) skipped)` : "");
     } catch (e) {
       status.textContent = e.message;
-      if (/another transfer|Start the scan again/u.test(e.message)) seen.clear();
+      if (/another transfer|Start the scan again/u.test(e.message)) camera?.forget();
     } finally {
       sending = false;
     }
   };
-  const loop = () => {
-    if (stopped) return;
-    if (video.readyState >= 2 && video.videoWidth) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      g.drawImage(video, 0, 0);
-      const img = g.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
-      const text = code?.data?.trim();
-      if (text && /^ur:/iu.test(text) && !seen.has(text)) {
-        seen.add(text);
-        queue.push(text);
-        flush();
-      }
-    }
-    setTimeout(loop, 60);
-  };
-  loop();
+  camera = await startCamera({
+    video,
+    status,
+    accept: (text) => /^ur:/iu.test(text),
+    onText: (text) => {
+      queue.push(text);
+      flush();
+    },
+    otherwise: "You can also upload the signed file instead.",
+  });
+  if (!camera) return;
+  if (stopped) camera.stop();
   setInterval(() => (stopped ? undefined : flush()), 500);
 }

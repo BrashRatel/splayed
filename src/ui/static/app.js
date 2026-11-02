@@ -1,4 +1,5 @@
 import { scanSignedPsbt, showPsbtQr } from "./qr.js";
+import { walletQrImport } from "./wallet_qr.js";
 // splayed web UI. Every action runs a splayed CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
@@ -684,6 +685,17 @@ function viewWallet() {
       { class: "row" },
       label,
       h("button", {
+        class: "secondary",
+        onclick: () =>
+          walletQrImport({
+            api,
+            h,
+            purpose: "import",
+            title: "Import a wallet by QR code",
+            onUse: (text) => (desc.value = text),
+          }),
+      }, "Scan QR"),
+      h("button", {
         onclick: () =>
           run([
             "import",
@@ -724,6 +736,17 @@ function viewWallet() {
           "div",
           { class: "row" },
           h("label", {}, "Start index", start),
+          h("button", {
+            class: "secondary",
+            onclick: () =>
+              walletQrImport({
+                api,
+                h,
+                purpose: "dest",
+                title: `${chain.toUpperCase()} destination by QR code`,
+                onUse: (text) => (input.value = text),
+              }),
+          }, "Scan QR"),
           h("button", {
             onclick: () =>
               run(["dest", "set", chain, input.value.trim(), "--start-index", start.value || "0"]),

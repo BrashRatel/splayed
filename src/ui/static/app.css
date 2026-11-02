@@ -512,3 +512,32 @@ input[type="file"]::file-selector-button {
 .inline-progress.hidden {
   display: none;
 }
+
+/* Wallet import by QR (wallet_qr.js). */
+.wallet-qr {
+  max-width: 760px;
+}
+.wallet-qr table {
+  width: 100%;
+}
+.wallet-qr-desc {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.85em;
+  max-height: 160px;
+  overflow: auto;
+}
+.wallet-qr .big-address {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 6px 0;
+  word-break: break-all;
+}
+.wallet-qr textarea {
+  width: 100%;
+}
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

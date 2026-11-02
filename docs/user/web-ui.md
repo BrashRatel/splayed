@@ -13,7 +13,18 @@ appear as dialogs in the browser.
 ## Tabs
 
 1. **Network:** backends, privacy level per backend, Tor mode, and "Check servers & confirm".
-2. **Wallet:** descriptors and fork destinations.
+2. **Wallet:** descriptors and fork destinations. **Scan QR** beside each field reads a wallet
+   export by camera (or pasted text) and fills the field; you still press **Import** or **Set
+   destination**. It reads:
+   - a signer's xpub export: animated UR `crypto-account` (SeedSigner's default) or the newer
+     `account-descriptor`, and SeedSigner's **Static** `[fingerprint/path]zpub…` text;
+   - a whole wallet from a coordinator such as Sparrow: UR `crypto-output` or `output-descriptor`;
+   - a plain descriptor.
+
+   For **multisig**, scan each cosigner's multisig xpub export in turn (SeedSigner: Export Xpub →
+   Multisig), set how many signatures are required and whether keys are sorted (`sortedmulti`, what
+   most coordinators use), and compare the first receive address shown with the one in your
+   coordinator before using it. Private keys are refused.
 3. **Coins:** scan, plus per-coin status on all three chains.
 4. **Plans & signing:** create a plan, download the unsigned PSBTs (binary or base64), upload signed
    files, then verify, broadcast and track. Each transaction has **QR** and **Scan signed** buttons

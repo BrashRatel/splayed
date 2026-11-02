@@ -9,7 +9,18 @@ import { base64 } from "@scure/base";
 import { type CliIO, describeTor } from "../cli/main.ts";
 import { privacyLevel } from "../cli/format.ts";
 import { type Config, loadConfig, networkConfirmed, routeForBackend } from "../core/config.ts";
-import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
+import { DescriptorError, networkForProfile, parseDescriptor } from "../core/descriptors.ts";
+import {
+  asDestination,
+  decodeWalletUr,
+  multisigDescriptor,
+  parseWalletText,
+  type Purpose,
+  type ScriptKind,
+  singleSigDescriptor,
+  type WalletKey,
+  WalletQrError,
+} from "../core/ur_wallet.ts";
 import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
 import { archivedAt } from "../core/plan_admin.ts";
@@ -41,12 +52,76 @@ async function saveUpload(dir: string, planFile: string, bytes: Uint8Array): Pro
 
 /** Decoders for scans in progress, keyed by plan and file. Memory only. */
 const qrSessions = new Map<string, URDecoder>();
+/** Wallet-import scans in progress, keyed by a random id the page picks per scan. Memory only. */
+const walletSessions = new Map<string, URDecoder>();
+
+const FP = /^[0-9a-f]{8}$/u;
+const ORIGIN_PATH = /^\d{1,10}h?(\/\d{1,10}h?){0,9}$/u;
+const XPUB = /^[xt]pub[1-9A-HJ-NP-Za-km-z]{100,115}$/u;
+const SCRIPTS = new Set(["wpkh", "sh-wpkh", "tr", "pkh", "wsh", "sh-wsh"]);
+
+/** A key sent back by the page: checked field by field before it goes into descriptor text. */
+function walletKeyFrom(v: unknown): WalletKey {
+  const k = v as Partial<WalletKey> | null;
+  if (
+    !k || typeof k.fingerprint !== "string" || !FP.test(k.fingerprint) ||
+    typeof k.path !== "string" || !ORIGIN_PATH.test(k.path) || typeof k.xpub !== "string" ||
+    !XPUB.test(k.xpub)
+  ) throw new JobError("Malformed key");
+  return { fingerprint: k.fingerprint, path: k.path, xpub: k.xpub };
+}
+
+/**
+ * Builds the descriptor for a wallet-import preview and checks it the way `import` / `dest set`
+ * will. Read-only: nothing is stored; the page puts the text in the field for the user to import.
+ */
+function walletPreview(
+  body: Record<string, unknown>,
+  network: ReturnType<typeof networkForProfile>,
+) {
+  const purpose: Purpose = body.purpose === "dest" ? "dest" : "import";
+  let descriptor: string;
+  if (body.mode === "single") {
+    if (typeof body.script !== "string" || !SCRIPTS.has(body.script)) {
+      throw new JobError("Unknown script type");
+    }
+    descriptor = singleSigDescriptor(body.script as ScriptKind, walletKeyFrom(body.key), purpose);
+  } else if (body.mode === "multisig") {
+    if (!Array.isArray(body.keys) || body.keys.length > 20) throw new JobError("Bad key list");
+    descriptor = multisigDescriptor({
+      script: body.script as ScriptKind,
+      threshold: Number(body.threshold),
+      sorted: body.sorted !== false,
+      keys: body.keys.map(walletKeyFrom),
+      purpose,
+    });
+  } else if (body.mode === "output") {
+    if (typeof body.descriptor !== "string" || body.descriptor.length > 8192) {
+      throw new JobError("Bad descriptor");
+    }
+    descriptor = purpose === "dest" ? asDestination(body.descriptor) : body.descriptor;
+  } else {
+    throw new JobError("Unknown preview mode");
+  }
+  const parsed = parseDescriptor(descriptor, network);
+  if (purpose === "dest" && !parsed.branches[0]?.ranged) {
+    throw new JobError("A destination must be a ranged descriptor (ending in /*)");
+  }
+  return {
+    descriptor,
+    normalized: parsed.normalized,
+    kind: parsed.kind,
+    branches: parsed.branches.length,
+    firstAddresses: parsed.branches.map((b) => b.derive(0).address),
+  };
+}
 
 const STATIC: Record<string, { file: string; type: string }> = {
   "/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
   "/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
   "/qr.js": { file: "qr.js", type: "text/javascript; charset=utf-8" },
+  "/wallet_qr.js": { file: "wallet_qr.js", type: "text/javascript; charset=utf-8" },
   "/vendor/qrcode.js": { file: "vendor/qrcode.js", type: "text/javascript; charset=utf-8" },
   "/vendor/jsQR.js": { file: "vendor/jsQR.js", type: "text/javascript; charset=utf-8" },
 };
@@ -496,6 +571,77 @@ export function startUi(
           throw new JobError(`The scanned data is not a usable PSBT: ${(error as Error).message}`);
         }
         return json({ complete: true, saved: await saveUpload(dir, t.file, bytes) });
+      }
+      // Wallet import by QR: frames in, decoded keys or descriptor out. Nothing is stored.
+      if (path === "/api/wallet/qr" && req.method === "POST") {
+        const body = await readBody(req) as { session?: string; frames?: unknown; reset?: boolean };
+        if (typeof body.session !== "string" || !/^[\w-]{8,64}$/u.test(body.session)) {
+          throw new JobError("session must be a random id");
+        }
+        if (!Array.isArray(body.frames) || body.frames.length > 200) {
+          throw new JobError("frames must be a list of at most 200 scanned strings");
+        }
+        const config = await loadConfig({ dataDir: options.dataDir, env: options.baseIO.env });
+        const network = networkForProfile(config.profile);
+        if (body.reset) walletSessions.delete(body.session);
+        const frames = body.frames.map((f) => String(f).trim()).filter(Boolean);
+        // One plain-text code (SeedSigner "Static" export, or a descriptor): no UR session.
+        const plain = frames.find((f) => !/^ur:/iu.test(f));
+        if (plain !== undefined) {
+          walletSessions.delete(body.session);
+          if (plain.length > 8192) throw new JobError("That code is too long");
+          try {
+            return json({ complete: true, result: parseWalletText(plain, network) });
+          } catch (error) {
+            if (error instanceof WalletQrError) throw new JobError(error.message);
+            throw error;
+          }
+        }
+        let session = walletSessions.get(body.session);
+        if (!session) {
+          if (walletSessions.size >= 8) walletSessions.delete(walletSessions.keys().next().value!);
+          session = new URDecoder();
+          walletSessions.set(body.session, session);
+        }
+        let rejected = 0;
+        let lastError: string | undefined;
+        for (const frame of frames) {
+          try {
+            session.receive(frame);
+          } catch (error) {
+            if (!(error instanceof URError)) throw error;
+            rejected++;
+            lastError = error.message;
+            if (/another transfer/u.test(error.message)) {
+              walletSessions.delete(body.session);
+              throw new JobError(`${error.message}. Start the scan again.`);
+            }
+          }
+          if (session.isComplete) break;
+        }
+        if (!session.isComplete) {
+          return json({ complete: false, rejected, lastError, progress: session.progress });
+        }
+        walletSessions.delete(body.session);
+        const { type, cbor } = session.result;
+        try {
+          return json({ complete: true, result: decodeWalletUr(type, cbor, network) });
+        } catch (error) {
+          if (error instanceof WalletQrError) throw new JobError(error.message);
+          throw error;
+        }
+      }
+      if (path === "/api/wallet/preview" && req.method === "POST") {
+        const body = await readBody(req) as Record<string, unknown>;
+        const config = await loadConfig({ dataDir: options.dataDir, env: options.baseIO.env });
+        try {
+          return json(walletPreview(body, networkForProfile(config.profile)));
+        } catch (error) {
+          if (error instanceof WalletQrError || error instanceof DescriptorError) {
+            throw new JobError(error.message);
+          }
+          throw error;
+        }
       }
       return json({ error: "Not found" }, 404);
     } catch (error) {

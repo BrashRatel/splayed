@@ -6,6 +6,20 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Wallet import by QR code, multisig included.** **Scan QR** on the Wallet tab (import field and
+  each fork destination) reads animated UR wallet exports by camera, or pasted text: a signer's xpub
+  (`crypto-account` / `account-descriptor`, SeedSigner's default), a coordinator's whole wallet
+  (`crypto-output` / `output-descriptor`, e.g. Sparrow), SeedSigner's Static `[fp/path]zpub…` text,
+  or a descriptor. Multisig: scan each SeedSigner cosigner, set the threshold and sorted/ordered
+  keys; the first receive address is shown to compare with the coordinator. Private keys and network
+  mismatches are refused. Decoding is `src/core/ur_wallet.ts` (its own bounded CBOR reader; the PSBT
+  frame decoder is unchanged) with read-only endpoints `POST /api/wallet/qr` and
+  `/api/wallet/preview`; importing still goes through `import` / `dest set`. Tested against frames
+  from SeedSigner 0.8.7's own encoder (single-sig 84/49/86/44, Static text, 2-of-3 native and nested
+  multisig, a coordinator `crypto-output`) and Sparrow's Hummingbird vectors, with addresses
+  cross-checked in embit (`tests/fixtures/seedsigner/generate.py`, `testdata/seedsigner_ur.json`).
+  The camera scan is shared with **Scan signed** (`startCamera` in `qr.js`).
+
 - **Archive and delete plans** (`plans archive|unarchive|delete <plan>`, and **Archive** /
   **Delete…** buttons on the Plans tab with an "Archived plans" section). Archiving leaves a marker
   in the plan's folder rather than moving it, because the donor rules and fee-bump tracking read

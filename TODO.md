@@ -133,7 +133,8 @@ Wanted, but this is the work pre-alpha testers help with.
 - [ ] ECX hardware wallets (Coldcard, Trezor, Ledger) sign locktime 499,999,998 without complaint
       and keep the locktime and sequences. Record which devices warn or refuse.
 - [ ] A real stock hardware wallet signing both the shared and the donor input (XBT donor route).
-- [ ] **Scan signed** with a real camera, and a Jade, Keystone and Passport.
+- [ ] **Scan signed** and **Scan QR** (wallet import) with a real camera and a real SeedSigner
+      (multisig cosigners and Static), and a Jade, Keystone and Passport.
   - Confirmed on mainnet (2026-11-01), in front of a real camera: exporting to a SeedSigner (stock
     firmware for ECX, a unified-sighash firmware fork for XBT) and scanning its signed QR back in
     both worked. Jade, Keystone and Passport still untried.
@@ -191,7 +192,7 @@ Wanted, but this is the work pre-alpha testers help with.
         and confirm", establishing circuits over Tor is slow enough to look hung without a progress
         or waiting indicator;
   - [x] auto-advance from the Network tab to the Wallet tab once settings are confirmed;
-  - [ ] scan a QR descriptor directly into the wallet/destination fields on the Wallet tab;
+  - [x] scan a QR descriptor directly into the wallet/destination fields on the Wallet tab;
   - [x] auto-advance from the Wallet tab to the Coins tab once all fork destinations are set;
   - [x] a progress or waiting indicator on the Coins tab while `scan` runs (or at least a note to be
         patient over Tor and watch the activity log) — same issue as Tor bootstrap, it looks hung
