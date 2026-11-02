@@ -2,7 +2,7 @@ import { assert, assertEquals } from "./assert.ts";
 import { join } from "node:path";
 import { type CliIO, main } from "../src/cli/main.ts";
 import { protectedTxids } from "../src/core/donors.ts";
-import { plannedOutpoints } from "../src/core/plan_admin.ts";
+import { plannedOutpoints, unsentReplacements } from "../src/core/plan_admin.ts";
 
 const ID = "20261101T120000000-abc123";
 
@@ -210,4 +210,60 @@ Deno.test("plannedOutpoints: which plans spend each coin, newest first, and whet
   assertEquals(planned.get(key(4)), [{ plan: NEW, sent: true }]);
   assertEquals(planned.has(key(5)), false, "archived plans don't count");
   assertEquals(planned.size, 4);
+});
+
+Deno.test("unsentReplacements: written and unsent fee bumps per original; sent, refused or archived ones don't count", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const bump = (n: number, status?: string) =>
+    writePlan(
+      dataDir,
+      `${ID}-bump${n}`,
+      [{
+        chain: "ecx",
+        file: `ecx/001-b${n}.psbt`,
+        replaces: { plan: ID, file: "ecx/001-aaaa.psbt", txid: "aa", fee: 1, feeRate: 1 },
+      }],
+      status
+        ? {
+          [`ecx/001-b${n}.psbt`]: { broadcast: { status, at: "x", backend: "b", attempts: 1 } },
+        }
+        : {},
+    );
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "ecx/001-aaaa.psbt" }]);
+  assertEquals((await unsentReplacements(dataDir, ID)).size, 0);
+  await bump(1); // written, never sent
+  await bump(2, "unknown"); // a send whose result is unknown: may be out there
+  await bump(3, "rejected");
+  await bump(4, "accepted");
+  const archived = await bump(5);
+  await Deno.writeTextFile(join(archived, "archived.json"), "{}");
+  const got = (await unsentReplacements(dataDir, ID)).get("ecx/001-aaaa.psbt");
+  assertEquals(got?.map((u) => [u.plan, u.status]), [
+    [`${ID}-bump1`, undefined],
+    [`${ID}-bump2`, "unknown"],
+  ]);
+});
+
+Deno.test("a split that left its block (depth 0 after track) can't be deleted; it still counts as sent", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const input = { txid: "ab".repeat(32), vout: 0 };
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "ecx/001-aaaa.psbt", inputs: [input] }], {
+    "ecx/001-aaaa.psbt": {
+      broadcast: { status: "conflict", at: "x", backend: "b", attempts: 1 },
+      confirmations: {
+        depth: 0,
+        at: "y",
+        state: "conflict",
+        previous: { depth: 60, at: "x", height: 100, blockHash: "11".repeat(32) },
+      },
+    },
+  });
+  const r = io();
+  assertEquals(await main(["--data-dir", dataDir, "plans", "delete", ID, "--yes"], r.cli), 1);
+  assert(r.text().includes("0 of 50 confirmations"), r.text());
+  // It was in a block once, so the coin shows as sent in a plan (plannedOutpoints).
+  assertEquals((await plannedOutpoints(dataDir)).get(`${input.txid}:0`), [{
+    plan: ID,
+    sent: true,
+  }]);
 });

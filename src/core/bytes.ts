@@ -6,6 +6,12 @@ export type Bytes = Uint8Array;
 export const fromHex = (value: string): Bytes => hex.decode(value);
 export const toHex = (value: Bytes): string => hex.encode(value);
 
+/**
+ * A block hash for people: its LAST 8 hex digits. Real block hashes start with many zeros, so the
+ * first digits are the same for every block and tell two blocks apart only by height.
+ */
+export const shortBlockHash = (hash: string): string => `…${hash.slice(-8)}`;
+
 export function concatBytes(...values: Bytes[]): Bytes {
   const length = values.reduce((total, value) => total + value.length, 0);
   const result = new Uint8Array(length);

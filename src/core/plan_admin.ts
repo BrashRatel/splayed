@@ -163,3 +163,57 @@ export async function deletePlan(config: Config, id: string): Promise<void> {
   }
   await Deno.remove(dir, { recursive: true });
 }
+
+/** A fee bump written for a transaction and not sent (or not known to be sent) yet. */
+export interface UnsentReplacement {
+  /** The bump plan's id and the replacement's file in it. */
+  plan: string;
+  file: string;
+  /** Its broadcast status, if a send was attempted ("sending" or "unknown"). */
+  status?: string;
+}
+
+/**
+ * Fee bumps of `planId`'s transactions that are written but not sent yet, keyed by the original's
+ * file. Rejected or conflicting replacements don't count (they never made it out); a sent one marks
+ * the original `replacedBy` instead. Archived bump plans are set aside and don't count either.
+ */
+export async function unsentReplacements(
+  dataDir: string,
+  planId: string,
+): Promise<Map<string, UnsentReplacement[]>> {
+  return (await unsentReplacementsByPlan(dataDir)).get(planId) ?? new Map();
+}
+
+/** unsentReplacements() for every plan at once: original plan id -> original file -> bumps. */
+export async function unsentReplacementsByPlan(
+  dataDir: string,
+): Promise<Map<string, Map<string, UnsentReplacement[]>>> {
+  const out = new Map<string, Map<string, UnsentReplacement[]>>();
+  const root = join(dataDir, PLANS_DIR);
+  const names: string[] = [];
+  try {
+    for await (const e of Deno.readDir(root)) if (e.isDirectory) names.push(e.name);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  for (const name of names.sort()) {
+    const dir = join(root, name);
+    const plan = await readJson<Plan>(join(dir, "plan.json")).catch(() => undefined);
+    if (!plan?.transactions?.some((t) => t.replaces)) continue;
+    if (await archivedAt(dir)) continue;
+    const progress = await loadProgress(dir).catch(() => undefined);
+    for (const t of plan.transactions) {
+      if (!t.replaces) continue;
+      const status = progress?.txs[t.file]?.broadcast?.status;
+      if (status && status !== "sending" && status !== "unknown") continue;
+      const files = out.get(t.replaces.plan) ?? new Map<string, UnsentReplacement[]>();
+      files.set(t.replaces.file, [
+        ...(files.get(t.replaces.file) ?? []),
+        { plan: name, file: t.file, status },
+      ]);
+      out.set(t.replaces.plan, files);
+    }
+  }
+  return out;
+}

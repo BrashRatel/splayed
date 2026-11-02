@@ -1,6 +1,7 @@
 // Checkpoint pattern adapted from smolcars/bcashjr-wallet src/core/chain_verifier.ts (MIT).
 import type { ChainBackend } from "../backends/types.ts";
 import type { ChainProfile } from "./profiles.ts";
+import { shortBlockHash } from "./bytes.ts";
 
 export interface IdentityResult {
   ok: boolean;
@@ -30,8 +31,8 @@ export async function verifyIdentity(
         return {
           ok: false,
           tip,
-          detail: `wrong chain: block ${checkpoint.height} is ${hash.slice(0, 16)}…, expected ` +
-            `${checkpoint.hash.slice(0, 16)}…`,
+          detail: `wrong chain: block ${checkpoint.height} is ${shortBlockHash(hash)}, expected ` +
+            shortBlockHash(checkpoint.hash),
         };
       }
     }

@@ -7,7 +7,7 @@
 import { join } from "node:path";
 import { base64 } from "@scure/base";
 import type { ChainBackend } from "../backends/types.ts";
-import { fromHex, toHex } from "./bytes.ts";
+import { fromHex, shortBlockHash, toHex } from "./bytes.ts";
 import type { ChainId } from "./profiles.ts";
 import { ECX_MAINNET_REPLAY_LOCKTIME } from "./profiles.ts";
 import type { Plan, PlannedTx } from "./planner.ts";
@@ -46,15 +46,41 @@ export interface TxProgress {
     attempts: number;
     detail?: string;
   };
-  /** Last confirmation `track` saw; the block hash is how a later reorg is noticed. */
-  confirmations?: { depth: number; at: string; height?: number; blockHash?: string };
+  /**
+   * What `track` saw last time, once the transaction has been in a block at least once. Depth 0
+   * (with `state`) when it is no longer in one; `previous` then keeps the last block it was in, so
+   * a later `track` can still tell the user what changed. The block hash is how a reorg is noticed.
+   */
+  confirmations?: Confirmations;
   /** Everything `track` has had to warn about, oldest first. */
-  reorgs?: { at: string; kind: ReorgKind; detail: string }[];
+  reorgs?: ReorgRecord[];
   /** Set on the original when a fee-bump plan replaced it. */
   replacedBy?: { plan: string; file: string };
 }
 
 export type ReorgKind = "moved" | "unconfirmed" | "dropped" | "conflict";
+
+export interface SeenInBlock {
+  depth: number;
+  at: string;
+  height?: number;
+  blockHash?: string;
+}
+
+export interface Confirmations extends SeenInBlock {
+  /** Set when depth is 0: where it is instead. */
+  state?: "mempool" | "absent" | "conflict";
+  /** Set when depth is 0: the last block `track` saw it in. */
+  previous?: SeenInBlock;
+}
+
+export interface ReorgRecord {
+  at: string;
+  kind: ReorgKind;
+  detail: string;
+  /** When `track` next saw the split (or the fee bump that replaced it) confirmed deep enough. */
+  resolved?: string;
+}
 
 export interface Progress {
   version: 1;
@@ -358,61 +384,241 @@ export interface ReorgAlert {
   detail: string;
 }
 
-const short = (hash?: string) => (hash ? `${hash.slice(0, 12)}…` : "unknown block");
+/** "block 974512 (…9c3e1a0b)": the height, and the part of the hash that differs. */
+const blockRef = (height?: number, hash?: string) =>
+  `${height ?? "?"}${hash ? ` (${shortBlockHash(hash)})` : ""}`;
+
+/** The headline `track` and the web UI put in front of an alert's detail. */
+export const alertTitle = (kind: ReorgKind) => (kind === "conflict" ? "CONFLICT" : "REORG");
+
+/** The last block a transaction was seen in, if `track` has ever seen it in one. */
+function lastSeenInBlock(prev?: Confirmations): SeenInBlock | undefined {
+  return prev && prev.depth > 0 ? prev : prev?.previous;
+}
 
 /**
  * Compares what `track` saw last time with what it sees now. Only a transaction that was once
- * seen confirmed can be "reorged"; a conflict is always worth shouting about.
+ * seen confirmed can be "reorged"; a conflict is always worth shouting about. While a reorged
+ * split is out of a block the alert repeats on every `track`, so it can't be missed.
  */
 export function assessReorg(
   chain: ChainId,
-  prev: TxProgress["confirmations"] | undefined,
+  prev: Confirmations | undefined,
   now: DepthResult,
 ): ReorgAlert | undefined {
   const label = chain.toUpperCase();
+  const seen = lastSeenInBlock(prev);
   switch (now.state) {
     case "conflict":
       return {
         kind: "conflict",
         detail:
-          `${label}: this split's input was spent by ${
+          `This split's input was spent by ${
             now.by ? `transaction ${now.by}` : "another transaction"
           }, not by this split. If you did not make that spend, treat the key as compromised; if ` +
           `you spent the BTC copy ordinarily, it was replayed onto ${label}.`,
       };
     case "confirmed":
-      if (prev?.blockHash && now.blockHash && prev.blockHash !== now.blockHash) {
+      // Straight from one block to another. One that left the chain and came back was reported
+      // when it left; being confirmed again is the recovery.
+      if (
+        prev && prev.depth > 0 && prev.blockHash && now.blockHash &&
+        prev.blockHash !== now.blockHash
+      ) {
         return {
           kind: "moved",
-          detail:
-            `${label}: REORG. This split was in block ${short(prev.blockHash)} (height ${
-              prev.height ?? "?"
-            }) and is now in block ${short(now.blockHash)} (height ${now.height}). ` +
-            "It is still confirmed, but in a different block: wait for it to be deep again.",
+          detail: `This split was in block ${blockRef(prev.height, prev.blockHash)} and is now ` +
+            `in block ${blockRef(now.height, now.blockHash)}. It is still confirmed, but in a ` +
+            "different block: wait for it to be deep again.",
         };
       }
       return undefined;
     case "mempool":
-      return prev
+      return seen
         ? {
           kind: "unconfirmed",
-          detail: `${label}: REORG. This split was confirmed (${prev.depth} deep) and is back in ` +
-            "the mempool. It should confirm again; do not spend the BTC copy until it does.",
+          detail:
+            `This split was confirmed ${seen.depth} deep in block ${
+              blockRef(seen.height, seen.blockHash)
+            } and is back in the mempool. It should confirm again; do not spend the BTC copy ` +
+            "until it does.",
         }
         : undefined;
     case "absent":
-      return prev
+      return seen
         ? {
           kind: "dropped",
-          detail: `${label}: REORG. This split was confirmed (${prev.depth} deep) and has left ` +
-            `the chain; it is not in the mempool and its input is unspent again, so the coin is ` +
-            `back on ${label} and still shared with BTC. Do NOT spend the BTC copy. Run ` +
-            "`splayed broadcast` to send it again, or `splayed bump` to replace it.",
+          detail:
+            `This split was confirmed ${seen.depth} deep in block ${
+              blockRef(seen.height, seen.blockHash)
+            } and has left the chain; it is not in the mempool and its input is unspent again, ` +
+            `so the coin is back on ${label} and still shared with BTC. Do NOT spend the BTC ` +
+            "copy. Run `splayed broadcast` to send it again, or `splayed bump` to replace it.",
         }
         : undefined;
     case "unknown":
       return undefined;
   }
+}
+
+/**
+ * What `track` records after looking: the depth now, truthfully. A transaction that left its
+ * block gets depth 0 and keeps the block it was last seen in. "unknown" (a backend that can't
+ * tell) keeps the last record. Nothing is recorded for one that was never in a block.
+ */
+export function nextConfirmations(
+  prev: Confirmations | undefined,
+  now: DepthResult,
+  at: string,
+): Confirmations | undefined {
+  switch (now.state) {
+    case "confirmed":
+      return { depth: now.depth!, at, height: now.height, blockHash: now.blockHash };
+    case "unknown":
+      return prev;
+    default: {
+      if (!prev) return undefined;
+      const seen = lastSeenInBlock(prev);
+      return {
+        depth: 0,
+        at,
+        state: now.state,
+        previous: seen &&
+          { depth: seen.depth, at: seen.at, height: seen.height, blockHash: seen.blockHash },
+      };
+    }
+  }
+}
+
+/** Marks every open reorg record resolved: the split is confirmed deep enough again. */
+export function resolveReorgs(p: TxProgress, at: string): void {
+  if (!p.reorgs?.some((r) => !r.resolved)) return;
+  p.reorgs = p.reorgs.map((r) => (r.resolved ? r : { ...r, resolved: at }));
+}
+
+/** Adds an alert to the history unless it repeats the open one at the end. */
+export function recordReorg(p: TxProgress, alert: ReorgAlert, at: string): void {
+  const last = p.reorgs?.[p.reorgs.length - 1];
+  if (last && !last.resolved && last.kind === alert.kind && last.detail === alert.detail) return;
+  p.reorgs = [...(p.reorgs ?? []), { at, kind: alert.kind, detail: alert.detail }];
+}
+
+export interface TestFirstVerdict {
+  /** The rest of the chain's transactions may be sent. */
+  open: boolean;
+  /** Send (or send again) the TEST FIRST transaction itself now. */
+  sendTest: boolean;
+  /** For the user: why the rest may go, or why it waits. */
+  reason: string;
+  test?: PlannedTx;
+}
+
+/**
+ * The TEST FIRST rule: on each chain the rest of a plan waits until its TEST FIRST spend is
+ * confirmed, proving the signer, the destination and the route work before more coins move. The
+ * spend counts when the TEST FIRST transaction is in a block, or the fee bump that replaced it is
+ * (followed through `replacedBy` to the bump plan). Asks the chain each time, so a test spend
+ * that left the chain in a reorg closes the gate again.
+ */
+export async function testFirstGate(o: {
+  dataDir: string;
+  plan: Plan;
+  progress: Progress;
+  chain: ChainId;
+  backend: ChainBackend;
+}): Promise<TestFirstVerdict> {
+  const test = o.plan.transactions.find((t) => t.chain === o.chain && t.testFirst);
+  if (!test) return { open: true, sendTest: false, reason: "no TEST FIRST transaction" };
+  const p = o.progress.txs[test.file];
+  const name = `the TEST FIRST transaction (${test.file})`;
+  const override = "or pass --all to send everything now";
+  if (!p?.verified) {
+    return {
+      open: false,
+      sendTest: false,
+      test,
+      reason: `waiting for ${name}: it isn't verified yet. Sign and verify it first, ${override}.`,
+    };
+  }
+  const tip = await o.backend.tipHeight();
+  const own = await confirmationDepth(o.backend, test, p.verified.txid, tip);
+  if (own.state === "confirmed") {
+    return {
+      open: true,
+      sendTest: false,
+      test,
+      reason: `${name} is confirmed (${own.depth} deep)`,
+    };
+  }
+  if (p.replacedBy) {
+    const by = p.replacedBy.plan;
+    let r: DepthResult | undefined;
+    try {
+      const { dir, plan } = await loadPlanDir(o.dataDir, by);
+      const rt = plan.transactions.find((t) => t.file === p.replacedBy!.file);
+      const rtxid = (await loadProgress(dir)).txs[p.replacedBy.file]?.verified?.txid;
+      if (rt && rtxid) r = await confirmationDepth(o.backend, rt, rtxid, tip);
+    } catch { /* unreadable: stays closed */ }
+    if (r?.state === "confirmed") {
+      return {
+        open: true,
+        sendTest: false,
+        test,
+        reason:
+          `${name} was replaced by plan ${by}, and that replacement is confirmed (${r.depth} deep)`,
+      };
+    }
+    return {
+      open: false,
+      sendTest: false,
+      test,
+      reason: r
+        ? `waiting for ${name} to confirm: it was replaced by plan ${by}, which is ${r.state}` +
+          (r.state === "absent"
+            ? `; it is not on the network, so run \`splayed broadcast ${by}\``
+            : r.state === "mempool"
+            ? "; run `splayed track` and try again"
+            : "") +
+          `, ${override}.`
+        : `waiting for ${name} to confirm: it was replaced by plan ${by}, which can't be read, ` +
+          `${override}.`,
+    };
+  }
+  const st = p.broadcast?.status;
+  if (st === undefined || st === "sending" || st === "unknown") {
+    return {
+      open: false,
+      sendTest: true,
+      test,
+      reason: `sending only ${name}; the rest waits until it confirms`,
+    };
+  }
+  if (st === "accepted") {
+    if (own.state === "absent") {
+      // Sent once, but neither in a block nor in the mempool now, and its input is unspent:
+      // send it again (broadcast re-checks the bytes and the inputs first).
+      return {
+        open: false,
+        sendTest: true,
+        test,
+        reason: `${name} is no longer on the network; sending it again, the rest waits`,
+      };
+    }
+    return {
+      open: false,
+      sendTest: false,
+      test,
+      reason: `waiting for ${name} to confirm (${own.state}). Run \`splayed track\` and try ` +
+        `again, ${override}.`,
+    };
+  }
+  return {
+    open: false,
+    sendTest: false,
+    test,
+    reason: `${name} is ${st}${p.broadcast?.detail ? ` (${p.broadcast.detail})` : ""}, so the ` +
+      `rest waits. See docs/user/recovery.md; \`splayed bump\` can replace it, ${override}.`,
+  };
 }
 
 export interface GateCheck {

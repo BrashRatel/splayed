@@ -336,3 +336,180 @@ Deno.test("mempool checks: a BTC node accepting a fork transaction fails verific
   assertEquals(await s.run("verify", s.id), 1);
   assert(s.out.join("\n").includes("NOT replay-protected"));
 });
+
+// ---- reorgs, fee bumps and the TEST FIRST rule, end to end on the fake chains ----
+
+/** Mines every unconfirmed transaction of the fake chain into a new block. */
+function mine(c: FakeChain) {
+  c.tip++;
+  for (const [k, v] of c.spends) {
+    if (v.height === undefined) {
+      c.spends.set(k, { ...v, height: c.tip });
+      const tx = c.txs.get(v.txid);
+      if (tx) tx.height = c.tip;
+    }
+  }
+}
+/** A reorg that puts the transaction back in the mempool. */
+function unmine(c: FakeChain, id: string) {
+  c.txs.get(id)!.height = undefined;
+  for (const [k, v] of c.spends) if (v.txid === id) c.spends.set(k, { txid: id });
+}
+/** A reorg after which the transaction is nowhere: its input is unspent again. */
+function drop(c: FakeChain, id: string) {
+  c.txs.delete(id);
+  for (const [k, v] of c.spends) if (v.txid === id) c.spends.delete(k);
+}
+type Prog = {
+  txs: Record<string, {
+    verified?: { txid: string };
+    broadcast?: { status: string; detail?: string };
+    confirmations?: { depth: number; state?: string; previous?: { depth: number } };
+    reorgs?: { kind: string; resolved?: string }[];
+    replacedBy?: { plan: string };
+  }>;
+};
+const progressOf = async (dir: string): Promise<Prog> =>
+  JSON.parse(await Deno.readTextFile(join(dir, "progress.json")));
+
+Deno.test("track after a reorg: depth goes to 0, broadcast sends the dropped split again, deep again resolves it", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--all", "--yes"), 0, s.err.join("\n"));
+  const ecx = s.chains.ecx;
+  const [t1] = s.plan.transactions.filter((t: { chain: string }) => t.chain === "ecx");
+  mine(ecx);
+  mine(s.chains.xbt);
+  ecx.tip += 59; // 60 deep: settled for any confirmation setting
+  s.chains.xbt.tip += 59;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  const id1 = (await progressOf(s.planDir)).txs[t1.file].verified!.txid;
+  assertEquals((await progressOf(s.planDir)).txs[t1.file].confirmations!.depth, 60);
+
+  // Reorg 1: back in the mempool. The record says depth 0, not the old 60.
+  unmine(ecx, id1);
+  assertEquals(await s.run("track", s.id), 1);
+  let p = (await progressOf(s.planDir)).txs[t1.file];
+  assertEquals(p.confirmations!.depth, 0);
+  assertEquals(p.confirmations!.state, "mempool");
+  assertEquals(p.confirmations!.previous!.depth, 60);
+  assert(s.err.join("\n").includes("REORG: This split was confirmed 60 deep in block"));
+  // Still out of a block on the next track: still warned about, recorded once.
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 1);
+  assert(s.err.join("\n").includes("back in the mempool"));
+  assertEquals((await progressOf(s.planDir)).txs[t1.file].reorgs!.length, 1);
+
+  // Reorg 2: gone altogether. Deleting the plan is refused (it was "60 deep" before the fix).
+  drop(ecx, id1);
+  assertEquals(await s.run("track", s.id), 1);
+  p = (await progressOf(s.planDir)).txs[t1.file];
+  assertEquals(p.broadcast!.status, "unknown");
+  assertEquals(p.confirmations!.state, "absent");
+  assertEquals(p.reorgs!.map((r) => r.kind), ["unconfirmed", "dropped"]);
+  assertEquals(await s.run("plans", "delete", s.id, "--yes"), 1);
+  assert(s.err.join("\n").includes("0 of"));
+
+  // Broadcast verified sends it again (bytes re-verified, inputs re-checked).
+  const before = ecx.broadcasts!.length;
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, before + 1);
+  assertEquals(ecx.broadcasts!.at(-1)!.txid, id1);
+
+  // Confirmed again but shallow: reorgs stay open; deep again: resolved, and track is quiet.
+  mine(ecx);
+  s.out.length = 0;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assert(s.out.join("\n").includes("confirmed again after a reorg"));
+  assert((await progressOf(s.planDir)).txs[t1.file].reorgs!.every((r) => !r.resolved));
+  ecx.tip += 59;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  p = (await progressOf(s.planDir)).txs[t1.file];
+  assert(p.reorgs!.every((r) => r.resolved), JSON.stringify(p.reorgs));
+  assertEquals(p.broadcast!.status, "accepted");
+});
+
+Deno.test("TEST FIRST replaced by a fee bump: the rest goes once the replacement confirms", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const ecx = s.chains.ecx;
+  assertEquals(ecx.broadcasts!.length, 1); // TEST FIRST alone
+  const test = s.plan.transactions.find((t: { chain: string; testFirst: boolean }) =>
+    t.chain === "ecx" && t.testFirst
+  );
+  const oldTxid = ecx.broadcasts![0].txid;
+
+  // Stuck: bump it. A second bump while the first is unsent is refused (no -bump2).
+  assertEquals(await s.run("bump", s.id, "--chains", "ecx", "--tx", "1", "--fee-rate", "ecx=9"), 0);
+  const bumpId = `${s.id}-bump1`;
+  s.out.length = 0;
+  assertEquals(
+    await s.run("bump", s.id, "--chains", "ecx", "--tx", "1", "--fee-rate", "ecx=12"),
+    1,
+  );
+  assert(s.out.join("\n").includes(`plan ${bumpId} already replaces it and is not sent yet`));
+  assertEquals(await Deno.stat(join(s.dir, "plans", `${s.id}-bump2`)).catch(() => null), null);
+
+  // Sign, verify, send the replacement (the fake node has no RBF: evict the original first).
+  const bumpDir = join(s.dir, "plans", bumpId);
+  const bumpPlan = JSON.parse(await Deno.readTextFile(join(bumpDir, "plan.json")));
+  await signAll(bumpDir, bumpPlan);
+  assertEquals(await s.run("verify", bumpId), 0, s.err.join("\n"));
+  drop(ecx, oldTxid);
+  assertEquals(await s.run("broadcast", bumpId, "--yes"), 0, s.err.join("\n"));
+  assertEquals((await progressOf(s.planDir)).txs[test.file].broadcast!.status, "replaced");
+
+  // Replacement unconfirmed: the rest waits, and says why.
+  s.out.length = 0;
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, 2);
+  assert(
+    s.out.join("\n").includes(`replaced by plan ${bumpId}, which is mempool`),
+    s.out.join("\n"),
+  );
+  assert(s.out.join("\n").includes("Nothing to broadcast right now:"));
+
+  // Replacement confirmed: "Broadcast verified" on the original plan sends the rest.
+  mine(ecx);
+  mine(s.chains.xbt);
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, 3);
+  const rest = s.plan.transactions.find((t: { chain: string; order: number }) =>
+    t.chain === "ecx" && t.order === 2
+  );
+  assertEquals((await progressOf(s.planDir)).txs[rest.file].broadcast!.status, "accepted");
+});
+
+Deno.test("bump --yes writes a second replacement anyway, with a warning", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const args = ["bump", s.id, "--chains", "ecx", "--tx", "1", "--fee-rate", "ecx=9"];
+  assertEquals(await s.run(...args), 0);
+  assertEquals(await s.run(...args, "--yes"), 0, s.err.join("\n"));
+  assert(s.err.join("\n").includes("Only one replacement can ever confirm"));
+  assert(await Deno.stat(join(s.dir, "plans", `${s.id}-bump2`)));
+});
+
+Deno.test("broadcast: the rest waits for an unverified TEST FIRST, and every held one says why", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  const test = s.plan.transactions.find((t: { chain: string; testFirst: boolean }) =>
+    t.chain === "ecx" && t.testFirst
+  );
+  // Only the second ECX transaction comes back signed.
+  const others = s.plan.transactions.filter((t: { file: string }) => t.file !== test.file)
+    .map((t: { file: string }) => join(s.planDir, t.file.replace(/\.psbt$/u, ".signed.psbt")));
+  assertEquals(await s.run("verify", s.id, ...others), 0, s.err.join("\n"));
+  s.out.length = 0;
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(s.chains.ecx.broadcasts, undefined); // used to go out without its test
+  const text = s.out.join("\n");
+  assert(text.includes("isn't verified yet"), text);
+  assert(text.includes(`ECX #1 (${test.file}): not verified yet`), text);
+  assert(text.includes("ECX #2 ("), text);
+});

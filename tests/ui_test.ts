@@ -198,8 +198,11 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     // The donor view starts empty, and a donor wallet imported from the UI shows up in it.
     assertEquals(await (await api("/api/donors")).json(), { descriptors: [], scan: null });
     // The main wallet's own descriptor is refused as a donor wallet.
+    // It is a refusal, not a typing mistake: exit 1 and just the reason, no usage text.
     const same = await runJob(["donor", "import", SRC_DESC]);
-    assertEquals(same.exitCode, 2, same.text);
+    assertEquals(same.exitCode, 1, same.text);
+    assert(same.text.includes("already in your main wallet"), same.text);
+    assert(!same.text.includes("Usage:"), same.text);
     const donorJob = await runJob(["donor", "import", ECX_DEST]);
     assertEquals(donorJob.exitCode, 0, donorJob.text);
     const donorView = await (await api("/api/donors")).json();
@@ -236,6 +239,44 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     // Fee bump is reachable from the UI; nothing is broadcast, so there is nothing to replace.
     const bump = await runJob(["bump", p.id, "--yes"]);
     assertEquals(bump.exitCode, 1, bump.text);
+  });
+});
+
+Deno.test("UI plans: a written, unsent fee bump shows on the original, and no second one is written", async () => {
+  await withUi(async ({ runJob, api }) => {
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    assertEquals(
+      (await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true])).exitCode,
+      0,
+    );
+    const p = (await (await api("/api/plans")).json()).plans[0];
+    const t = p.transactions[0];
+    const dl = await api(
+      `/api/plans/${p.id}/download?file=${encodeURIComponent(t.file)}&format=binary`,
+    );
+    const tx = Transaction.fromPSBT(new Uint8Array(await dl.arrayBuffer()));
+    tx.signIdx(SOURCE.derive("m/84'/0'/0'/0/0").privateKey!, 0);
+    const up = await api(`/api/plans/${p.id}/upload`, {
+      method: "POST",
+      body: JSON.stringify({ file: t.file, content: base64.encode(tx.toPSBT()) }),
+    });
+    await up.body?.cancel();
+    assertEquals((await runJob(["verify", p.id])).exitCode, 0);
+    assertEquals((await runJob(["broadcast", p.id], [true])).exitCode, 0);
+    const bump = await runJob(["bump", p.id, "--fee-rate", "ecx=6"], [true]);
+    assertEquals(bump.exitCode, 0, bump.text);
+    const original = (await (await api("/api/plans")).json()).plans
+      .find((x: { id: string }) => x.id === p.id).transactions[0];
+    assertEquals(original.progress.pendingBump?.plan, `${p.id}-bump1`);
+    assert(original.vsize > 0, "vsize for the bump prompt's minimum");
+    const again = await runJob(["bump", p.id, "--fee-rate", "ecx=8"], [true]);
+    assertEquals(again.exitCode, 1, again.text);
+    assert(again.text.includes("already replaces it and is not sent yet"), again.text);
+    const ids = (await (await api("/api/plans")).json()).plans.map((x: { id: string }) => x.id);
+    assert(!ids.includes(`${p.id}-bump2`), ids.join(" "));
   });
 });
 
