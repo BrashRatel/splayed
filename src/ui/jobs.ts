@@ -15,7 +15,8 @@ export interface JobSnapshot {
   id: string;
   args: string[];
   lines: JobLine[];
-  question?: { id: string; text: string };
+  /** `recommend: "no"`: the page makes No the default button (yes skips a safety step). */
+  question?: { id: string; text: string; recommend?: "no" };
   done: boolean;
   exitCode?: number;
   startedAt: string;
@@ -110,10 +111,14 @@ export class JobRunner {
       progress: (p) => {
         if (!job.done) job.progress = { ...p, at: new Date().toISOString() };
       },
-      confirm: (text) =>
+      confirm: (text, opts) =>
         new Promise<boolean>((resolve) => {
           const qid = crypto.randomUUID();
-          job.question = { id: qid, text };
+          job.question = {
+            id: qid,
+            text,
+            ...(opts?.recommend ? { recommend: opts.recommend } : {}),
+          };
           job.answer = (yes) => {
             job.question = undefined;
             job.answer = undefined;

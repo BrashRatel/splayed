@@ -235,3 +235,31 @@ Deno.test("UI: a running scan exposes progress on /api/jobs/<id>, and none once 
     await ui.server.shutdown();
   }
 });
+
+Deno.test("JobRunner passes on how a question is put: No is the default when yes skips a safety step", async () => {
+  const runner = new JobRunner(
+    async (_argv, io) => {
+      const risky = await io.confirm("Send anyway?", { recommend: "no" });
+      const plain = await io.confirm("Send?");
+      return risky || !plain ? 1 : 0;
+    },
+    { env: {} },
+    "/tmp/unused",
+  );
+  const job = runner.start(["broadcast", "p"]);
+  const wait = async () => {
+    for (let i = 0; i < 100 && !runner.get(job.id).question; i++) {
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    return runner.get(job.id).question!;
+  };
+  const q1 = await wait();
+  assertEquals(q1.recommend, "no");
+  runner.answer(job.id, q1.id, false);
+  const q2 = await wait();
+  assertEquals(q2.text, "Send?");
+  assertEquals(q2.recommend, undefined);
+  runner.answer(job.id, q2.id, true);
+  await new Promise((r) => setTimeout(r, 5));
+  assertEquals(runner.get(job.id).exitCode, 0);
+});

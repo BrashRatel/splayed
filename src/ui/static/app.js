@@ -1,6 +1,6 @@
 import { scanSignedPsbt, showPsbtQr } from "./qr.js";
 import { walletQrImport } from "./wallet_qr.js";
-import { bumpable, bumpQuestion, depthText, reorgAlerts } from "./plan_status.js";
+import { bumpable, bumpQuestion, depthText, isOpenAlert, reorgAlerts } from "./plan_status.js";
 // splayed web UI. Every action runs a splayed CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
@@ -218,7 +218,12 @@ function ask(question) {
   questionShown = question.id;
   const modal = document.getElementById("modal");
   document.getElementById("modal-text").textContent = question.text;
+  // Yes would skip a safety step: No is the default (focused, primary) button.
+  const risky = question.recommend === "no";
+  document.getElementById("modal-yes").className = risky ? "secondary" : "";
+  document.getElementById("modal-no").className = risky ? "" : "secondary";
   modal.classList.remove("hidden");
+  if (risky) document.getElementById("modal-no").focus();
   const answer = async (yes) => {
     modal.classList.add("hidden");
     document.getElementById("modal-yes").onclick = null;
@@ -1812,9 +1817,9 @@ function viewPlans() {
             ? h(
               "div",
               { class: "muted" },
-              pr.reorgs.some((r) => !r.resolved)
+              pr.reorgs.some(isOpenAlert)
                 ? `${pr.reorgs.length} alert(s), see above`
-                : `${pr.reorgs.length} alert(s), resolved`,
+                : `${pr.reorgs.length} alert(s), resolved or acknowledged`,
             )
             : null,
           t.chain !== "btc" && bumpable(pr)
@@ -1839,6 +1844,22 @@ function viewPlans() {
       ...reorgAlerts(p.transactions).map((a) =>
         h("div", { class: a.active ? "alert" : "alert resolved" }, a.text)
       ),
+      reorgAlerts(p.transactions).some((a) => a.active)
+        ? h(
+          "div",
+          { class: "row" },
+          h(
+            "button",
+            {
+              class: "small secondary",
+              title:
+                "Mute these alerts once you have dealt with them, or decided to leave them. They stay on record. Track asks first.",
+              onclick: () => run(["track", p.id, "--ack"]),
+            },
+            "Acknowledge alerts…",
+          ),
+        )
+        : null,
       h(
         "table",
         {},

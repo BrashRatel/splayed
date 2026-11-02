@@ -358,6 +358,8 @@ pre#log .cmd {
   margin: 0 0 16px;
   /* Questions from the CLI can list one line per chain. */
   white-space: pre-line;
+  /* ...and name 64-digit txids, which must wrap inside the box. */
+  overflow-wrap: anywhere;
 }
 .modal-actions {
   display: flex;

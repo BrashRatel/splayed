@@ -3,6 +3,7 @@ import {
   bumpable,
   bumpQuestion,
   depthText,
+  isOpenAlert,
   minimumBumpRate,
   reorgAlerts,
   utc,
@@ -134,4 +135,22 @@ Deno.test("Plans tab: an older record's stale depth doesn't hide Fee bump for an
     }),
     false,
   );
+});
+
+Deno.test("Plans tab: an acknowledged alert is shown muted, with when it was acknowledged", () => {
+  const rec = { at: "2026-11-02T12:00:00.000Z", kind: "conflict", detail: "Spent by dd." };
+  const [open] = reorgAlerts([{ chain: "ecx", order: 1, progress: { reorgs: [rec] } }]);
+  assertEquals(open.active, true);
+  const [acked] = reorgAlerts([{
+    chain: "ecx",
+    order: 1,
+    progress: { reorgs: [{ ...rec, acknowledged: "2026-11-02T13:00:00.000Z" }] },
+  }]);
+  assertEquals(acked.active, false);
+  assertEquals(
+    acked.text,
+    "Acknowledged 2026-11-02 13:00:00 UTC: CONFLICT ECX #1 (conflict, 2026-11-02 12:00:00 UTC): Spent by dd.",
+  );
+  assertEquals(isOpenAlert(rec), true);
+  assertEquals(isOpenAlert({ ...rec, acknowledged: "x" }), false);
 });

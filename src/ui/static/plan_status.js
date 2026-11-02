@@ -52,9 +52,15 @@ function detailOnly(detail) {
   return detail.replace(/^[A-Z]{3}: (REORG\. )?/u, "");
 }
 
+/** An alert that still counts: neither resolved nor acknowledged (isOpenAlert in execute.ts). */
+export function isOpenAlert(r) {
+  return !r.resolved && !r.acknowledged;
+}
+
 /**
  * One alert per transaction that has reorg records: the newest one, with how many there were.
- * `active` is false once track saw the split (or its replacement) confirmed deep enough again.
+ * `active` is false once track saw the split (or its replacement) confirmed deep enough again, or
+ * once you acknowledged it (`track --ack`, or archiving the plan).
  */
 export function reorgAlerts(transactions) {
   const out = [];
@@ -71,8 +77,10 @@ export function reorgAlerts(transactions) {
       ? " Now: sent again, waiting to confirm."
       : "";
     out.push({
-      active: !r.resolved,
-      text: r.resolved
+      active: isOpenAlert(r),
+      text: r.acknowledged
+        ? `Acknowledged ${utc(r.acknowledged)}: ${head}: ${detailOnly(r.detail)}`
+        : r.resolved
         ? `Resolved ${utc(r.resolved)}: ${head}: confirmed deep enough${
           r.kind === "evicted" ? "" : " again"
         }. Was: ${detailOnly(r.detail)}`
