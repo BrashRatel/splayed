@@ -13,11 +13,13 @@ import { join } from "node:path";
 import type { Config } from "./config.ts";
 import type { ChainBackend } from "../backends/types.ts";
 import {
+  acknowledgeAlerts,
   confirmationDepth,
   type DepthResult,
   loadProgress,
   type Progress,
   type ReplacementLink,
+  saveProgress,
   type TxProgress,
 } from "./execute.ts";
 import { type Plan, type PlannedTx, PLANS_DIR } from "./planner.ts";
@@ -50,10 +52,21 @@ export async function archivedAt(dir: string): Promise<string | undefined> {
   return marker ? (marker.at ?? "unknown") : undefined;
 }
 
-export async function archivePlan(dataDir: string, id: string, now = new Date()): Promise<void> {
+/**
+ * Archives a plan. Its open alerts are acknowledged (recorded in progress.json, shown muted, no
+ * longer making `track` exit 1): archiving says you are done with it. Returns how many.
+ */
+export async function archivePlan(dataDir: string, id: string, now = new Date()): Promise<number> {
   const { dir } = await planFolder(dataDir, id);
   if (await archivedAt(dir)) throw new PlanAdminError(`Plan ${id} is already archived.`);
+  const progress = await loadProgress(dir);
+  let acknowledged = 0;
+  for (const p of Object.values(progress.txs)) {
+    acknowledged += acknowledgeAlerts(p, now.toISOString());
+  }
+  if (acknowledged) await saveProgress(dir, progress);
   await writeJsonAtomic(join(dir, ARCHIVE_MARKER), { at: now.toISOString() });
+  return acknowledged;
 }
 
 export async function unarchivePlan(dataDir: string, id: string): Promise<void> {
@@ -236,6 +249,8 @@ export interface OwnTx {
   /** Set on a fee bump: what it replaces (with the original's txid). */
   replaces?: { plan: string; file: string; txid: string };
   input?: { txid: string; vout: number };
+  /** Every coin it spends. */
+  inputs?: { txid: string; vout: number }[];
 }
 
 /** Every verified transaction of every plan (archived ones included), by txid. */
@@ -256,6 +271,7 @@ export async function ownTransactions(dataDir: string): Promise<Map<string, OwnT
         txid,
         replaces: t.replaces,
         input: t.inputs?.[0] && { txid: t.inputs[0].txid, vout: t.inputs[0].vout },
+        inputs: t.inputs?.map((i) => ({ txid: i.txid, vout: i.vout })),
       });
     }
   }
@@ -268,6 +284,8 @@ export type Spender =
   | { kind: "replacement"; link: ReplacementLink; spender: OwnTx }
   /** Another plan's transaction spent the coin first. */
   | { kind: "own"; spender: OwnTx }
+  /** The split itself: its own input spent by its own transaction is no conflict. */
+  | { kind: "self"; spender: OwnTx }
   | { kind: "unknown" };
 
 /** The longest chain of fee bumps followed (a bump of a bump of …). */
@@ -298,8 +316,46 @@ export async function classifySpender(
     }
     cur = all.get(cur.replaces.txid);
   }
-  if (own.plan === split.plan && own.file === split.file) return { kind: "unknown" };
+  if (own.plan === split.plan && own.file === split.file) return { kind: "self", spender: own };
   return { kind: "own", spender: own };
+}
+
+/**
+ * Who spent a split's input, when the backend may not be able to say. With a spender named
+ * (Esplora, Electrum), as classifySpender. Without one (node RPC never names a spender), each of
+ * this tool's own transactions that spends one of the same coins is looked up on the chain by its
+ * txid: one that is confirmed or in the mempool is the spender. Lookups that fail are skipped; if
+ * none is found the spender stays unknown.
+ */
+export async function identifySpender(
+  dataDir: string,
+  split: { plan: string; file: string; chain: string; inputs: { txid: string; vout: number }[] },
+  by: string | undefined,
+  backend: ChainBackend,
+  tip: number,
+  index?: Map<string, OwnTx>,
+): Promise<Spender> {
+  const all = index ?? await ownTransactions(dataDir);
+  if (by) return await classifySpender(dataDir, split, by, all);
+  const coins = new Set(split.inputs.map((i) => `${i.txid}:${i.vout}`));
+  for (const own of all.values()) {
+    if (own.chain !== split.chain) continue;
+    if (own.plan === split.plan && own.file === split.file) continue;
+    const inputs = own.inputs ?? (own.input ? [own.input] : []);
+    if (!inputs.some((i) => coins.has(`${i.txid}:${i.vout}`))) continue;
+    try {
+      const d = await confirmationDepth(
+        backend,
+        { inputs } as unknown as PlannedTx,
+        own.txid,
+        tip,
+      );
+      if (d.state === "confirmed" || d.state === "mempool") {
+        return await classifySpender(dataDir, split, own.txid, all);
+      }
+    } catch { /* this candidate can't be checked now; try the others */ }
+  }
+  return { kind: "unknown" };
 }
 
 export interface FollowedReplacement {

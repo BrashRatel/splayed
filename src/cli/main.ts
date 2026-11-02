@@ -24,15 +24,17 @@ import type { ProgressSink } from "../core/progress.ts";
 import {
   archivedAt,
   archivePlan,
-  classifySpender,
   deletePlan,
   deletionNotes,
   followReplacement,
+  identifySpender,
+  MAX_BUMP_HOPS,
   ownTransactions,
   type OwnTx,
   PlanAdminError,
   planFolder,
   replacedByReferences,
+  type Spender,
   unarchivePlan,
   unsentReplacements,
   unsettledTransactions,
@@ -85,6 +87,7 @@ import {
 import { join } from "node:path";
 import { buildCpfp, buildReplacement, BumpError, bumpPlan, defaultBumpRate } from "../core/bump.ts";
 import {
+  acknowledgeAlerts,
   alertTitle,
   applyReplaced,
   assessReorg,
@@ -94,6 +97,7 @@ import {
   findSignedFiles,
   type GateCheck,
   gateProblems,
+  isOpenAlert,
   lastSeenInBlock,
   loadPlanDir,
   loadProgress,
@@ -104,6 +108,9 @@ import {
   nextUnmined,
   ownPsbt,
   recordReorg,
+  type ReorgAlert,
+  type ReorgRecord,
+  type ReplacementLink,
   resolveReorgs,
   retractConflicts,
   saveProgress,
@@ -187,14 +194,16 @@ Splitting (guided route: forks first, BTC untouched):
                                   Send verified transactions, each only to its own chain, each
                                   over its own Tor circuit. On each chain the TEST FIRST
                                   transaction goes alone first; the next run says where it is and
-                                  asks before sending the rest (--yes answers yes, --all sends
-                                  everything at once). Sends again a split that dropped out of the
-                                  mempool. Says why for each transaction it doesn't send.
-  track <plan>                    Confirmations of broadcast transactions. Warns loudly (exit 1)
+                                  asks before sending the rest. --yes answers yes only while the
+                                  test spend is confirmed or in the mempool (otherwise the rest
+                                  waits); --all sends everything at once. Sends again a split that
+                                  dropped out of the mempool. Says why for each one it doesn't send.
+  track <plan> [--ack [--yes]]    Confirmations of broadcast transactions. Warns loudly (exit 1)
                                   if a split that was confirmed leaves the chain or is re-mined in
                                   another block, a sent split drops out of the mempool, or its
                                   input is spent by a transaction that isn't one of your plans;
-                                  and while any such alert is open.
+                                  and while any such alert is open. --ack acknowledges the open
+                                  alerts (after asking): kept on record, shown muted, exit 0.
   bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--another] [--yes]
                                   Stuck split? Write a new plan that spends the same inputs at a
                                   higher fee (RBF, BIP125). Sign, verify and broadcast it like any
@@ -217,10 +226,16 @@ Global options:
   --profile ID      (env SPLAYED_PROFILE)    --json   -h, --help
 `;
 
+/** How a question is put. `recommend: "no"`: answering yes skips a safety step. */
+export interface ConfirmOptions {
+  recommend?: "no";
+}
+
 export interface CliIO {
   out: (text: string) => void;
   err: (text: string) => void;
-  confirm: (question: string) => boolean | Promise<boolean>;
+  /** Asks a yes/no question. The terminal's prompt defaults to no. */
+  confirm: (question: string, opts?: ConfirmOptions) => boolean | Promise<boolean>;
   /** Locates/starts Tor and returns its SOCKS endpoint. Tests replace it. */
   tor?: (config: Config, log: (m: string) => void) => Promise<SocksEndpoint>;
   env: Record<string, string | undefined>;
@@ -291,6 +306,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         "btc-first": { type: "boolean" },
         cpfp: { type: "boolean" },
         another: { type: "boolean" },
+        ack: { type: "boolean" },
         drop: { type: "string", multiple: true },
         tx: { type: "string", multiple: true },
       },
@@ -363,7 +379,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
       case "broadcast":
         return await cmdBroadcast(config, io, args[0], flags.all === true, flags.yes === true);
       case "track":
-        return await cmdTrack(config, io, args[0]);
+        return await cmdTrack(config, io, args[0], flags.ack === true, flags.yes === true);
       case "bump":
         return await cmdBump(config, io, args[0], {
           feeRate: flags["fee-rate"],
@@ -1358,10 +1374,16 @@ async function cmdPlans(config: Config, io: CliIO, args: string[], yes: boolean)
   if (action !== undefined) {
     if (!id || extra.length) throw new UsageError("plans archive|unarchive|delete <plan>");
     if (action === "archive") {
-      await archivePlan(config.dataDir, id);
+      const acknowledged = await archivePlan(config.dataDir, id);
       io.out(
         `Archived plan ${id}. Its folder is kept; \`splayed plans unarchive ${id}\` undoes it.`,
       );
+      if (acknowledged) {
+        io.out(
+          `${acknowledged} open alert(s) of this plan acknowledged: they stay on record, shown ` +
+            "muted, and no longer make `track` exit 1.",
+        );
+      }
       return 0;
     }
     if (action === "unarchive") {
@@ -1587,6 +1609,41 @@ function sentAlready(p: TxProgress): string | undefined {
   }
 }
 
+/**
+ * Records what a recognised spend of a split's input means, and returns why the split isn't
+ * sent, or undefined when the spender is a stranger (or unknown): its own fee bump marks it
+ * replaced, another plan's transaction marks it superseded, and the split itself is on the
+ * network. Records of a CONFLICT that blamed that spend are withdrawn.
+ */
+function recordOwnSpend(entry: TxProgress, spender: Spender, backend: string): string | undefined {
+  switch (spender.kind) {
+    case "replacement":
+      applyReplaced(entry, spender.link);
+      retractConflicts(entry, spender.spender.txid);
+      return `replaced by plan ${spender.link.plan} (its fee bump), which is on the network`;
+    case "own":
+      entry.supersededBy = {
+        plan: spender.spender.plan,
+        file: spender.spender.file,
+        txid: spender.spender.txid,
+      };
+      entry.broadcast = {
+        status: "superseded",
+        at: new Date().toISOString(),
+        backend,
+        attempts: entry.broadcast?.attempts ?? 0,
+        detail: `by plan ${spender.spender.plan} (${spender.spender.file})`,
+      };
+      retractConflicts(entry, spender.spender.txid);
+      return `superseded: plan ${spender.spender.plan} (${spender.spender.file}) already spent ` +
+        "this coin";
+    case "self":
+      return "already sent: it is on the network (its input is spent by this very transaction)";
+    default:
+      return undefined;
+  }
+}
+
 async function cmdBroadcast(
   config: Config,
   io: CliIO,
@@ -1609,6 +1666,25 @@ async function cmdBroadcast(
     /** Why a transaction is not being sent this time, for the summary. */
     const held = new Map<PlannedTx, string>();
     let ownIndex: Map<string, OwnTx> | undefined;
+    /** Who spent a split's input, asking the chain about this tool's own transactions if needed. */
+    const spenderOf = async (
+      t: PlannedTx,
+      by: string | undefined,
+      backend: ChainBackend,
+      tip: number,
+    ): Promise<Spender> => {
+      ownIndex ??= await ownTransactions(config.dataDir);
+      return await identifySpender(
+        config.dataDir,
+        { plan: plan.id, file: t.file, chain: t.chain, inputs: t.inputs },
+        by,
+        backend,
+        tip,
+        ownIndex,
+      );
+    };
+    /** Sent before and found by the recheck on neither the chain nor the mempool. */
+    const checkedAbsent = new Set<PlannedTx>();
     /** Chains whose TEST FIRST transaction went out before: its status, for the question. */
     const asks = new Map<ChainId, TestFirstStatus>();
     /** Sent only if the user says yes to that question (or passes --yes). */
@@ -1664,10 +1740,19 @@ async function cmdBroadcast(
             continue;
           }
           if (d.state === "absent") {
+            checkedAbsent.add(t);
             io.out(
               `${chain.toUpperCase()} #${t.order}: sent before but no longer in the mempool or on ` +
                 "the chain, and its inputs are unspent: it can be sent again.",
             );
+          } else if (d.state === "conflict") {
+            // Its own fee bump (sent with its reply lost) or another plan may have spent the coin.
+            const why = recordOwnSpend(
+              p,
+              await spenderOf(t, d.by, send, tip),
+              send.config.url,
+            );
+            held.set(t, why ?? `already sent: ${sentWhere(d)}`);
           } else held.set(t, `already sent: ${sentWhere(d)}`);
         }
         recheck.length = 0;
@@ -1676,18 +1761,13 @@ async function cmdBroadcast(
       if (!pending.length) continue;
       let allowed = pending;
       const test = all ? undefined : ofChain.find((t) => t.testFirst);
+      /** The TEST FIRST transaction, when it is the only one of this chain tried this run. */
+      let alone: PlannedTx | undefined;
       if (test && pending.includes(test)) {
         // The TEST FIRST transaction goes alone: its first send, or again after it dropped out.
+        // What the rest is told depends on what happens to it below.
         allowed = [test];
-        const why = `the TEST FIRST transaction (${test.file}) goes first, in this run. Run ` +
-          "broadcast again to send the rest (it says where the test is and asks), or pass --all";
-        for (const t of pending) if (t !== test) held.set(t, why);
-        if (pending.length > 1) {
-          io.out(
-            `${chain.toUpperCase()}: sending only the TEST FIRST transaction this time; the rest ` +
-              "waits for the next broadcast.",
-          );
-        }
+        alone = test;
       } else if (test) {
         // Sent before (or it can't be sent): say where it is, and ask before sending the rest.
         const status = await describeTestFirst({
@@ -1709,6 +1789,48 @@ async function cmdBroadcast(
         const again = verifySigned(t, await ownPsbt(dir, t), { tx: parseTx(v.finalHex) });
         if (again.finalHex !== v.finalHex) {
           throw new ExecuteError(`${t.file}: stored transaction changed`);
+        }
+        const entry = progress.txs[t.file];
+        if (!t.replaces && entry.broadcast && !checkedAbsent.has(t)) {
+          // Sent before without a clear result (or put back by track): it may have got through.
+          // Ask the chain first, so a send that did isn't taken for a conflict (node RPC can't
+          // name the spender of its input, which is this very transaction).
+          const tip = await send.tipHeight();
+          let d: DepthResult;
+          try {
+            d = await confirmationDepth(send, t, v.txid, tip);
+          } catch (error) {
+            held.set(
+              t,
+              `an earlier send may have got through, and checking failed: ${
+                (error as Error).message
+              }. Not sent again`,
+            );
+            continue;
+          }
+          if (d.state === "confirmed" || d.state === "mempool") {
+            const where = d.state === "confirmed" ? "on chain" : "in the mempool";
+            entry.broadcast = {
+              status: "accepted",
+              at: new Date().toISOString(),
+              backend: send.config.url,
+              attempts: entry.broadcast.attempts ?? 0,
+              detail: `already ${where}`,
+            };
+            held.set(t, `already ${where}: an earlier send got through`);
+            continue;
+          }
+          if (d.state === "unknown") {
+            held.set(
+              t,
+              "an earlier send may have got through, and this backend can't tell (node RPC " +
+                "without txindex can't see a confirmed transaction once its outputs are spent). " +
+                "Not sent again; check with Esplora, Electrum or a node with txindex",
+            );
+            continue;
+          }
+          // absent: its inputs are unspent, send it (checked again below). conflict: the input
+          // check below works out whose spend it was.
         }
         if (t.donor && !t.replaces) {
           await donorPreflight(config, io, t.donor, t.chain as "xbt" | "btc", opened);
@@ -1798,38 +1920,15 @@ async function cmdBroadcast(
             break;
           }
           if (obs.state !== "unspent") {
-            const entry = progress.txs[t.file];
             const by = obs.state === "spent" ? obs.spendTxid : undefined;
-            ownIndex ??= await ownTransactions(config.dataDir);
-            const spender = await classifySpender(
-              config.dataDir,
-              { plan: plan.id, file: t.file, chain },
-              by,
-              ownIndex,
+            // Its own fee bump got there (never send the original again), or another plan did.
+            const why = recordOwnSpend(
+              entry,
+              await spenderOf(t, by, send, await send.tipHeight()),
+              send.config.url,
             );
-            if (spender.kind === "replacement") {
-              // Its own fee bump got there: never send the original again.
-              applyReplaced(entry, spender.link);
-              held.set(t, `replaced by plan ${spender.link.plan}, which is on the network`);
-            } else if (spender.kind === "own") {
-              entry.supersededBy = {
-                plan: spender.spender.plan,
-                file: spender.spender.file,
-                txid: spender.spender.txid,
-              };
-              entry.broadcast = {
-                status: "superseded",
-                at: new Date().toISOString(),
-                backend: send.config.url,
-                attempts: entry.broadcast?.attempts ?? 0,
-                detail: `by plan ${spender.spender.plan} (${spender.spender.file})`,
-              };
-              held.set(
-                t,
-                `superseded: plan ${spender.spender.plan} (${spender.spender.file}) already spent ` +
-                  "this coin",
-              );
-            } else {
+            if (why) held.set(t, why);
+            else {
               entry.broadcast = {
                 status: "conflict",
                 at: new Date().toISOString(),
@@ -1850,41 +1949,112 @@ async function cmdBroadcast(
         }
         if (!skip) queue.push({ t, hex: v.finalHex, txid: v.txid, send });
       }
+      if (alone) {
+        // Say what actually happens to the TEST FIRST transaction, and so to the rest.
+        const test = alone;
+        const rest = pending.filter((t) => t !== test);
+        const queued = queue.some((q) => q.t === test);
+        const testWhy = held.get(test) ?? "see above";
+        const why = queued
+          ? `waits: the TEST FIRST transaction (${test.file}) goes first, alone, in this run. Run ` +
+            "broadcast again to send the rest (it says where the test is and asks), or pass --all"
+          : /^already (on chain|in the mempool)/u.test(testWhy)
+          ? `waits: the TEST FIRST transaction (${test.file}) is already on the network ` +
+            `(${testWhy}). Run broadcast again to send the rest (it says where the test is and ` +
+            "asks), or pass --all"
+          : `waits for the TEST FIRST transaction (${test.file}), which is not sent in this run ` +
+            `(${testWhy}). Run broadcast again once it can go, or pass --all to send everything ` +
+            "without it";
+        for (const t of rest) held.set(t, why);
+        if (rest.length && queued) {
+          io.out(
+            `${chain.toUpperCase()}: sending only the TEST FIRST transaction this time; the rest ` +
+              "waits for the next broadcast.",
+          );
+        }
+      }
     }
     await saveProgress(dir, progress);
-    // The TEST FIRST step: one question for every chain whose rest is ready to go.
+    // The TEST FIRST step: one question for every chain whose rest is ready to go. --yes answers
+    // it only for a chain whose test spend is on the network (confirmed or in the mempool).
     let agreed = false;
     let declined = false;
+    /** Held because --yes can't answer for a test spend that never went out. */
+    let heldForYes = false;
     const gatedQueue = queue.filter((q) => gated.has(q.t));
     if (gatedQueue.length) {
       const chains = [...new Set(gatedQueue.map((q) => q.t.chain as ChainId))];
       const lines = chains.map((c) => `${c.toUpperCase()}: ${asks.get(c)!.text}.`);
       const allConfirmed = chains.every((c) => asks.get(c)!.confirmed);
+      const notOut = chains.filter((c) => !asks.get(c)!.out);
+      const names = (cs: ChainId[]) => cs.map((c) => c.toUpperCase()).join(" and ");
       const counts = chains.map((c) =>
         `${gatedQueue.filter((q) => q.t.chain === c).length} ${c.toUpperCase()}`
       ).join(" and ");
-      io.out(allConfirmed ? "TEST FIRST: the test spend went through." : "TEST FIRST:");
-      for (const l of lines) io.out(`  ${l}`);
-      const question = [
+      io.out(
         allConfirmed
-          ? "The TEST FIRST spend went through:"
-          : "The TEST FIRST step is there to prove the signer, the destination and the route " +
-            "work before more coins move. Where it is now:",
-        ...lines.map((l) => `  ${l}`),
-        `Send the other ${counts} transaction(s) now? Each goes only to its own chain.`,
-      ].join("\n");
-      agreed = yes || await io.confirm(question);
-      if (!agreed) {
-        declined = true;
-        for (const q of gatedQueue) {
-          held.set(
-            q.t,
-            `not sent: you chose to wait (${asks.get(q.t.chain as ChainId)!.text}). Run ` +
-              "broadcast again when you're ready",
+          ? "TEST FIRST: the test spend went through."
+          : notOut.length
+          ? `TEST FIRST: the test spend has NOT gone out on ${names(notOut)}:`
+          : "TEST FIRST:",
+      );
+      for (const l of lines) io.out(`  ${l}`);
+      let yesTo: ChainId[];
+      if (yes) {
+        yesTo = chains.filter((c) => asks.get(c)!.out);
+        if (notOut.length) {
+          heldForYes = true;
+          io.out(
+            `--yes doesn't answer for ${names(notOut)}: no TEST FIRST spend is on the network ` +
+              "there, so the rest of it is not sent. Send the TEST FIRST transaction (or a fee " +
+              "bump of it) first, run broadcast without --yes to answer yourself, or pass --all " +
+              "to send everything.",
           );
         }
-        queue.splice(0, queue.length, ...queue.filter((q) => !gated.has(q.t)));
+      } else {
+        const question = notOut.length
+          ? [
+            `The TEST FIRST transaction has NOT gone out on ${names(notOut)}: no test spend is ` +
+            "on the network there.",
+            ...lines.map((l) => `  ${l}`),
+            "The TEST FIRST step proves the signer, the destination and the route work before " +
+            `more coins move. Sending the rest now skips that check on ${names(notOut)}: if ` +
+            "anything is wrong, every coin is affected, not just the test. Answering no is " +
+            "recommended: send the TEST FIRST transaction (or a fee bump of it) first.",
+            `Send the other ${counts} transaction(s) anyway, without a TEST FIRST spend on the ` +
+            "network? Each goes only to its own chain.",
+          ].join("\n")
+          : [
+            allConfirmed
+              ? "The TEST FIRST spend went through:"
+              : "The TEST FIRST step is there to prove the signer, the destination and the route " +
+                "work before more coins move. Where it is now:",
+            ...lines.map((l) => `  ${l}`),
+            `Send the other ${counts} transaction(s) now? Each goes only to its own chain.`,
+          ].join("\n");
+        const ok = await io.confirm(question, notOut.length ? { recommend: "no" } : undefined);
+        yesTo = ok ? chains : [];
       }
+      agreed = yesTo.length > 0;
+      for (const q of gatedQueue) {
+        const c = q.t.chain as ChainId;
+        if (yesTo.includes(c)) continue;
+        declined = true;
+        held.set(
+          q.t,
+          yes
+            ? `not sent: --yes only answers once the TEST FIRST spend is confirmed or in the ` +
+              `mempool, and ${asks.get(c)!.text}. Send it first, run broadcast without --yes to ` +
+              "answer yourself, or pass --all"
+            : `not sent: you chose to wait (${asks.get(c)!.text}). Run broadcast again when ` +
+              "you're ready",
+        );
+      }
+      queue.splice(
+        0,
+        queue.length,
+        ...queue.filter((q) => !gated.has(q.t) || yesTo.includes(q.t.chain as ChainId)),
+      );
     }
     const notNow = plan.transactions.filter((t) => held.has(t));
     if (!queue.length) {
@@ -1961,7 +2131,7 @@ async function cmdBroadcast(
       await saveProgress(dir, progress);
     }
     io.out("Run `splayed track <plan>` to follow confirmations.");
-    return failed ? 1 : 0;
+    return failed || heldForYes ? 1 : 0;
   } finally {
     for (const b of opened) await b.close?.();
   }
@@ -2008,16 +2178,84 @@ function describeDepth(d: DepthResult, required: number): string {
   }
 }
 
-async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
+/**
+ * The original confirmed although a fee bump was sent to replace it: the bump (and any bump of
+ * it) can never confirm now. Each is marked superseded by the original, the way a coin spent by
+ * another plan is, so `track` on its plan reports it settled once the original is deep.
+ */
+async function markOutraced(
+  config: Config,
+  original: { plan: string; file: string; txid: string },
+  link: ReplacementLink,
+) {
+  let next: ReplacementLink | undefined = link;
+  for (let hop = 0; next && hop < MAX_BUMP_HOPS; hop++) {
+    const cur: ReplacementLink = next;
+    next = undefined;
+    try {
+      const { dir } = await planFolder(config.dataDir, cur.plan);
+      const progress = await loadProgress(dir);
+      const entry = progress.txs[cur.file];
+      if (!entry) return;
+      next = entry.replacedBy;
+      delete entry.replacedBy;
+      entry.supersededBy = { plan: original.plan, file: original.file, txid: original.txid };
+      if (entry.broadcast) {
+        entry.broadcast = {
+          ...entry.broadcast,
+          status: "superseded",
+          detail: `by plan ${original.plan}: the original confirmed first`,
+        };
+      }
+      await saveProgress(dir, progress);
+    } catch {
+      return; // that plan can't be read: its own track will find the original instead
+    }
+  }
+}
+
+/** The detail on the broadcast record of a split whose conflicting spend left the chain. */
+const CONFLICT_LEFT = "the spend that conflicted with it left the chain";
+
+function conflictLeftAlert(chain: ChainId): ReorgAlert {
+  return {
+    kind: "evicted",
+    detail: "The transaction that spent this split's input instead (the CONFLICT reported " +
+      "before) has left the chain and the mempool, and the input is unspent again, so the coin " +
+      `is back on ${chain.toUpperCase()} and still shared with BTC: do NOT spend the BTC copy. ` +
+      "This split can be sent again: `splayed broadcast` (Broadcast verified) checks the bytes " +
+      "and the inputs first. Or replace it with `splayed bump` (Fee bump…).",
+  };
+}
+
+const utcMinute = (iso: string) => `${iso.slice(0, 16).replace("T", " ")} UTC`;
+
+async function cmdTrack(
+  config: Config,
+  io: CliIO,
+  id: string | undefined,
+  ack = false,
+  yes = false,
+) {
   await requireNetworkConfirmed(config);
-  if (!id) throw new UsageError("track <plan>");
+  if (!id) throw new UsageError("track <plan> [--ack]");
   const { dir, plan } = await loadPlanDir(config.dataDir, id);
   const progress = await loadProgress(dir);
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
-  const alerts: string[] = [];
+  /** Loud alerts, with the record each belongs to (unrecorded ones can't be acknowledged). */
+  const alerts: { text: string; rec?: ReorgRecord }[] = [];
+  /** Acknowledged alerts that still apply: shown, but they don't change the exit code. */
+  const muted: string[] = [];
   const infos: string[] = [];
   const failures: string[] = [];
   let ownIndex: Map<string, OwnTx> | undefined;
+  /** Records an alert in the split's history and shows it: muted once acknowledged. */
+  const raise = (p: TxProgress, label: string, alert: ReorgAlert, at: string, text?: string) => {
+    const rec = recordReorg(p, alert, at);
+    const shown = text ?? `${label}: ${alertTitle(alert.kind)}: ${alert.detail}`;
+    if (rec.acknowledged) muted.push(`${shown} (acknowledged ${utcMinute(rec.acknowledged)})`);
+    else alerts.push({ text: shown, rec });
+  };
   for (const chain of ["btc", "ecx", "xbt"] as const) {
     const txs = plan.transactions.filter((t) =>
       t.chain === chain && progress.txs[t.file]?.broadcast
@@ -2043,35 +2281,48 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
           }
         }
         const label = `${chain.toUpperCase()} ${t.file}`;
-        const alertsBefore = alerts.length;
+        const alertsBefore = alerts.length + muted.length;
         if (d && backend && tip !== undefined && p.verified) {
           const at = new Date().toISOString();
           const required = config.chains[chain].confirmations;
           conf = describeDepth(d, required);
-          if (p.supersededBy && !(d.state === "conflict" && d.by === p.supersededBy.txid)) {
-            // The other plan's transaction no longer holds the coin: this split stands alone again.
-            infos.push(`${label}: no longer superseded by plan ${p.supersededBy.plan}.`);
-            delete p.supersededBy;
-            if (p.broadcast?.status === "superseded") {
-              p.broadcast = {
-                ...p.broadcast,
-                status: d.state === "confirmed" || d.state === "mempool" ? "accepted" : "unknown",
-                detail: "no longer superseded",
-              };
+          const split = { plan: plan.id, file: t.file, chain, inputs: t.inputs };
+          if (p.supersededBy) {
+            // Cleared only on positive evidence that the other plan's transaction no longer holds
+            // the coin: this split itself is on the network, its inputs were seen unspent, or a
+            // named, different transaction spent them. Node RPC never names a spender, and a
+            // backend that can't tell says nothing: the record stays.
+            const sup = p.supersededBy;
+            const freed = d.state === "confirmed" || d.state === "mempool" ||
+              d.state === "absent" ||
+              (d.state === "conflict" && d.by !== undefined && d.by !== sup.txid);
+            if (freed) {
+              infos.push(`${label}: no longer superseded by plan ${sup.plan}.`);
+              delete p.supersededBy;
+              if (p.broadcast?.status === "superseded") {
+                p.broadcast = {
+                  ...p.broadcast,
+                  status: d.state === "confirmed" || d.state === "mempool" ? "accepted" : "unknown",
+                  detail: "no longer superseded",
+                };
+              }
             }
           }
           if (d.state === "conflict" && !p.replacedBy && !p.supersededBy) {
-            // Before alarming, recognise this tool's own spends of the coin.
+            // Before alarming, recognise this tool's own spends of the coin (asking the chain
+            // about them when the backend can't name the spender).
             ownIndex ??= await ownTransactions(config.dataDir);
-            const spender = await classifySpender(
+            const spender = await identifySpender(
               config.dataDir,
-              { plan: plan.id, file: t.file, chain },
+              split,
               d.by,
+              backend,
+              tip,
               ownIndex,
             );
             if (spender.kind === "replacement") {
               applyReplaced(p, spender.link);
-              retractConflicts(p, d.by!);
+              retractConflicts(p, spender.spender.txid);
               infos.push(
                 `${label}: its input was spent by its own fee bump (plan ${spender.spender.plan}); ` +
                   "recorded as replaced.",
@@ -2087,17 +2338,37 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
                 status: "superseded",
                 detail: `by plan ${spender.spender.plan} (${spender.spender.file})`,
               };
-              retractConflicts(p, d.by!);
+              retractConflicts(p, spender.spender.txid);
+            } else if (spender.kind === "self") {
+              // Its own input spent by itself is no conflict: a server that is behind. Say
+              // nothing and change nothing; the next look will place it.
+              d = { state: "unknown" };
+              conf = "on the network (the server is catching up; run track again)";
             }
           }
           if (p.replacedBy && d.state === "confirmed") {
-            // The original won the race: the fee bump can no longer apply.
-            conf += "  (the ORIGINAL confirmed)";
-            alerts.push(
-              `${label}: the original confirmed even though plan ${p.replacedBy.plan} was ` +
-                "broadcast to replace it. The replacement is now invalid.",
+            // The original won the race: its fee bump(s) can never confirm now. Settle that
+            // here, once, rather than alarming on every run: the bump plans are marked superseded
+            // by this one, and this split is followed like any other from now on.
+            const link = p.replacedBy;
+            await markOutraced(
+              config,
+              { plan: plan.id, file: t.file, txid: p.verified.txid },
+              link,
             );
-          } else if (p.replacedBy) {
+            delete p.replacedBy;
+            p.broadcast = {
+              ...p.broadcast!,
+              status: "accepted",
+              detail: `confirmed; its fee bump (plan ${link.plan}) lost the race`,
+            };
+            infos.push(
+              `${label}: the original confirmed even though plan ${link.plan} was broadcast to ` +
+                "replace it. That replacement can't confirm now and is marked superseded by this " +
+                "plan. This split is confirmed: nothing to do.",
+            );
+          }
+          if (p.replacedBy) {
             // Expected to be gone from the chain: follow the fee bump(s) instead.
             const r = await followReplacement(config.dataDir, p.replacedBy, chain, backend, tip);
             const name = `plan ${r.link.plan}${
@@ -2112,11 +2383,11 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
               if (rd.state === "confirmed" && rd.depth! >= required) resolveReorgs(p, at);
             } else if (!rd) {
               conf = `REPLACED by ${name}, which can't be read`;
-              alerts.push(
-                `${label}: ${name} replaced this transaction, but that plan can't be read (was ` +
-                  "it deleted?), so where the replacement went can't be checked. Leave the BTC " +
-                  "copy alone until a replacement shows as confirmed.",
-              );
+              alerts.push({
+                text: `${label}: ${name} replaced this transaction, but that plan can't be read ` +
+                  "(was it deleted?), so where the replacement went can't be checked. Leave the " +
+                  "BTC copy alone until a replacement shows as confirmed.",
+              });
             } else if (rd.state === "unknown") {
               conf = `REPLACED by ${name} (unknown: this backend can't say where it is)`;
             } else if (rd.state === "absent") {
@@ -2135,27 +2406,37 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
                 conf = `REPLACED by ${name} (not on the network yet: sent a few minutes ago)`;
               } else {
                 conf = `REPLACED by ${name}, which is not on the network either`;
-                const alert = {
-                  kind: "evicted" as const,
+                raise(p, label, {
+                  kind: "evicted",
                   detail: `This transaction was replaced by its fee bump (${name}), and that ` +
                     "replacement is no longer in the mempool or on the chain either. Its inputs " +
                     "are unspent, so the coin is still shared with BTC: do NOT spend the BTC " +
                     `copy. Send the replacement again (\`splayed broadcast ${r.link.plan}\`, ` +
                     "Broadcast verified on that plan), or, if its fee was too low, bump it again " +
                     `(\`splayed bump ${r.link.plan}\`).`,
-                };
-                alerts.push(`${label}: ${alertTitle(alert.kind)}: ${alert.detail}`);
-                recordReorg(p, alert, at);
+                }, at);
               }
             } else {
               ownIndex ??= await ownTransactions(config.dataDir);
-              const spender = await classifySpender(
+              const spender = await identifySpender(
                 config.dataDir,
-                { ...r.link, chain },
+                { ...r.link, chain, inputs: t.inputs },
                 rd.by,
+                backend,
+                tip,
                 ownIndex,
               );
-              if (spender.kind === "own") {
+              if (spender.kind === "own" && spender.spender.txid === p.verified.txid) {
+                // The original itself holds the coin again (its replacement fell out and the
+                // original came back): whichever confirms first stands.
+                conf = `${describeDepth(d, required)}: back instead of its replacement (${name})`;
+                infos.push(
+                  `${label}: this original transaction is ${
+                    d.state === "mempool" ? "in the mempool" : "on the network"
+                  } again and its replacement (${name}) is not. Whichever confirms first stands; ` +
+                    "nothing to do unless it stays stuck (then bump this plan again).",
+                );
+              } else if (spender.kind === "own" || spender.kind === "replacement") {
                 conf =
                   `REPLACED by ${name}; the coin was then spent by plan ${spender.spender.plan}`;
                 infos.push(
@@ -2165,20 +2446,25 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
               } else {
                 conf = `REPLACED by ${name}, whose input was spent by something else`;
                 const alert = assessReorg(chain, undefined, rd)!;
-                alerts.push(`${label}: its replacement (${name}): CONFLICT: ${alert.detail}`);
-                recordReorg(p, alert, at);
+                raise(
+                  p,
+                  label,
+                  alert,
+                  at,
+                  `${label}: its replacement (${name}): CONFLICT: ${alert.detail}`,
+                );
               }
             }
           } else if (p.supersededBy) {
             // Another plan of this tool spent the coin first: information, not an alarm.
             const sup = p.supersededBy;
             ownIndex ??= await ownTransactions(config.dataDir);
-            const input = ownIndex.get(sup.txid)?.input;
+            const supInputs = ownIndex.get(sup.txid)?.inputs;
             let sd: DepthResult | undefined;
             try {
               sd = await confirmationDepth(
                 backend,
-                input ? ({ inputs: [input] } as unknown as PlannedTx) : t,
+                supInputs ? ({ inputs: supInputs } as unknown as PlannedTx) : t,
                 sup.txid,
                 tip,
               );
@@ -2195,6 +2481,9 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
             );
           } else {
             const st = p.broadcast?.status;
+            /** The spend that conflicted with it is gone and its inputs are unspent again. */
+            const conflictLeft = d.state === "absent" &&
+              (st === "conflict" || (st === "unknown" && p.broadcast?.detail === CONFLICT_LEFT));
             const sent: SentContext | undefined =
               st === "accepted" || st === "sending" || st === "unknown"
                 ? {
@@ -2205,19 +2494,29 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
                 }
                 : undefined;
             const neverInBlock = !lastSeenInBlock(p.confirmations);
-            if (d.state === "absent" && neverInBlock && sent && withinDropGrace(sent)) {
+            if (conflictLeft && neverInBlock) {
+              conf = "not on the network: the spend that conflicted with it left the chain";
+            } else if (d.state === "absent" && neverInBlock && sent && withinDropGrace(sent)) {
               conf = "not on the network yet (sent a few minutes ago; run track again later)";
             } else if (d.state === "absent" && neverInBlock && sent) {
               conf = p.unmined?.lastInMempool
                 ? "DROPPED from the mempool, never confirmed"
                 : "not on the network, never confirmed";
             }
-            const alert = assessReorg(chain, p.confirmations, d, sent);
+            let alert = assessReorg(chain, p.confirmations, d, sent);
+            if (conflictLeft && (!alert || alert.kind === "evicted")) {
+              alert = conflictLeftAlert(chain);
+            }
             // Mempool sightings of a split that was never in a block, for the next look.
             p.unmined = neverInBlock ? nextUnmined(p.unmined, d, at) : undefined;
+            if (conflictLeft) {
+              // The CONFLICT is over: what is open now is the coin being shared again.
+              p.reorgs = p.reorgs?.map((r) =>
+                r.kind === "conflict" && !r.resolved ? { ...r, resolved: at } : r
+              );
+            }
             if (alert) {
-              alerts.push(`${label}: ${alertTitle(alert.kind)}: ${alert.detail}`);
-              recordReorg(p, alert, at);
+              raise(p, label, alert, at);
               if (alert.kind === "dropped" && p.broadcast) {
                 // Let `broadcast` send it again (it re-verifies and re-checks the inputs first).
                 p.broadcast = {
@@ -2225,6 +2524,8 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
                   status: "unknown",
                   detail: "left the chain in a reorg",
                 };
+              } else if (conflictLeft && p.broadcast) {
+                p.broadcast = { ...p.broadcast, status: "unknown", detail: CONFLICT_LEFT };
               }
               if (alert.kind === "conflict" && p.broadcast) {
                 p.broadcast = { ...p.broadcast, status: "conflict", detail: alert.detail };
@@ -2255,21 +2556,35 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
               };
             }
             if (d.state === "confirmed" && d.depth! >= required) resolveReorgs(p, at);
+            else if (d.state === "confirmed" || d.state === "mempool") {
+              // An acknowledged alert about the split being off the network (or its coin spent
+              // by someone else) is over once it is back: a later drop is a new, loud alert.
+              for (const r of p.reorgs ?? []) {
+                if (
+                  r.acknowledged && !r.resolved &&
+                  (r.kind === "evicted" || r.kind === "dropped" || r.kind === "conflict")
+                ) r.resolved = at;
+              }
+            }
           }
           // The depth as it is now: 0 once it is out of its block, so nothing reads a stale one.
           p.confirmations = nextConfirmations(p.confirmations, d, at);
         }
-        // An alert stays an alert until it is resolved (confirmed deep enough again), even on a
-        // run where nothing new happened.
-        const open = (p.reorgs ?? []).filter((r) => !r.resolved);
-        if (alerts.length === alertsBefore && open.length) {
-          const last = open[open.length - 1];
-          alerts.push(
-            `${label}: ${alertTitle(last.kind)} of ${last.at.slice(0, 16).replace("T", " ")} UTC ` +
+        // An alert stays an alert until it is resolved (confirmed deep enough again) or
+        // acknowledged, even on a run where nothing new happened.
+        if (alerts.length + muted.length === alertsBefore) {
+          const last = (p.reorgs ?? []).filter((r) => !r.resolved).at(-1);
+          if (last) {
+            const text = `${label}: ${alertTitle(last.kind)} of ${utcMinute(last.at)} ` +
               `is still open (now: ${conf}). It closes once the split${
                 p.replacedBy ? " (or its replacement)" : ""
-              } is ${config.chains[chain].confirmations} deep.`,
-          );
+              } is ${config.chains[chain].confirmations} deep${
+                last.acknowledged ? "" : `, or when you acknowledge it (\`track ${plan.id} --ack\`)`
+              }.`;
+            if (last.acknowledged) {
+              muted.push(`${text} (acknowledged ${utcMinute(last.acknowledged)})`);
+            } else alerts.push({ text, rec: last });
+          }
         }
         rows.push([
           chain.toUpperCase(),
@@ -2283,6 +2598,38 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
       await backend?.close?.();
     }
   }
+  if (ack) {
+    // Acknowledge every alert that is open now: kept on record and shown muted from now on.
+    const open = plan.transactions.flatMap((t) =>
+      (progress.txs[t.file]?.reorgs ?? []).filter(isOpenAlert).map((r) => ({ t, r }))
+    );
+    if (!open.length) io.out("No open alerts to acknowledge.");
+    else {
+      const question = [
+        `Acknowledge ${open.length} open alert(s) of plan ${plan.id}?`,
+        ...open.map(({ t, r }) =>
+          `  ${t.chain.toUpperCase()} ${t.file}: ${alertTitle(r.kind)} of ${utcMinute(r.at)}`
+        ),
+        "They stay on record and are shown muted, and no longer make track exit 1. Only " +
+        "acknowledge what you have dealt with, or decided to leave: a coin that is still shared " +
+        "with BTC stays shared. A new alert is loud again.",
+      ].join("\n");
+      if (yes || await io.confirm(question)) {
+        const at = new Date().toISOString();
+        for (const t of plan.transactions) {
+          const p = progress.txs[t.file];
+          if (p) acknowledgeAlerts(p, at);
+        }
+        for (let i = alerts.length - 1; i >= 0; i--) {
+          if (alerts[i].rec?.acknowledged) {
+            muted.push(`${alerts[i].text} (acknowledged now)`);
+            alerts.splice(i, 1);
+          }
+        }
+        io.out(`Acknowledged ${open.length} alert(s).`);
+      } else io.out("Nothing acknowledged.");
+    }
+  }
   await saveProgress(dir, progress);
   if (rows.length === 1) {
     io.out("Nothing broadcast yet.");
@@ -2290,12 +2637,17 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
   }
   io.out(table(rows));
   for (const n of infos) io.out(`Note: ${n}`);
+  for (const m of muted) io.out(`Acknowledged alert: ${m}`);
   for (const f of failures) io.err(`Warning: ${f}`);
   if (alerts.length) {
     io.err("");
     io.err("!!! WARNING: a split did not stay where it was put !!!");
-    for (const a of alerts) io.err(`  ${a}`);
+    for (const a of alerts) io.err(`  ${a.text}`);
     io.err("Until every split is confirmed again, leave the BTC copies alone.");
+    io.err(
+      `Dealt with an alert, or decided to leave it? \`splayed track ${plan.id} --ack\` ` +
+        "acknowledges it (Archive does too).",
+    );
     return 1;
   }
   if (failures.length) {

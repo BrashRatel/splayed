@@ -2,8 +2,9 @@
  * The TEST FIRST rule, as a soft gate: on each chain `broadcast` sends the TEST FIRST (smallest)
  * transaction alone first, proving the signer, the destination and the route work before more
  * coins move. On later runs it says where the TEST FIRST transaction is now and asks before
- * sending the rest of that chain (`--yes` answers yes, `--all` skips the TEST FIRST step), so no
- * state can leave the rest stuck. This module only describes the TEST FIRST transaction.
+ * sending the rest of that chain, so no state can leave the rest stuck. `--yes` answers yes only
+ * while the test spend is on the network (confirmed or in the mempool); `--all` skips the TEST
+ * FIRST step. This module only describes the TEST FIRST transaction.
  */
 import type { ChainBackend } from "../backends/types.ts";
 import { confirmationDepth, type DepthResult, type Progress } from "./execute.ts";
@@ -15,6 +16,12 @@ export interface TestFirstStatus {
   test: PlannedTx;
   /** It (or the fee bump that replaced it, through any number of bumps) is in a block. */
   confirmed: boolean;
+  /**
+   * It (or its replacement) is confirmed or in the mempool: the test spend went out. Only then
+   * may `--yes` answer the question; anything else (not verified, not sent, rejected, in
+   * conflict, superseded, dropped, unknown, a failed lookup) means no test is on the network.
+   */
+  out: boolean;
   /** "the TEST FIRST transaction (ecx/001-…) is confirmed (3 deep)", for the question. */
   text: string;
 }
@@ -49,7 +56,12 @@ export async function describeTestFirst(o: {
   if (!test) return undefined;
   const p = o.progress.txs[test.file];
   const name = `the TEST FIRST transaction (${test.file})`;
-  const say = (confirmed: boolean, text: string) => ({ test, confirmed, text: `${name} ${text}` });
+  const say = (confirmed: boolean, text: string, out = confirmed) => ({
+    test,
+    confirmed,
+    out,
+    text: `${name} ${text}`,
+  });
   if (!p?.verified) return say(false, "isn't verified yet (sign and verify it first)");
   if (!p.broadcast) return say(false, "hasn't been sent yet");
   if (p.supersededBy) {
@@ -68,6 +80,7 @@ export async function describeTestFirst(o: {
       return say(
         r.depth.state === "confirmed",
         `was replaced by ${by}, which is ${where(r.depth)}`,
+        r.depth.state === "confirmed" || r.depth.state === "mempool",
       );
     }
     const st = p.broadcast.status;
@@ -77,7 +90,7 @@ export async function describeTestFirst(o: {
         `was rejected by the server${p.broadcast.detail ? ` (${p.broadcast.detail})` : ""}`,
       );
     }
-    return say(false, `is ${where(own)}`);
+    return say(false, `is ${where(own)}`, own.state === "mempool");
   } catch (error) {
     return say(false, `couldn't be checked (${(error as Error).message})`);
   }

@@ -3,13 +3,16 @@ import { join } from "node:path";
 import { type CliIO, main } from "../src/cli/main.ts";
 import { protectedTxids } from "../src/core/donors.ts";
 import {
+  archivePlan,
   classifySpender,
+  identifySpender,
   isUnsettled,
   ownTransactions,
   plannedOutpoints,
   unsentReplacements,
 } from "../src/core/plan_admin.ts";
 import type { TxProgress } from "../src/core/execute.ts";
+import type { ChainBackend, OutputObservation } from "../src/backends/types.ts";
 
 const ID = "20261101T120000000-abc123";
 
@@ -399,6 +402,8 @@ Deno.test("classifySpender: own fee bumps (any hop), other plans (archived too),
   const own = await classifySpender(dataDir, split, tx("dd"), index);
   assertEquals(own.kind === "own" && own.spender.plan, other);
   assertEquals((await classifySpender(dataDir, split, tx("ee"), index)).kind, "unknown");
+  // The split's own txid spending its own input is the split itself, never a stranger.
+  assertEquals((await classifySpender(dataDir, split, tx("aa"), index)).kind, "self");
   assertEquals((await classifySpender(dataDir, split, undefined, index)).kind, "unknown");
   // Another chain's transaction with the same txid can't be this coin's spender.
   assertEquals(
@@ -420,4 +425,73 @@ Deno.test("plannedOutpoints: a transaction superseded by another plan isn't coun
     plan: ID,
     sent: false,
   }]);
+});
+
+Deno.test("identifySpender: without a named spender, this tool's transactions on the same coin are asked about by txid", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const tx = (c: string) => c.repeat(32);
+  const v = (txid: string) => ({ verified: { at: "x", txid, finalHex: "00", checks: [] } });
+  const coin = { txid: tx("01"), vout: 0 };
+  // The other plan spends the coin as its SECOND input (a batch): still found.
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "a.psbt", inputs: [coin] }], {
+    "a.psbt": v(tx("aa")),
+  });
+  const other = "20261101T130000000-def456";
+  await writePlan(dataDir, other, [{
+    chain: "ecx",
+    file: "d.psbt",
+    inputs: [{ txid: tx("02"), vout: 1 }, coin],
+  }], { "d.psbt": v(tx("dd")) });
+  const asked: string[] = [];
+  /** Node RPC with txindex: knows transactions by txid, never names a spender. */
+  const rpcLike = (onChain: Set<string>) =>
+    ({
+      txStatus: (id: string) => {
+        asked.push(id);
+        return Promise.resolve(
+          onChain.has(id) ? { state: "confirmed", height: 100, blockHash: tx("ff") } : {
+            state: "absent",
+          },
+        );
+      },
+      observeOutput: () =>
+        Promise.resolve({ state: "spent", spendDetailKnown: false } as OutputObservation),
+    }) as unknown as ChainBackend;
+  const split = { plan: ID, file: "a.psbt", chain: "ecx", inputs: [coin] };
+  const found = await identifySpender(dataDir, split, undefined, rpcLike(new Set([tx("dd")])), 105);
+  assertEquals(found.kind === "own" && found.spender.plan, other);
+  assert(!asked.includes(tx("aa")), "the split itself is not a candidate");
+  // Not on the chain: unknown, never a guess.
+  assertEquals(
+    (await identifySpender(dataDir, split, undefined, rpcLike(new Set()), 105)).kind,
+    "unknown",
+  );
+  // Another chain's transactions are never candidates.
+  assertEquals(
+    (await identifySpender(
+      dataDir,
+      { ...split, chain: "xbt" },
+      undefined,
+      rpcLike(new Set([tx("dd")])),
+      105,
+    )).kind,
+    "unknown",
+  );
+});
+
+Deno.test("archiving a plan acknowledges its open alerts, and only those", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  await writePlan(dataDir, ID, [{ chain: "ecx", file: "a.psbt", inputs: [] }], {
+    "a.psbt": {
+      broadcast: B("accepted"),
+      reorgs: [
+        { at: "t1", kind: "conflict", detail: "x", resolved: "t2" },
+        { at: "t3", kind: "evicted", detail: "y" },
+      ],
+    },
+  });
+  assertEquals(await archivePlan(dataDir, ID, new Date("2026-11-02T12:00:00.000Z")), 1);
+  const p = JSON.parse(await Deno.readTextFile(join(dataDir, "plans", ID, "progress.json")));
+  assertEquals(p.txs["a.psbt"].reorgs[0].acknowledged, undefined);
+  assertEquals(p.txs["a.psbt"].reorgs[1].acknowledged, "2026-11-02T12:00:00.000Z");
 });

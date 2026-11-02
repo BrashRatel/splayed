@@ -100,14 +100,19 @@ export function applyReplaced(entry: TxProgress, link: ReplacementLink): void {
   }
 }
 
+/** The words a CONFLICT detail uses when the backend couldn't name the spender. */
+export const UNNAMED_SPENDER = "this backend can't say which";
+
 /**
  * Drops open CONFLICT records that blamed `txid`, once it turned out to be one of this tool's
- * own transactions (a fee bump, or another plan): they were never true.
+ * own transactions (a fee bump, or another plan): they were never true. Records that couldn't
+ * name the spender (node RPC) were about the same spend and go too.
  */
 export function retractConflicts(entry: TxProgress, txid: string): boolean {
   const before = entry.reorgs?.length ?? 0;
   entry.reorgs = entry.reorgs?.filter((r) =>
-    r.resolved || r.kind !== "conflict" || !r.detail.includes(txid)
+    r.resolved || r.kind !== "conflict" ||
+    !(r.detail.includes(txid) || r.detail.includes(UNNAMED_SPENDER))
   );
   if (entry.reorgs && !entry.reorgs.length) delete entry.reorgs;
   return (entry.reorgs?.length ?? 0) !== before;
@@ -148,6 +153,25 @@ export interface ReorgRecord {
   detail: string;
   /** When `track` next saw the split (or the fee bump that replaced it) confirmed deep enough. */
   resolved?: string;
+  /**
+   * When the user acknowledged it (`track --ack`, or archiving the plan): still on record and
+   * shown, muted, but no longer counted as open (it doesn't make `track` exit 1).
+   */
+  acknowledged?: string;
+}
+
+/** An alert that still counts: neither resolved nor acknowledged. */
+export const isOpenAlert = (r: ReorgRecord) => !r.resolved && !r.acknowledged;
+
+/** Acknowledges every open alert of a transaction; returns how many. */
+export function acknowledgeAlerts(p: TxProgress, at: string): number {
+  let n = 0;
+  for (const r of p.reorgs ?? []) {
+    if (!isOpenAlert(r)) continue;
+    r.acknowledged = at; // in place: callers hold these records
+    n++;
+  }
+  return n;
 }
 
 export interface Progress {
@@ -407,9 +431,31 @@ export interface DepthResult {
 
 /**
  * Where the plan transaction is on its chain. Asks about the transaction itself first (needs a
- * backend with txStatus); falls back to judging by what spent its first input.
+ * backend with txStatus); falls back to judging by what spent its first input, and when that
+ * can't tell either, to its own first output: an output in the chain's UTXO set (node RPC's
+ * `gettxout` sees the mempool too) proves the transaction is in a block or the mempool, even on a
+ * node without txindex.
  */
 export async function confirmationDepth(
+  backend: ChainBackend,
+  planTx: PlannedTx,
+  txid: string,
+  tip: number,
+): Promise<DepthResult> {
+  const d = await depthByStatusAndInputs(backend, planTx, txid, tip);
+  if (d.state !== "unknown") return d;
+  const own = await backend.observeOutput(txid, 0).catch(() => undefined);
+  if (own?.state !== "unspent") return d;
+  if (own.createdHeight === undefined) return { state: "mempool" };
+  return {
+    state: "confirmed",
+    depth: tip - own.createdHeight + 1,
+    height: own.createdHeight,
+    blockHash: await backend.blockHash(own.createdHeight),
+  };
+}
+
+async function depthByStatusAndInputs(
   backend: ChainBackend,
   planTx: PlannedTx,
   txid: string,
@@ -440,8 +486,10 @@ export async function confirmationDepth(
     }
     return { state: "absent" };
   }
-  if (obs.state === "spent" && status?.state === "absent") {
+  if (obs.state === "spent" && status?.state === "absent" && obs.spendTxid !== txid) {
     // Not on the chain and not in the mempool, yet the input is gone: someone else spent it.
+    // (Spent by this very transaction: it reached the mempool or a block between the two
+    // lookups, or the server answering is behind; the spend itself says where it is, below.)
     return { state: "conflict", by: obs.spendTxid };
   }
   // The input's own transaction can't be found, or the backend can't tell spent from missing:
@@ -550,7 +598,7 @@ export function assessReorg(
           (now.by
             ? `This split's input was spent by transaction ${now.by}, which is not one of this ` +
               "tool's plans or fee bumps."
-            : "This split's input was spent by another transaction; this backend can't say which " +
+            : `This split's input was spent by another transaction; ${UNNAMED_SPENDER} ` +
               "(node RPC without txindex can't name a spender: an Esplora or Electrum backend " +
               "can).") +
           ` Likely causes, most likely first: the coin was spent with another wallet or tool (a ` +
@@ -658,11 +706,21 @@ export function resolveReorgs(p: TxProgress, at: string): void {
   p.reorgs = p.reorgs.map((r) => (r.resolved ? r : { ...r, resolved: at }));
 }
 
-/** Adds an alert to the history unless it repeats the open one at the end. */
-export function recordReorg(p: TxProgress, alert: ReorgAlert, at: string): void {
+/**
+ * Adds an alert to the history unless it repeats the one still unresolved at the end (an open
+ * DROPPED alert is repeated by its kind alone: how the split came to be off the network can be
+ * worded differently on a later look). Once acknowledged, only the same words repeat it: a new
+ * drop (seen in the mempool again since) is a new, loud record. Returns the record.
+ */
+export function recordReorg(p: TxProgress, alert: ReorgAlert, at: string): ReorgRecord {
   const last = p.reorgs?.[p.reorgs.length - 1];
-  if (last && !last.resolved && last.kind === alert.kind && last.detail === alert.detail) return;
-  p.reorgs = [...(p.reorgs ?? []), { at, kind: alert.kind, detail: alert.detail }];
+  if (
+    last && !last.resolved && last.kind === alert.kind &&
+    (last.detail === alert.detail || (alert.kind === "evicted" && !last.acknowledged))
+  ) return last;
+  const rec: ReorgRecord = { at, kind: alert.kind, detail: alert.detail };
+  p.reorgs = [...(p.reorgs ?? []), rec];
+  return rec;
 }
 
 export interface GateCheck {

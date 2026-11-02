@@ -242,11 +242,14 @@ export async function setup(
   /** What every question is answered, and the questions asked. */
   const answer = { yes: true };
   const questions: string[] = [];
+  /** How each question was put (`recommend: "no"` when yes skips a safety step). */
+  const recommends: (string | undefined)[] = [];
   const io: CliIO = {
     out: (t) => out.push(t),
     err: (t) => err.push(t),
-    confirm: (q) => {
+    confirm: (q, o) => {
       questions.push(q);
+      recommends.push(o?.recommend);
       return answer.yes;
     },
     env: {},
@@ -311,6 +314,7 @@ export async function setup(
     coins: { a, b },
     answer,
     questions,
+    recommends,
   };
 }
 

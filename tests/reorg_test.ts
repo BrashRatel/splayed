@@ -1,11 +1,13 @@
 import { assert, assertEquals } from "./assert.ts";
 import type { ChainBackend, OutputObservation, TxStatus } from "../src/backends/types.ts";
 import {
+  acknowledgeAlerts,
   alertTitle,
   assessReorg,
   confirmationDepth,
   type Confirmations,
   DROP_GRACE_MS,
+  isOpenAlert,
   nextConfirmations,
   nextUnmined,
   recordReorg,
@@ -111,6 +113,49 @@ Deno.test("depth: a backend that can't report spend details says unknown, not me
   assertEquals(
     (await confirmationDepth(stub({ state: "unknown" }, { state: "gone" }), planTx, TXID, 105))
       .state,
+    "unknown",
+  );
+});
+
+Deno.test("depth: an input spent by this very transaction is never a conflict, even when its status lags", async () => {
+  // The status lookup said "absent", then the input showed spent by this txid: it reached the
+  // mempool (or a block) between the two lookups, or the server is behind. It used to be a
+  // conflict blaming the split itself.
+  assertEquals(
+    (await confirmationDepth(stub({ state: "absent" }, spentBy(TXID)), planTx, TXID, 105)).state,
+    "mempool",
+  );
+  assertEquals(
+    await confirmationDepth(stub({ state: "absent" }, spentBy(TXID, 100)), planTx, TXID, 105),
+    { state: "confirmed", depth: 6, height: 100, blockHash: (100).toString(16).padStart(64, "0") },
+  );
+});
+
+Deno.test("depth: when nothing else can tell, the transaction's own unspent output proves where it is", async () => {
+  // Node RPC without txindex: the split is confirmed, its input is gone (spent or missing can't
+  // be told apart), but its own output is in the UTXO set.
+  const rpcLike = (own: OutputObservation) =>
+    ({
+      txStatus: () => Promise.resolve({ state: "unknown" }),
+      observeOutput: (txid: string) => Promise.resolve(txid === TXID ? own : { state: "gone" }),
+      blockHash: (h: number) => Promise.resolve(h.toString(16).padStart(64, "0")),
+    }) as unknown as ChainBackend;
+  assertEquals(
+    await confirmationDepth(
+      rpcLike({ state: "unspent", value: 1, createdHeight: 101 }),
+      planTx,
+      TXID,
+      105,
+    ),
+    { state: "confirmed", depth: 5, height: 101, blockHash: (101).toString(16).padStart(64, "0") },
+  );
+  assertEquals(
+    (await confirmationDepth(rpcLike({ state: "unspent", value: 1 }), planTx, TXID, 105)).state,
+    "mempool",
+  );
+  // Its output spent too (the destination wallet moved it): still unknown, never a guess.
+  assertEquals(
+    (await confirmationDepth(rpcLike({ state: "gone" }), planTx, TXID, 105)).state,
     "unknown",
   );
 });
@@ -346,6 +391,39 @@ Deno.test("reorg records: no duplicates while open; resolved once deep again; a 
   assertEquals(p.reorgs![0].resolved, "t3");
   recordReorg(p, alert, "t5"); // the same thing happening again is a new record
   assertEquals(p.reorgs!.map((r) => r.resolved), ["t3", undefined]);
+});
+
+Deno.test("reorg records: acknowledged alerts stay on record, aren't open, and are returned as such", () => {
+  const p: TxProgress = {};
+  const conflict = { kind: "conflict" as const, detail: "spent by dd" };
+  const rec = recordReorg(p, conflict, "t1");
+  assertEquals(isOpenAlert(rec), true);
+  assertEquals(acknowledgeAlerts(p, "t2"), 1);
+  assertEquals(rec.acknowledged, "t2"); // in place: callers hold the record
+  assertEquals(isOpenAlert(rec), false);
+  assertEquals(acknowledgeAlerts(p, "t3"), 0);
+  // The same alert again is the acknowledged record, not a new loud one.
+  assertEquals(recordReorg(p, conflict, "t4"), rec);
+  assertEquals(p.reorgs!.length, 1);
+  // A different one is new and open.
+  assertEquals(
+    isOpenAlert(recordReorg(p, { kind: "conflict", detail: "spent by ee" }, "t5")),
+    true,
+  );
+});
+
+Deno.test("reorg records: an open DROPPED alert repeats by its kind, however it is worded", () => {
+  const p: TxProgress = {};
+  recordReorg(p, { kind: "evicted", detail: "the conflicting spend left" }, "t1");
+  const again = recordReorg(p, { kind: "evicted", detail: "the last send ended unclear" }, "t2");
+  assertEquals(p.reorgs!.length, 1);
+  assertEquals(again.detail, "the conflicting spend left");
+  // Once acknowledged, only the same words repeat it: a new drop is a new record.
+  acknowledgeAlerts(p, "t3");
+  recordReorg(p, { kind: "evicted", detail: "the conflicting spend left" }, "t4");
+  assertEquals(p.reorgs!.length, 1);
+  recordReorg(p, { kind: "evicted", detail: "last seen 14:03" }, "t5");
+  assertEquals(p.reorgs!.length, 2);
 });
 
 // ---- scan-to-scan regressions ----
