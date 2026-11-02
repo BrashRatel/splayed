@@ -14,7 +14,7 @@ detail; this file covers the plan, what's left and how the work has been done.
 | 2     | Follow-ups: new-shared-coins warning; coin picker; real-browser checks; track/broadcast correctness (reorgs, DROPPED, own-spend recognition, soft TEST FIRST gate, `track --ack`, `bump --another`); docs and screenshot refresh | Done                                                                                     |
 | 3     | A1: UI behind another server (`ui --listen --allowed-host --token-file`, sign-in, throttling). A2: `config backend detect`                                                                                                       | Done                                                                                     |
 | 4     | Docker (`docker/`, `docs/user/docker.md`)                                                                                                                                                                                        | Written, **not built yet** (no Docker daemon where it was written)                       |
-| 5     | StartOS package (separate `splayed-startos` repo)                                                                                                                                                                                | Not started; notes below                                                                 |
+| 5     | StartOS package (separate `splayed-startos` repo)                                                                                                                                                                                | First version in `splayed-startos`; not packed or installed yet (below)                  |
 
 Decisions made along the way:
 
@@ -31,32 +31,14 @@ Decisions made along the way:
 1. **Docs and screenshots refresh:** done. `docs/images/web-ui/` was regenerated (26 screens) by
    `scripts/docs_screenshots.ts` (pinned Playwright; `SPLAYED_SHOTS_CHROMIUM`), and the Web UI guide
    was updated.
-2. **Phase 5: the StartOS package** (StartOS 0.4 SDK, in a new repo `splayed-startos`):
-   - **Image:** build on `docker/Dockerfile`, for x86_64 and aarch64 only (Deno has no riscv64
-     target). No Tor in the StartOS image.
-   - **Tor:** the StartOS Tor package exposes SOCKS at `${osIp}:9050` (`10.0.3.1`). Its torrc sets
-     `SocksPort 0.0.0.0:9050` with default flags, so `IsolateSOCKSAuth` is on.
-     - Pass it always, via
-       `sdk.host.getBridgeAddress({ packageId: "tor", hostId: socksHostId, internalPort: 9050, fallbackPort: 9050 })`.
-     - Set `SPLAYED_TOR_MODE=system` and `SPLAYED_TOR_SOCKS` to that address.
-   - **Bitcoin node:** an optional `bitcoind` dependency accepting any version.
-     - Core, Knots (pre-RDTS) and Knots (RDTS) are flavours of the same package id, and only one
-       runs per box, so the node may follow BTC or the RDTS chain. Use `config backend detect --add`
-       to put it on the right chain.
-     - Prefer Core's bridge-only `rpc-local` (container port 58332) over the proxied `rpc` (8332).
-     - Credentials: the hidden `generate-rpc-dependent` action (password at least 20 characters,
-       from `utils.getDefaultString`, stored in the package's `store.json`), passed as `--user` +
-       `--password-env`.
-     - Don't require `txindex` (pruned nodes force it off; only donor checks need it).
-   - **UI:**
-     - A1 flags; allowed hosts from the UI interface's own addresses (`.local`, `.onion`, domains),
-       restarting when they change.
-     - Actions "Show UI token" (read the token file) and "Reset UI token" (`ui --new-token-file`).
-     - The HTTPS LAN address makes the QR camera work.
-   - **ECX:** no StartOS node package; it stays on Esplora over Tor.
-   - **Packaging:** the data volume goes in backups; write `instructions.md`; pass StartOS's
-     new-package checklist (packaging guide in `Start9Labs/start-technologies`,
-     `projects/start-sdk/docs/src`).
+2. **Phase 5: the StartOS package:** first version in
+   [`BrashRatel/splayed-startos`](https://github.com/BrashRatel/splayed-startos) (SDK 3.1.1, the
+   published one; submodule pinned to this branch). Its README describes the design: image built
+   with `WITH_TOR=0`; Tor service required (`SPLAYED_TOR_MODE=system`, SOCKS from its bridge
+   binding); optional `bitcoind` through `rpc-local` with a login from `generate-rpc-dependent` and
+   `config backend detect --add` on each start; allowed hosts from the UI binding; Show/Reset UI
+   token actions; both volumes backed up. Type-checked, linted and bundled with ncc here; not yet
+   packed (`start-cli` and Docker aren't available here) or installed.
 3. **Checkpoints before merging into `main`:**
    - **Docker testing:**
      - build and run the image;
@@ -66,7 +48,11 @@ Decisions made along the way:
        track/broadcast changes have so far only been tested against fake backends).
    - **Real devices:** QR import (Scan QR, multisig cosigners, Static text) with a real camera and
      SeedSigner.
-   - **StartOS:** install on a real device.
+   - **StartOS:** `make x86`/`make arm` in `splayed-startos`, then install on a real device. Check
+     first: the Web UI answers (no 403 from the Host check behind the StartOS proxy), Show UI token
+     and sign-in, a scan over the Tor service, and with Use the Bitcoin node the bitcoind task, then
+     the node added to the right chain. Also back up and restore. The icon is a placeholder drawn
+     for the package.
    - **One final review of the whole branch**, focusing on track/broadcast and on A1 (the network
      boundary).
 
