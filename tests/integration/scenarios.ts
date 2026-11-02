@@ -242,7 +242,7 @@ export async function reorgScenario(t: Deno.TestContext, h: Harness, w: Scenario
     await mine(h, "ecx", 2);
     assertEquals(await run("track", planId), 1, text());
     assert(text().includes("another transaction"), text());
-    assert(text().includes("treat the key as compromised"), text());
+    assert(text().includes("the key may be compromised"), text());
     assertEquals((await readProgress(dir)).txs[a2.file].broadcast?.status, "conflict");
   });
 }
@@ -879,9 +879,9 @@ export async function droppedScenario(t: Deno.TestContext, h: Harness, w: Scenar
       const pool = await ecx.call<string[]>("getrawmempool");
       for (const id of txids) assert(pool.includes(id), `${id} should be back in the mempool`);
       await mine(h, "ecx", 2);
-      // They confirm in a different block from before: reported once, then quiet.
-      assertEquals(await run("track", planId), 1, text());
-      assert(text().includes("is now in block"), text());
+      // The drop was reported when it happened; confirming again is the recovery, so it is quiet.
+      assertEquals(await run("track", planId), 0, text());
+      assert(!text().includes("is now in block"), text());
       assertEquals(await run("track", planId), 0, text());
     });
   } finally {
