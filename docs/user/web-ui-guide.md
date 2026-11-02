@@ -55,7 +55,14 @@ deno task ui
 ```
 
 Your browser opens the interface. It only listens on your own computer, and the link includes a
-random access token, so open it from that terminal output if it doesn't open automatically.
+random access token, so open it from that terminal output if it doesn't open automatically. (In
+[Docker](docker.md) or on another server, the page asks for the access token instead: a sign-in
+screen, remembered for that browser tab only.)
+
+A **Setup guide** above every tab lists the steps below, ticks off what's done and explains the next
+one; **Guide: on/off** in the tab bar hides it.
+
+![Setup guide on first launch](../images/web-ui/01-setup-guide.png)
 
 The header always shows two status pills: whether **Tor** is running, and whether your **network
 settings are confirmed**. The **Activity** panel on the right shows what splayed is doing, in plain
@@ -63,7 +70,7 @@ text. Use the **Light mode** button if you prefer a light theme.
 
 ## 2. Network: decide where queries go
 
-![Network tab before confirming](../images/web-ui/01-network.png)
+![Network tab before confirming](../images/web-ui/02-network.png)
 
 The **Network** tab shows where splayed will ask about your coins, per chain. By default it uses
 public servers **over Tor**, and it will never fall back to a direct connection. The pill at top
@@ -75,28 +82,43 @@ Most people can leave everything as it is. You can:
   [Network and privacy](network-and-privacy.md);
 - set how many **Confirmations** each chain needs before a spend counts as final;
 - **Add your own backend** (a node or Electrum server you run), which replaces that chain's default.
+  **Detect chain & add** asks the server which chain it follows and adds it there;
+- change the **Scan settings**: the gap limit (unused addresses checked past the last used one) and
+  the jitter between lookups.
+
+![Scan settings](../images/web-ui/03-scan-settings.png)
 
 When you're happy, press **Check servers & confirm**.
 
-![Confirmation dialog](../images/web-ui/02-network-confirm.png)
+![Confirmation dialog](../images/web-ui/04-network-confirm.png)
 
 splayed asks before contacting the servers. Answer **Yes**. It then checks each server is really on
 the right chain, sending only the chain tip and a few fixed block hashes, nothing about your coins.
+Over Tor this can take a minute or more; a progress box shows which server is being checked.
 
-![Network confirmed](../images/web-ui/03-network-confirmed.png)
+![Checking servers](../images/web-ui/05-network-progress.png)
 
-The pill turns green: **network confirmed**. The Activity panel shows which checkpoints each server
-matched. If a server fails the check, fix or replace it and confirm again. Changing any network
-setting later locks the gate again until you re-confirm.
+![Network confirmed](../images/web-ui/06-network-confirmed.png)
+
+The pill turns green: **network confirmed**, and the UI moves on to the Wallet tab by itself. The
+Activity panel shows which checkpoints each server matched. If a server fails the check, fix or
+replace it and confirm again. Changing any network setting later locks the gate again until you
+re-confirm.
 
 ## 3. Wallet: add your coins and destinations
 
 Open the **Wallet** tab.
 
 **Import your wallet.** Paste your output descriptor into the box, optionally add a label, and press
-**Import**.
+**Import**. Or press **Scan QR** and show it your signer's xpub export (SeedSigner: Export Xpub) or
+your coordinator's wallet QR. For a **multisig** wallet, scan each cosigner's multisig xpub in turn
+(**Add cosigner**), set how many signatures are required, and **check that the first receive address
+matches your coordinator** (e.g. Sparrow) before pressing **Use this**. Without a camera, paste the
+QR text instead.
 
-![Wallet imported](../images/web-ui/04-wallet-imported.png)
+![Multisig wallet from three SeedSigner exports](../images/web-ui/07-wallet-qr-multisig.png)
+
+![Wallet imported](../images/web-ui/08-wallet-imported.png)
 
 splayed lists the first addresses of the wallet. **Check that they match what your wallet shows**
 before going on. If they don't, press **Forget** and re-check the descriptor.
@@ -105,18 +127,22 @@ Supported wallet types: single-key (`pkh`, `wpkh`, `sh(wpkh)`, Taproot `tr`) and
 (`sh`/`wsh`/`sh(wsh)` with `multi` or `sortedmulti`).
 
 **Set where the split coins go.** Paste the destination descriptor for ECX and for XBT into their
-cards and press **Set destination** on each.
+cards (or use **Scan QR**) and press **Set destination** on each. Once both are set, the UI moves on
+to the Coins tab.
 
-![Destinations set](../images/web-ui/05-wallet-destinations.png)
+![Destinations set](../images/web-ui/09-wallet-destinations.png)
 
 Each card then shows the next address that will be used. Use a **different wallet for each fork**,
 ideally from a new seed. Every destination address is reserved so it is never reused.
 
 ## 4. Coins: find what's shared
 
-Open **Coins** and press **Scan now**.
+Open **Coins** and press **Scan now**. Over Tor each address is looked up separately with pauses in
+between, so a scan takes a while; a progress box shows how far it got.
 
-![Coins after scanning](../images/web-ui/06-coins-scanned.png)
+![Scanning](../images/web-ui/10-coins-scanning.png)
+
+![Coins after scanning](../images/web-ui/11-coins-scanned.png)
 
 Each coin shows its state on every chain. The **Status** column tells you what to do:
 
@@ -136,11 +162,15 @@ lists them, their rows get a **new** badge, and once you have a plan a pill in t
 them. Don't spend those coins on BTC until they are split; plan them like the others: **Plan these
 coins** on the banner opens the plan form with only those coins ticked.
 
+![New shared coins after a rescan](../images/web-ui/12-new-shared-coins.png)
+
+![Plan these coins](../images/web-ui/14-plan-these-coins.png)
+
 ## 5. Plan: create the transactions
 
 Open **Plans & signing**.
 
-![New plan form](../images/web-ui/07-plan-form.png)
+![New plan form](../images/web-ui/13-plan-form.png)
 
 Choose:
 
@@ -160,7 +190,7 @@ Press **Create plan** (it stays disabled, with the reason, while no coin is pick
 re-checks each coin, fetches its previous transaction, and writes one unsigned file (PSBT) per
 transaction.
 
-![Plan created](../images/web-ui/08-plan-created.png)
+![Plan created](../images/web-ui/15-plan-created.png)
 
 The table lists every transaction, with its value, fee and destination. The smallest transaction on
 each chain is marked **TEST FIRST**: it is sent alone first, as a safety check.
@@ -175,7 +205,7 @@ For each row, get the unsigned file to your signer. There are three ways:
 - **QR** shows the transaction as an animated QR code for an **air-gapped signer** (Keystone,
   Passport, Jade, SeedSigner and others).
 
-![Animated QR for an air-gapped signer](../images/web-ui/09-qr-export.png)
+![Animated QR for an air-gapped signer](../images/web-ui/16-qr-export.png)
 
 Keep the signer scanning until it has all frames. If it misses some, nothing is lost: frames loop.
 
@@ -190,9 +220,9 @@ Then bring each **signed** transaction back:
 - **Choose File** and **Upload signed** for a saved file. Signed PSBTs and raw transaction hex are
   both accepted.
 - **Scan signed** reads your signer's animated QR codes through the camera. Browsers only allow the
-  camera on `localhost` or `127.0.0.1`, so open the UI at that address.
+  camera on `localhost`, `127.0.0.1` or an HTTPS address, so open the UI at one of those.
 
-![Signed files uploaded](../images/web-ui/10-signed-uploaded.png)
+![Signed files uploaded](../images/web-ui/17-signed-uploaded.png)
 
 Each uploaded row shows a green **received** note. Do all rows before verifying.
 
@@ -200,7 +230,7 @@ Each uploaded row shows a green **received** note. Do all rows before verifying.
 
 Press **Verify signed files**.
 
-![Verified](../images/web-ui/11-verified.png)
+![Verified](../images/web-ui/18-verified.png)
 
 splayed checks, for every transaction, that:
 
@@ -217,12 +247,12 @@ file again. Nothing is sent until you move on.
 
 Press **Broadcast verified**. splayed asks for confirmation:
 
-![Broadcast confirmation](../images/web-ui/12-broadcast-confirm.png)
+![Broadcast confirmation](../images/web-ui/19-broadcast-confirm.png)
 
 Each transaction goes **only to its own chain**, over its own Tor connection. The first time, only
 the **TEST FIRST** transaction on each chain is sent.
 
-![Test first sent](../images/web-ui/13-broadcast-test-first.png)
+![Test first sent](../images/web-ui/20-broadcast-test-first.png)
 
 Wait for the test transactions to confirm on their chains (**Track confirmations**), then press
 **Broadcast verified** again. splayed says where each TEST FIRST transaction is now and asks before
@@ -231,7 +261,9 @@ call), **No** to wait. If the TEST FIRST transaction has **not** gone out at all
 rejected, in conflict, superseded by another plan…), the question says so first and **No** is the
 default button: sending the rest then skips the test.
 
-![Everything broadcast](../images/web-ui/14-broadcast-all.png)
+![The TEST FIRST question](../images/web-ui/21-test-first-question.png)
+
+![Everything broadcast](../images/web-ui/22-broadcast-all.png)
 
 If a send times out you'll see an _unknown_ result, never a false failure; pressing the button again
 is safe and never double-sends. A split that was sent but dropped out of the mempool shows a
@@ -243,7 +275,7 @@ step; avoid it until you are comfortable.
 
 Press **Track confirmations** now and then.
 
-![Tracking confirmations](../images/web-ui/15-tracked.png)
+![Tracking confirmations](../images/web-ui/23-tracked.png)
 
 Each row shows its depth against the number you chose on the Network tab. When all splits are deeply
 confirmed, go to **Coins** and **Scan now** again. The BTC copies now show as **separated**, and can
@@ -260,6 +292,8 @@ be spent normally from your original wallet.
   that can't resolve by itself (a stranger's spend, a dropped split you won't send again) can be
   muted with **Acknowledge alerts…** once you have dealt with it; it then turns grey and says
   **Acknowledged**. **Archive** acknowledges a plan's alerts too.
+
+  ![A DROPPED alert](../images/web-ui/24-alert-dropped.png)
 - **A transaction is stuck unconfirmed.** Use **Fee bump…** on its row (or **Fee bump all
   unconfirmed…**) to create a higher-fee replacement. Sign, verify and broadcast the new plan
   exactly as above. See [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).
@@ -269,11 +303,17 @@ be spent normally from your original wallet.
 - **Verify says a signature isn't `0x21`.** Your XBT signer ignored the request. Use one from
   [Signers](signers.md).
 
+**Tidying up.** **Archive** on a plan moves it to **Archived plans** at the bottom of the tab (kept
+on disk; **Restore** brings it back). **Delete…** removes it for good, and is refused while any of
+its transactions was sent and isn't confirmed yet.
+
+![Archived plans](../images/web-ui/25-archived-plans.png)
+
 ## Advanced: stock hardware wallets and moving BTC first
 
 Switch **Advanced** on at the right of the tab bar to reveal a **Donors** tab.
 
-![Donors tab](../images/web-ui/16-donors-tab.png)
+![Donors tab](../images/web-ui/26-donors-tab.png)
 
 A **donor** is a coin that exists on only one chain. Spending it in the same transaction makes the
 transaction invalid everywhere else, so a normal wallet signature is enough. This lets a **stock

@@ -4,6 +4,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Docs
+
+- The Web UI guide and its screenshots are regenerated for the current UI (26 screens: setup guide,
+  scan settings, progress boxes, QR multisig import, new shared coins, coin picker, TEST FIRST
+  question, DROPPED alert, archived plans). `scripts/docs_screenshots.ts` pins Playwright and takes
+  `SPLAYED_SHOTS_CHROMIUM` for an existing browser.
+
 ### Added (Phase 4)
 
 - **Docker image** (`docker/Dockerfile`, `docker/compose.yml`, `docs/user/docker.md`):

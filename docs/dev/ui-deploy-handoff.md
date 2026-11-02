@@ -8,13 +8,13 @@ detail; this file covers the plan, what's left and how the work has been done.
 
 ## The plan and where it stands
 
-| Phase | What                                                                                                                                                                                                | Status                                                                                   |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| 1     | UI: progress reporting; in-tab progress and auto-advance; `config scan`; plan archive/delete; QR wallet import with SeedSigner multisig; setup guide                                                | Done. Per-coin state on the Coins tab and a donor opt-in screen were skipped by decision |
-| 2     | Follow-ups: new-shared-coins warning; coin picker; real-browser checks; track/broadcast correctness (reorgs, DROPPED, own-spend recognition, soft TEST FIRST gate, `track --ack`, `bump --another`) | Done, except the docs/screenshot refresh (below)                                         |
-| 3     | A1: UI behind another server (`ui --listen --allowed-host --token-file`, sign-in, throttling). A2: `config backend detect`                                                                          | Done                                                                                     |
-| 4     | Docker (`docker/`, `docs/user/docker.md`)                                                                                                                                                           | Written, **not built yet** (no Docker daemon where it was written)                       |
-| 5     | StartOS package (separate `splayed-startos` repo)                                                                                                                                                   | Not started; notes below                                                                 |
+| Phase | What                                                                                                                                                                                                                             | Status                                                                                   |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 1     | UI: progress reporting; in-tab progress and auto-advance; `config scan`; plan archive/delete; QR wallet import with SeedSigner multisig; setup guide                                                                             | Done. Per-coin state on the Coins tab and a donor opt-in screen were skipped by decision |
+| 2     | Follow-ups: new-shared-coins warning; coin picker; real-browser checks; track/broadcast correctness (reorgs, DROPPED, own-spend recognition, soft TEST FIRST gate, `track --ack`, `bump --another`); docs and screenshot refresh | Done                                                                                     |
+| 3     | A1: UI behind another server (`ui --listen --allowed-host --token-file`, sign-in, throttling). A2: `config backend detect`                                                                                                       | Done                                                                                     |
+| 4     | Docker (`docker/`, `docs/user/docker.md`)                                                                                                                                                                                        | Written, **not built yet** (no Docker daemon where it was written)                       |
+| 5     | StartOS package (separate `splayed-startos` repo)                                                                                                                                                                                | Not started; notes below                                                                 |
 
 Decisions made along the way:
 
@@ -28,16 +28,9 @@ Decisions made along the way:
 
 ## Left to do
 
-1. **Docs and screenshots refresh.** The user and reference docs were updated by each change, but
-   `docs/images/web-ui/` predates this branch.
-   - `scripts/docs_screenshots.ts` needs a pinned `npm:playwright` version and an optional
-     environment variable for the browser executable, to run where `playwright install` can't
-     download browsers.
-   - Then extend it to the new screens (setup guide, Scan settings, QR import modal and multisig
-     builder, coin picker, TEST FIRST question, alerts with Acknowledge, new-shared-coins banner,
-     archived plans) and regenerate the whole set.
-   - An unfinished attempt exists only in the user's local bundle (branch `wp/2c`); it's simpler to
-     start fresh.
+1. **Docs and screenshots refresh:** done. `docs/images/web-ui/` was regenerated (26 screens) by
+   `scripts/docs_screenshots.ts` (pinned Playwright; `SPLAYED_SHOTS_CHROMIUM`), and the Web UI guide
+   was updated.
 2. **Phase 5: the StartOS package** (StartOS 0.4 SDK, in a new repo `splayed-startos`):
    - **Image:** build on `docker/Dockerfile`, for x86_64 and aarch64 only (Deno has no riscv64
      target). No Tor in the StartOS image.
