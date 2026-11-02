@@ -186,6 +186,7 @@ async function overview(dataDir: string, env: Record<string, string | undefined>
     descriptors,
     destinations,
     xbtSigners: XBT_SIGNERS,
+    scanSettings: config.scan,
     scan: scan
       ? { scannedAt: scan.scannedAt, coins: scan.coins.length, warnings: scan.warnings }
       : null,

@@ -471,7 +471,8 @@ input[type="file"]::file-selector-button {
   margin: 0 0 8px;
   font-size: 0.9em;
 }
-.job-progress .spinner {
+.job-progress .spinner,
+.inline-progress .spinner {
   width: 12px;
   height: 12px;
   flex: none;
@@ -486,10 +487,28 @@ input[type="file"]::file-selector-button {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .job-progress .spinner {
+  .job-progress .spinner,
+  .inline-progress .spinner {
     animation: none;
   }
 }
 .job-progress.hidden {
+  display: none;
+}
+/* The same, inside a tab (Network while checking servers, Coins while scanning). */
+.inline-progress {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.inline-progress .row {
+  align-items: center;
+  gap: 8px;
+}
+.inline-progress .note {
+  margin: 6px 0 0;
+}
+.inline-progress.hidden {
   display: none;
 }

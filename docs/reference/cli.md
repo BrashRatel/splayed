@@ -29,6 +29,7 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 | `config clearnet <chain> on\|off`                                              | Allow direct (non-Tor) connections to public hosts.                                                                                                                                                                                                       |
 | `config tor auto\|managed\|system [host:port]`                                 | Tor mode (see [Network and privacy](../user/network-and-privacy.md#tor)).                                                                                                                                                                                 |
 | `config confirmations <chain> N`                                               | Depth required before a spend counts as final.                                                                                                                                                                                                            |
+| `config scan [--gap-limit N] [--jitter MIN-MAX]`                               | Unused addresses checked past the last used one (1-1000, default 20), and the random pause in ms between lookups on remote backends (default 150-900). Re-locks until `init`. Also on the Network tab under **Scan settings**.                            |
 
 `<chain>` is `btc`, `xbt` or `ecx`.
 

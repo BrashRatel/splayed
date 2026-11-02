@@ -45,8 +45,14 @@ Deno.test("describeProgress: readable one-line text", () => {
     "Loading relay descriptors 45%",
   );
   assertEquals(
-    describeProgress({ phase: "identity", chain: "ecx", detail: "checking server 1 of 2" }),
-    "ECX: checking server 1 of 2",
+    describeProgress({
+      phase: "identity",
+      chain: "ecx",
+      done: 1,
+      total: 2,
+      detail: "checking server",
+    }),
+    "ECX: checking server (1 of 2)",
   );
   assertEquals(
     describeProgress({ phase: "discovery", chain: "btc", done: 12 }),

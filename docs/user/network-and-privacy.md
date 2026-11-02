@@ -22,7 +22,9 @@ any network setting closes the gate again.
 - Tor is the default for public hosts, and there's no clearnet fallback.
 - DNS is resolved by Tor (SOCKS5 domain addressing).
 - Each chain and each broadcast gets a separate Tor circuit (SOCKS credential isolation).
-- Queries are shuffled and jittered.
+- Queries are shuffled and jittered. Change the gap limit and the jitter with
+  `splayed config scan --gap-limit N --jitter MIN-MAX` or on the Network tab (**Scan settings**); a
+  larger gap limit reveals more addresses to a public backend.
 - `status` reports how many addresses were revealed to remote servers.
 - HTTP goes over connections the tool opens itself (no `fetch()`), so `HTTP(S)_PROXY` environment
   variables can't silently reroute traffic.

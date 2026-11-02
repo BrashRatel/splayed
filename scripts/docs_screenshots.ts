@@ -170,6 +170,8 @@ await clickAndConfirm(
   page.getByRole("button", { name: "Check servers & confirm" }),
   "02-network-confirm",
 );
+// Confirming moves on to the Wallet tab by itself; go back for the "confirmed" picture.
+await tab("network");
 await shot("03-network-confirmed");
 // 2. wallet
 await tab("wallet");
@@ -184,6 +186,8 @@ await idle();
 await page.locator("textarea").nth(2).fill(XBT_DEST);
 await page.getByRole("button", { name: "Set destination" }).nth(1).click();
 await idle();
+// Setting the last fork destination moves on to the Coins tab; go back for this picture.
+await tab("wallet");
 await shot("05-wallet-destinations");
 // 3. coins
 await tab("coins");

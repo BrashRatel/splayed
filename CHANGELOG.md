@@ -6,6 +6,15 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Web UI flow.** Progress boxes inside the Network tab (while checking servers over Tor) and the
+  Coins tab (while scanning), with the current step, elapsed time and a note on why it's slow. The
+  UI moves on by itself from Network to Wallet once the settings are confirmed, and from Wallet to
+  Coins once a wallet is imported and both fork destinations are set (only on that transition, so
+  revisiting a tab doesn't bounce you).
+- **`config scan [--gap-limit N] [--jitter MIN-MAX]`**, and a **Scan settings** card on the Network
+  tab with an estimate of how many addresses a scan reveals. Like other network settings, changing
+  them re-locks importing and scanning until `init`.
+
 - **Progress while commands run.** Long steps now report structured progress (Tor start-up, each
   backend identity check, addresses checked per chain during a scan, and the cross-check with a
   known total). The web UI shows the latest step and the elapsed time under the Activity header

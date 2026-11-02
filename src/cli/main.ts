@@ -106,6 +106,11 @@ Setup (nothing about your coins is sent anywhere until you confirm):
                                   system: only a Tor you run (e.g. 127.0.0.1:9150 for Tor
                                   Browser). managed: always start splayed's own Tor.
   config confirmations <chain> N  Depth required before a spend counts as final
+  config scan [--gap-limit N] [--jitter MIN-MAX]
+                                  Unused addresses checked past the last used one (1-1000,
+                                  default 20), and the random pause in ms between lookups on
+                                  remote backends (default 150-900). More addresses and less
+                                  jitter reveal more to a public backend.
 
 Coins:
   import <descriptor> [--label L] Add a watch-only output descriptor (xpub-based)
@@ -221,6 +226,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         "password-env": { type: "string" },
         "ca-file": { type: "string" },
         "rpc-range": { type: "string" },
+        "gap-limit": { type: "string" },
+        jitter: { type: "string" },
         "start-index": { type: "string" },
         "xbt-signer": { type: "string" },
         donor: { type: "string", multiple: true },
@@ -513,6 +520,25 @@ async function editConfig(
       tor.socks = first;
     }
     file.tor = tor;
+  } else if (sub === "scan") {
+    // config scan [--gap-limit N] [--jitter MIN-MAX]; ranges are checked by loadConfig below.
+    const scan = (file.scan ?? {}) as Record<string, unknown>;
+    if (rest.length) throw new UsageError("config scan [--gap-limit N] [--jitter MIN-MAX]");
+    if (flags["gap-limit"] === undefined && flags.jitter === undefined) {
+      throw new UsageError("config scan needs --gap-limit N and/or --jitter MIN-MAX");
+    }
+    if (flags["gap-limit"] !== undefined) {
+      const n = Number(flags["gap-limit"]);
+      if (!Number.isSafeInteger(n)) throw new UsageError("--gap-limit must be a whole number");
+      scan.gap_limit = n;
+    }
+    if (flags.jitter !== undefined) {
+      const m = /^(\d+)-(\d+)$/u.exec(String(flags.jitter));
+      if (!m) throw new UsageError("--jitter must look like MIN-MAX in milliseconds, e.g. 150-900");
+      scan.jitter_min_ms = Number(m[1]);
+      scan.jitter_max_ms = Number(m[2]);
+    }
+    file.scan = scan;
   } else if (sub === "confirmations") {
     const chain = requireChain(rest[0]);
     const n = Number(rest[1]);
@@ -584,10 +610,15 @@ async function verifiedBackendsFor(
   );
   for (const [i, b] of candidates.entries()) {
     let detail: string;
-    const step = { phase: "identity" as const, chain, done: i, total: candidates.length };
     try {
       await torFor(config, chain, b, io);
-      io.progress?.({ ...step, detail: `checking server ${i + 1} of ${candidates.length}` });
+      io.progress?.({
+        phase: "identity",
+        chain,
+        done: i + 1,
+        total: candidates.length,
+        detail: "checking server",
+      });
       const backend = await createBackend(config, chain, b, {
         transportFactory: io.transportFactory,
         streamFactory: io.streamFactory,

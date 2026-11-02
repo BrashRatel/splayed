@@ -129,6 +129,35 @@ async function run(args) {
   pollJob();
 }
 
+/** What the auto-advance below compares before and after a command. */
+function progressMarks() {
+  const o = state.overview ?? {};
+  const dests = o.destinations ?? {};
+  return {
+    confirmed: !!o.confirmed,
+    walletReady: (o.descriptors ?? []).length > 0 && !!dests.ecx && !!dests.xbt,
+  };
+}
+
+/**
+ * Moves to the next tab when a step has just been completed from its own tab: Network → Wallet
+ * once the settings are confirmed, Wallet → Coins once a wallet is imported and both fork
+ * destinations are set. Only on the transition, so revisiting a tab later doesn't bounce you.
+ */
+function autoAdvance(job, before, after) {
+  if (job.exitCode !== 0) return;
+  if (state.tab === "network" && job.args[0] === "init" && !before.confirmed && after.confirmed) {
+    selectTab("wallet");
+    flash("Network settings confirmed. Next: import your wallet.");
+  } else if (
+    state.tab === "wallet" && ["dest", "import"].includes(job.args[0]) &&
+    !before.walletReady && after.walletReady
+  ) {
+    selectTab("coins");
+    flash("Wallet and both fork destinations are set. Next: scan for your coins.");
+  }
+}
+
 let questionShown = null;
 async function pollJob() {
   const job = await api(`/api/jobs/${state.job.id}?after=${state.after}`).catch((e) => {
@@ -144,7 +173,9 @@ async function pollJob() {
   if (job.done) {
     logLine(`(exit ${job.exitCode})`, job.exitCode ? "err" : "muted");
     setBusy(false);
+    const before = progressMarks();
     await refresh();
+    autoAdvance(job, before, progressMarks());
     return;
   }
   setTimeout(pollJob, 400);
@@ -199,14 +230,22 @@ function showProgress(job) {
   if (!box) return;
   if (!job || job.done) {
     box.classList.add("hidden");
+    for (const el of document.querySelectorAll(".inline-progress")) el.classList.add("hidden");
     return;
   }
+  document.getElementById("job-progress-text").textContent = progressText(job);
+  box.classList.remove("hidden");
+  for (const el of document.querySelectorAll(".inline-progress")) {
+    const mine = el.getAttribute("data-cmd") === job.args[0];
+    el.classList.toggle("hidden", !mine);
+    if (mine) el.querySelector(".inline-progress-text").textContent = progressText(job);
+  }
+}
+
+function progressText(job) {
   const what = job.progress ? describeProgress(job.progress) : `running ${job.args[0]}`;
   const wait = job.question ? " · waiting for your answer" : "";
-  document.getElementById("job-progress-text").textContent = `${what} · ${
-    elapsed(job.startedAt)
-  }${wait}`;
-  box.classList.remove("hidden");
+  return `${what} · ${elapsed(job.startedAt)}${wait}`;
 }
 
 function setBusy(busy) {
@@ -267,6 +306,76 @@ function headerPills() {
 
 // ---------- views ----------
 
+/**
+ * A progress box shown inside a tab while `cmd` runs. showProgress() fills it on every poll; the
+ * view isn't re-rendered while a job runs, so the element stays put.
+ */
+function inlineProgress(cmd, note) {
+  const running = state.job && !state.job.done && state.job.args[0] === cmd;
+  return h(
+    "div",
+    { class: `inline-progress${running ? "" : " hidden"}`, "data-cmd": cmd },
+    h(
+      "div",
+      { class: "row" },
+      h("span", { class: "spinner", "aria-hidden": "true" }),
+      h("strong", { class: "inline-progress-text" }, running ? progressText(state.job) : ""),
+    ),
+    h("p", { class: "note" }, note),
+  );
+}
+
+function scanSettingsCard(o) {
+  const st = o.scanSettings ?? { gapLimit: 20, jitterMinMs: 150, jitterMaxMs: 900 };
+  const num = (value, min, max) =>
+    h("input", { type: "number", min: String(min), max: String(max), value: String(value) });
+  const gap = num(st.gapLimit, 1, 1000);
+  const jMin = num(st.jitterMinMs, 0, 60000);
+  const jMax = num(st.jitterMaxMs, 0, 60000);
+  const branches = (o.descriptors ?? []).reduce((n, d) => n + d.firstAddresses.length, 0);
+  const estimate = h("p", { class: "note" });
+  const updateEstimate = () => {
+    const g = Number(gap.value) || 0;
+    estimate.textContent = branches
+      ? `With ${branches} address branch(es) imported, a scan looks up at least ${
+        g * branches
+      } addresses per chain on a remote backend, plus every used address.`
+      : `Each address branch (receive, change) costs at least ${g} lookups per chain on a remote backend.`;
+  };
+  gap.addEventListener("input", updateEstimate);
+  updateEstimate();
+  return h(
+    "div",
+    { class: "card" },
+    h("h2", {}, "Scan settings"),
+    h(
+      "p",
+      { class: "note" },
+      "Gap limit: how many unused addresses are checked past the last used one before a branch counts as finished. Raise it if your wallet skipped addresses. Jitter: a random pause between lookups on remote backends, so they don't arrive as one burst. Local nodes ignore both. Saving re-locks importing and scanning until you confirm the network settings again.",
+    ),
+    h(
+      "div",
+      { class: "row" },
+      h("label", {}, "Gap limit", gap),
+      h("label", {}, "Jitter min (ms)", jMin),
+      h("label", {}, "Jitter max (ms)", jMax),
+      h("button", {
+        class: "secondary",
+        onclick: () =>
+          run([
+            "config",
+            "scan",
+            "--gap-limit",
+            String(gap.value).trim(),
+            "--jitter",
+            `${String(jMin.value).trim()}-${String(jMax.value).trim()}`,
+          ]),
+      }, "Save scan settings"),
+    ),
+    estimate,
+  );
+}
+
 function viewNetwork() {
   const o = state.overview;
   if (o.configError) {
@@ -283,6 +392,10 @@ function viewNetwork() {
       "div",
       { class: "row" },
       h("button", { onclick: () => run(["init"]) }, "Check servers & confirm"),
+    ),
+    inlineProgress(
+      "init",
+      "Connecting over Tor can take a minute or more, especially the first time. Each step is listed under Activity.",
     ),
   ));
 
@@ -325,6 +438,8 @@ function viewNetwork() {
       }, "Save Tor setting"),
     ),
   ));
+
+  view.push(scanSettingsCard(o));
 
   for (const c of o.chains) {
     const rows = c.backends.map((b) =>
@@ -663,6 +778,10 @@ function viewCoins() {
       s
         ? h("span", { class: "muted" }, `Last scan ${new Date(s.scannedAt).toLocaleString()}`)
         : null,
+    ),
+    inlineProgress(
+      "scan",
+      "Scanning over Tor is slow: every address is looked up separately, with pauses in between. A re-scan after a split takes as long as the first one.",
     ),
     s && s.warnings.length
       ? h("div", { class: "banner bad" }, ...s.warnings.map((w) => h("div", {}, w)))

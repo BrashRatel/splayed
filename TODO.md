@@ -187,16 +187,16 @@ Wanted, but this is the work pre-alpha testers help with.
       written).
 - [ ] UI:
   - [ ] guided first-run wizard;
-  - [ ] live Tor bootstrap progress; confirmed needed in practice (2026-11-01): after "Check servers
+  - [x] live Tor bootstrap progress; confirmed needed in practice (2026-11-01): after "Check servers
         and confirm", establishing circuits over Tor is slow enough to look hung without a progress
         or waiting indicator;
-  - [ ] auto-advance from the Network tab to the Wallet tab once settings are confirmed;
+  - [x] auto-advance from the Network tab to the Wallet tab once settings are confirmed;
   - [ ] scan a QR descriptor directly into the wallet/destination fields on the Wallet tab;
-  - [ ] auto-advance from the Wallet tab to the Coins tab once all fork destinations are set;
-  - [ ] a progress or waiting indicator on the Coins tab while `scan` runs (or at least a note to be
+  - [x] auto-advance from the Wallet tab to the Coins tab once all fork destinations are set;
+  - [x] a progress or waiting indicator on the Coins tab while `scan` runs (or at least a note to be
         patient over Tor and watch the activity log) — same issue as Tor bootstrap, it looks hung
         but is just slow, especially noticeable on re-scans after a split;
-  - [ ] edit scan gap limit and jitter;
+  - [x] edit scan gap limit and jitter;
   - [ ] archive or delete plans;
   - [ ] show the per-coin plan, verify and broadcast state on the Coins tab;
   - [ ] an opt-in screen explaining the donor rules and the on-chain linkage they create.

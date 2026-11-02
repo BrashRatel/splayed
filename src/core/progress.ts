@@ -51,7 +51,7 @@ export function throttleProgress(
   return throttled;
 }
 
-/** One line of text for a progress report, e.g. "ECX: checking server 1 of 2 · 12s". */
+/** One line of text for a progress report, e.g. "ECX: checking server (1 of 2)". */
 export function describeProgress(p: Progress): string {
   const chain = p.chain ? `${p.chain.toUpperCase()}: ` : "";
   const counts = p.done === undefined
