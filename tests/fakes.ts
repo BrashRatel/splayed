@@ -309,7 +309,7 @@ export function fakeSend(
     return {
       reason: c.txs.get(id)!.height === undefined
         ? "txn-already-in-mempool"
-        : "transaction already in block chain",
+        : "Transaction outputs already in utxo set", // current Core/Knots wording
     };
   }
   for (const i of tx.inputs) {

@@ -223,3 +223,21 @@ Deno.test("finding 5: a split in conflict whose conflicting spend left the chain
     assertEquals(s.chains.ecx.broadcasts!.length, n + 1, kind);
   }
 });
+
+Deno.test("track --ack --yes never mutes an alert first raised by the same run", async () => {
+  const { s, test, old } = await sentTestFirst();
+  drop(s.chains.ecx, old);
+  const input = inputOf(test);
+  spendReal(s.chains.ecx, input.txid, input.vout, undefined, 7);
+  // The CONFLICT is first seen by this --ack run: it isn't acknowledged, and track exits 1.
+  s.out.length = 0;
+  assertEquals(await s.run("track", s.id, "--ack", "--yes"), 1, s.err.join("\n"));
+  assert(s.out.join("\n").includes("first raised by this run"), s.out.join("\n"));
+  let recs = await recordsOf(s.planDir, test.file);
+  assertEquals(recs.map((r) => r.kind), ["conflict"]);
+  assert(!recs[0].acknowledged);
+  // Once it has been shown, a later --ack can acknowledge it.
+  assertEquals(await s.run("track", s.id, "--ack", "--yes"), 0, s.err.join("\n"));
+  recs = await recordsOf(s.planDir, test.file);
+  assert(recs[0].acknowledged);
+});

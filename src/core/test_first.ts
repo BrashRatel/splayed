@@ -22,6 +22,11 @@ export interface TestFirstStatus {
    * conflict, superseded, dropped, unknown, a failed lookup) means no test is on the network.
    */
   out: boolean;
+  /**
+   * Not out as far as splayed can tell, but only because the backend can't say (unknown state, a
+   * failed lookup, an unreadable replacement): it may well be on the network.
+   */
+  unsure?: boolean;
   /** "the TEST FIRST transaction (ecx/001-…) is confirmed (3 deep)", for the question. */
   text: string;
 }
@@ -56,10 +61,11 @@ export async function describeTestFirst(o: {
   if (!test) return undefined;
   const p = o.progress.txs[test.file];
   const name = `the TEST FIRST transaction (${test.file})`;
-  const say = (confirmed: boolean, text: string, out = confirmed) => ({
+  const say = (confirmed: boolean, text: string, out = confirmed, unsure = false) => ({
     test,
     confirmed,
     out,
+    ...(unsure ? { unsure } : {}),
     text: `${name} ${text}`,
   });
   if (!p?.verified) return say(false, "isn't verified yet (sign and verify it first)");
@@ -76,11 +82,12 @@ export async function describeTestFirst(o: {
       const by = `plan ${r.link.plan}${
         r.plans.length > 1 ? ` (via ${r.plans.slice(0, -1).join(", ")})` : ""
       }`;
-      if (!r.depth) return say(false, `was replaced by ${by}, which can't be read`);
+      if (!r.depth) return say(false, `was replaced by ${by}, which can't be read`, false, true);
       return say(
         r.depth.state === "confirmed",
         `was replaced by ${by}, which is ${where(r.depth)}`,
         r.depth.state === "confirmed" || r.depth.state === "mempool",
+        r.depth.state === "unknown",
       );
     }
     const st = p.broadcast.status;
@@ -90,8 +97,8 @@ export async function describeTestFirst(o: {
         `was rejected by the server${p.broadcast.detail ? ` (${p.broadcast.detail})` : ""}`,
       );
     }
-    return say(false, `is ${where(own)}`, own.state === "mempool");
+    return say(false, `is ${where(own)}`, own.state === "mempool", own.state === "unknown");
   } catch (error) {
-    return say(false, `couldn't be checked (${(error as Error).message})`);
+    return say(false, `couldn't be checked (${(error as Error).message})`, false, true);
   }
 }

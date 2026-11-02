@@ -337,12 +337,27 @@ export async function identifySpender(
 ): Promise<Spender> {
   const all = index ?? await ownTransactions(dataDir);
   if (by) return await classifySpender(dataDir, split, by, all);
-  const coins = new Set(split.inputs.map((i) => `${i.txid}:${i.vout}`));
+  // The backend can't name the spender. Only credit one of our own transactions if it spends
+  // EVERY input of this split that is gone: a stranger who spent one input (a replayed BTC spend,
+  // a compromised key) must not be explained away by an own plan that shares another input.
+  const key = (i: { txid: string; vout: number }) => `${i.txid}:${i.vout}`;
+  const gone: string[] = [];
+  for (const i of split.inputs) {
+    let state: string;
+    try {
+      state = (await backend.observeOutput(i.txid, i.vout)).state;
+    } catch {
+      state = "unknown"; // can't tell: treat as gone, so it must be explained too
+    }
+    if (state !== "unspent") gone.push(key(i));
+  }
+  if (!gone.length) return { kind: "unknown" };
   for (const own of all.values()) {
     if (own.chain !== split.chain) continue;
     if (own.plan === split.plan && own.file === split.file) continue;
     const inputs = own.inputs ?? (own.input ? [own.input] : []);
-    if (!inputs.some((i) => coins.has(`${i.txid}:${i.vout}`))) continue;
+    const spends = new Set(inputs.map(key));
+    if (!gone.every((k) => spends.has(k))) continue;
     try {
       const d = await confirmationDepth(
         backend,

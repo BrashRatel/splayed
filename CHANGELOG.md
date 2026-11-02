@@ -4,6 +4,18 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Fixed (review of the track/broadcast fixes)
+
+- **A stranger's spend is no longer passed off as one of your plans on node RPC.** When the backend
+  can't name a spender, an own transaction now explains a split's conflict only if it spends every
+  input of the split that is gone; one input spent by someone else keeps the CONFLICT. Explained
+  conflicts are kept in the history, marked resolved and explained.
+- **`track --ack` never mutes an alert first raised by the same run**, and its question shows each
+  alert's full text.
+- **TEST FIRST wording:** "can't be confirmed as sent (the backend can't tell)" instead of "has NOT
+  gone out" when the backend can't see it; `--yes` still doesn't answer then.
+- "Transaction outputs already in utxo set" (current Core/Knots) counts as already sent.
+
 ### Fixed (independent review of wp/2f)
 
 - **Superseded stays superseded on node RPC.** `track` used to drop "superseded by plan …" whenever

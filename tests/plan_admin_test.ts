@@ -495,3 +495,60 @@ Deno.test("archiving a plan acknowledges its open alerts, and only those", async
   assertEquals(p.txs["a.psbt"].reorgs[0].acknowledged, undefined);
   assertEquals(p.txs["a.psbt"].reorgs[1].acknowledged, "2026-11-02T12:00:00.000Z");
 });
+
+Deno.test("identifySpender (no spender named, node RPC): a stranger's spend isn't passed off as an own plan sharing another coin", async () => {
+  const { identifySpender } = await import("../src/core/plan_admin.ts");
+  const A = { txid: "a".repeat(64), vout: 0 };
+  const B = { txid: "b".repeat(64), vout: 0 };
+  const C = { txid: "c".repeat(64), vout: 0 };
+  const S2 = "d".repeat(64);
+  // Like node RPC: says whether an output is spent, never by whom; S2 (spends B and C) is
+  // confirmed on chain.
+  const spent = new Set<string>();
+  const backend = {
+    observeOutput: (txid: string, vout: number) =>
+      Promise.resolve(
+        spent.has(`${txid}:${vout}`) ? { state: "spent" } : { state: "unspent", value: 1000 },
+      ),
+    txStatus: (txid: string) =>
+      Promise.resolve(
+        txid === S2 ? { state: "confirmed", height: 974_400, blockHash: "e".repeat(64) } : {
+          state: "absent",
+        },
+      ),
+    blockHash: () => Promise.resolve("e".repeat(64)),
+    tipHeight: () => Promise.resolve(974_500),
+  };
+  const index = new Map([[S2, {
+    plan: "p2",
+    file: "ecx/001-dddd.psbt",
+    chain: "ecx",
+    txid: S2,
+    input: B,
+    inputs: [B, C],
+  }]]);
+  const split = { plan: "p1", file: "ecx/001-aaaa.psbt", chain: "ecx", inputs: [A, B] };
+  const ask = () =>
+    identifySpender(
+      "/nonexistent",
+      split,
+      undefined,
+      backend as unknown as Parameters<typeof identifySpender>[3],
+      974_500,
+      index,
+    );
+
+  // A stranger spent A, and S2 spent B: S2 doesn't explain A, so it stays unknown (CONFLICT).
+  spent.add(`${A.txid}:0`);
+  spent.add(`${B.txid}:0`);
+  assertEquals((await ask()).kind, "unknown");
+
+  // Only B is gone, spent by S2: that is our own plan.
+  spent.clear();
+  spent.add(`${B.txid}:0`);
+  assertEquals((await ask()).kind, "own");
+
+  // Nothing gone: nothing to explain.
+  spent.clear();
+  assertEquals((await ask()).kind, "unknown");
+});

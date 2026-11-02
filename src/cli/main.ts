@@ -87,7 +87,6 @@ import {
 import { join } from "node:path";
 import { buildCpfp, buildReplacement, BumpError, bumpPlan, defaultBumpRate } from "../core/bump.ts";
 import {
-  acknowledgeAlerts,
   alertTitle,
   applyReplaced,
   assessReorg,
@@ -1566,8 +1565,13 @@ async function donorPreflight(
 }
 
 /** Node answers to a send of a transaction it already has (Core, Knots, eCash, Electrum). */
+/**
+ * A send refused because the node already has it: older Core/Knots say "already in block chain",
+ * newer ones "Transaction outputs already in utxo set"; mempool and Electrum servers word it
+ * their own way.
+ */
 const ALREADY_KNOWN =
-  /txn-already-(in-mempool|known)|already in (the )?(block ?chain|mempool)|already have transaction/i;
+  /txn-already-(in-mempool|known)|already in (the )?(block ?chain|mempool|utxo set)|already have transaction/i;
 
 /** Where a split that was sent before is now, for "not sent this time". */
 function sentWhere(d: DepthResult): string {
@@ -1988,6 +1992,15 @@ async function cmdBroadcast(
       const allConfirmed = chains.every((c) => asks.get(c)!.confirmed);
       const notOut = chains.filter((c) => !asks.get(c)!.out);
       const names = (cs: ChainId[]) => cs.map((c) => c.toUpperCase()).join(" and ");
+      // Of those, the ones where the backend just can't tell: say so, don't claim it isn't out.
+      const unsure = notOut.filter((c) => asks.get(c)!.unsure);
+      const surelyNot = notOut.filter((c) => !asks.get(c)!.unsure);
+      const notOutText = [
+        surelyNot.length ? `has NOT gone out on ${names(surelyNot)}` : "",
+        unsure.length
+          ? `can't be confirmed as sent on ${names(unsure)} (the backend can't tell)`
+          : "",
+      ].filter(Boolean).join(", and ");
       const counts = chains.map((c) =>
         `${gatedQueue.filter((q) => q.t.chain === c).length} ${c.toUpperCase()}`
       ).join(" and ");
@@ -1995,7 +2008,7 @@ async function cmdBroadcast(
         allConfirmed
           ? "TEST FIRST: the test spend went through."
           : notOut.length
-          ? `TEST FIRST: the test spend has NOT gone out on ${names(notOut)}:`
+          ? `TEST FIRST: the test spend ${notOutText}:`
           : "TEST FIRST:",
       );
       for (const l of lines) io.out(`  ${l}`);
@@ -2005,17 +2018,19 @@ async function cmdBroadcast(
         if (notOut.length) {
           heldForYes = true;
           io.out(
-            `--yes doesn't answer for ${names(notOut)}: no TEST FIRST spend is on the network ` +
-              "there, so the rest of it is not sent. Send the TEST FIRST transaction (or a fee " +
-              "bump of it) first, run broadcast without --yes to answer yourself, or pass --all " +
-              "to send everything.",
+            `--yes doesn't answer for ${names(notOut)}: splayed can't see a TEST FIRST spend on ` +
+              "the network there, so the rest of it is not sent. " +
+              (surelyNot.length
+                ? "Send the TEST FIRST transaction (or a fee bump of it) first, run broadcast " +
+                  "without --yes to answer yourself, or pass --all to send everything."
+                : "Try another backend (a node with txindex, or an explorer), or check that the " +
+                  "test arrived in your destination wallet and pass --all."),
           );
         }
       } else {
         const question = notOut.length
           ? [
-            `The TEST FIRST transaction has NOT gone out on ${names(notOut)}: no test spend is ` +
-            "on the network there.",
+            `The TEST FIRST transaction ${notOutText}.`,
             ...lines.map((l) => `  ${l}`),
             "The TEST FIRST step proves the signer, the destination and the route work before " +
             `more coins move. Sending the rest now skips that check on ${names(notOut)}: if ` +
@@ -2239,6 +2254,8 @@ async function cmdTrack(
 ) {
   await requireNetworkConfirmed(config);
   if (!id) throw new UsageError("track <plan> [--ack]");
+  /** Alerts first raised in this run haven't been seen yet: --ack never mutes those. */
+  const runStart = new Date().toISOString();
   const { dir, plan } = await loadPlanDir(config.dataDir, id);
   const progress = await loadProgress(dir);
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
@@ -2599,16 +2616,27 @@ async function cmdTrack(
     }
   }
   if (ack) {
-    // Acknowledge every alert that is open now: kept on record and shown muted from now on.
-    const open = plan.transactions.flatMap((t) =>
+    // Acknowledge the alerts that were already open before this run (kept on record, shown muted
+    // from now on). One first raised by this very run hasn't been seen yet: it stays loud.
+    const all = plan.transactions.flatMap((t) =>
       (progress.txs[t.file]?.reorgs ?? []).filter(isOpenAlert).map((r) => ({ t, r }))
     );
-    if (!open.length) io.out("No open alerts to acknowledge.");
+    const open = all.filter(({ r }) => r.at < runStart);
+    const fresh = all.length - open.length;
+    if (fresh) {
+      io.out(
+        `${fresh} alert(s) were first raised by this run and are not acknowledged: read them ` +
+          "below, then run `splayed track --ack` again if you want to.",
+      );
+    }
+    if (!open.length) io.out("No earlier open alerts to acknowledge.");
     else {
       const question = [
         `Acknowledge ${open.length} open alert(s) of plan ${plan.id}?`,
         ...open.map(({ t, r }) =>
-          `  ${t.chain.toUpperCase()} ${t.file}: ${alertTitle(r.kind)} of ${utcMinute(r.at)}`
+          `  ${t.chain.toUpperCase()} ${t.file}: ${alertTitle(r.kind)} of ${
+            utcMinute(r.at)
+          }: ${r.detail}`
         ),
         "They stay on record and are shown muted, and no longer make track exit 1. Only " +
         "acknowledge what you have dealt with, or decided to leave: a coin that is still shared " +
@@ -2616,10 +2644,7 @@ async function cmdTrack(
       ].join("\n");
       if (yes || await io.confirm(question)) {
         const at = new Date().toISOString();
-        for (const t of plan.transactions) {
-          const p = progress.txs[t.file];
-          if (p) acknowledgeAlerts(p, at);
-        }
+        for (const { r } of open) r.acknowledged = at;
         for (let i = alerts.length - 1; i >= 0; i--) {
           if (alerts[i].rec?.acknowledged) {
             muted.push(`${alerts[i].text} (acknowledged now)`);

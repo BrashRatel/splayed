@@ -104,18 +104,27 @@ export function applyReplaced(entry: TxProgress, link: ReplacementLink): void {
 export const UNNAMED_SPENDER = "this backend can't say which";
 
 /**
- * Drops open CONFLICT records that blamed `txid`, once it turned out to be one of this tool's
+ * Closes open CONFLICT records that blamed `txid`, once it turned out to be one of this tool's
  * own transactions (a fee bump, or another plan): they were never true. Records that couldn't
- * name the spender (node RPC) were about the same spend and go too.
+ * name the spender (node RPC) were about the same spend and close too. They stay in the history,
+ * marked resolved and explained.
  */
-export function retractConflicts(entry: TxProgress, txid: string): boolean {
-  const before = entry.reorgs?.length ?? 0;
-  entry.reorgs = entry.reorgs?.filter((r) =>
-    r.resolved || r.kind !== "conflict" ||
-    !(r.detail.includes(txid) || r.detail.includes(UNNAMED_SPENDER))
-  );
-  if (entry.reorgs && !entry.reorgs.length) delete entry.reorgs;
-  return (entry.reorgs?.length ?? 0) !== before;
+export function retractConflicts(
+  entry: TxProgress,
+  txid: string,
+  at = new Date().toISOString(),
+): boolean {
+  let changed = false;
+  entry.reorgs = entry.reorgs?.map((r) => {
+    if (
+      r.resolved || r.kind !== "conflict" ||
+      !(r.detail.includes(txid) || r.detail.includes(UNNAMED_SPENDER))
+    ) return r;
+    changed = true;
+    // Kept as history, closed: it was this tool's own transaction all along.
+    return { ...r, resolved: at, explained: `spent by this tool's own transaction ${txid}` };
+  });
+  return changed;
 }
 
 /**
@@ -153,6 +162,8 @@ export interface ReorgRecord {
   detail: string;
   /** When `track` next saw the split (or the fee bump that replaced it) confirmed deep enough. */
   resolved?: string;
+  /** Why a CONFLICT was closed without a re-confirmation: it was this tool's own spend. */
+  explained?: string;
   /**
    * When the user acknowledged it (`track --ack`, or archiving the plan): still on record and
    * shown, muted, but no longer counted as open (it doesn't make `track` exit 1).
