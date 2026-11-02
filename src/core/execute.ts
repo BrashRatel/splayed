@@ -52,13 +52,32 @@ export interface TxProgress {
    * a later `track` can still tell the user what changed. The block hash is how a reorg is noticed.
    */
   confirmations?: Confirmations;
+  /**
+   * What `track` saw of a split that has never been in a block: in a mempool, or on neither the
+   * chain nor the mempool (dropped, or never arrived), and when a mempool last had it. Cleared
+   * once it is in a block (`confirmations` takes over) and when it is sent again.
+   */
+  unmined?: Unmined;
   /** Everything `track` has had to warn about, oldest first. */
   reorgs?: ReorgRecord[];
   /** Set on the original when a fee-bump plan replaced it. */
   replacedBy?: { plan: string; file: string };
 }
 
-export type ReorgKind = "moved" | "unconfirmed" | "dropped" | "conflict";
+/**
+ * moved / unconfirmed / dropped: a split that was in a block left it (a reorg). conflict: its
+ * inputs were spent by another transaction. evicted: a split that was sent but never in a block
+ * is no longer in the mempool either (dropped from it, or the send never arrived).
+ */
+export type ReorgKind = "moved" | "unconfirmed" | "dropped" | "conflict" | "evicted";
+
+export interface Unmined {
+  state: "mempool" | "absent";
+  /** When `track` saw that. */
+  at: string;
+  /** The last time `track` saw it in the mempool, if it ever did. */
+  lastInMempool?: string;
+}
 
 export interface SeenInBlock {
   depth: number;
@@ -324,8 +343,9 @@ export async function mempoolChecks(
 
 export interface DepthResult {
   /**
-   * confirmed: in the active chain. mempool: seen but unconfirmed. absent: neither, and its inputs
-   * are still unspent. conflict: its inputs were spent by something else. unknown: this backend
+   * confirmed: in the active chain. mempool: seen but unconfirmed. absent: neither, and every one
+   * of its inputs was seen unspent (never inferred from a failed or ambiguous lookup: those throw
+   * or give unknown). conflict: its inputs were spent by something else. unknown: this backend
    * can't say (node RPC without txindex can't report a confirmed spend's details).
    */
   state: "confirmed" | "mempool" | "absent" | "conflict" | "unknown";
@@ -359,15 +379,25 @@ export async function confirmationDepth(
 
   const first = planTx.inputs[0];
   const obs = await backend.observeOutput(first.txid, first.vout);
-  if (obs.state === "unspent") return { state: "absent" };
-  if (status?.state === "absent") {
-    // Not on the chain and not in the mempool, yet the input is gone: someone else spent it.
-    return {
-      state: "conflict",
-      by: obs.state === "spent" ? obs.spendTxid : undefined,
-    };
+  if (obs.state === "unspent") {
+    // It can't be in a block or a mempool while its first input is unspent. "absent" also
+    // promises the other inputs are unspent: one spent elsewhere is a conflict, and one the
+    // backend can't place leaves the answer open.
+    for (const input of planTx.inputs.slice(1)) {
+      const o = await backend.observeOutput(input.txid, input.vout);
+      if (o.state === "unspent") continue;
+      if (o.state === "spent") return { state: "conflict", by: o.spendTxid };
+      return { state: "unknown" };
+    }
+    return { state: "absent" };
   }
-  if (obs.state !== "spent") return { state: obs.state === "absent" ? "absent" : "unknown" };
+  if (obs.state === "spent" && status?.state === "absent") {
+    // Not on the chain and not in the mempool, yet the input is gone: someone else spent it.
+    return { state: "conflict", by: obs.spendTxid };
+  }
+  // The input's own transaction can't be found, or the backend can't tell spent from missing:
+  // nothing can be said about this transaction.
+  if (obs.state !== "spent") return { state: "unknown" };
   if (obs.spendTxid && obs.spendTxid !== txid) return { state: "conflict", by: obs.spendTxid };
   if (!obs.spendDetailKnown) return { state: "unknown" };
   if (obs.spendHeight === undefined) return { state: "mempool" };
@@ -389,10 +419,63 @@ const blockRef = (height?: number, hash?: string) =>
   `${height ?? "?"}${hash ? ` (${shortBlockHash(hash)})` : ""}`;
 
 /** The headline `track` and the web UI put in front of an alert's detail. */
-export const alertTitle = (kind: ReorgKind) => (kind === "conflict" ? "CONFLICT" : "REORG");
+export const alertTitle = (kind: ReorgKind) =>
+  kind === "conflict" ? "CONFLICT" : kind === "evicted" ? "DROPPED" : "REORG";
+
+/**
+ * How long after a send a split that no mempool shows is given before `track` calls it dropped:
+ * the server `track` asks may not have it yet. Once `track` has seen it in a mempool, a later
+ * absence counts at once.
+ */
+export const DROP_GRACE_MS = 10 * 60_000;
+
+/** "2026-11-02 14:03 UTC" */
+const utcText = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+
+/**
+ * For a split that was never in a block: what `track` knows about its sends. Only passed for one
+ * that was sent (accepted) or may have been (sending / unknown), and not replaced by a fee bump.
+ */
+export interface SentContext {
+  status: "accepted" | "sending" | "unknown";
+  /** When it was (last) sent. */
+  sentAt?: string;
+  lastInMempool?: string;
+  /** Now, in ms (Date.now()). */
+  nowMs: number;
+}
+
+/** True while a split that no mempool shows was sent too recently to call it dropped. */
+export function withinDropGrace(sent: SentContext): boolean {
+  if (sent.lastInMempool || !sent.sentAt) return false;
+  const t = Date.parse(sent.sentAt);
+  return Number.isFinite(t) && sent.nowMs - t < DROP_GRACE_MS;
+}
+
+function droppedFromMempool(sent: SentContext): ReorgAlert {
+  const head = sent.lastInMempool
+    ? `This split was in the mempool (last seen ${utcText(sent.lastInMempool)}) but never ` +
+      "confirmed, and it is no longer in the mempool or on the chain."
+    : sent.status === "accepted"
+    ? `This split was accepted by the server${
+      sent.sentAt ? ` (sent ${utcText(sent.sentAt)})` : ""
+    } but never confirmed, and it is no longer in the mempool or on the chain.`
+    : `The last send of this split${
+      sent.sentAt ? ` (${utcText(sent.sentAt)})` : ""
+    } ended without a clear answer, and it is not in the mempool or on the chain: it never ` +
+      "arrived, or it was dropped.";
+  return {
+    kind: "evicted",
+    detail: `${head} Nodes drop a transaction whose fee rate falls below their mempool minimum ` +
+      "(a busy mempool) or that waited too long (mempool expiry, two weeks by default). Its " +
+      "inputs are unspent, so the coin is still shared with BTC: do NOT spend the BTC copy. " +
+      "Send it again with `splayed broadcast` (Broadcast verified), or, if the fee was too low, " +
+      "replace it with `splayed bump` (Fee bump…).",
+  };
+}
 
 /** The last block a transaction was seen in, if `track` has ever seen it in one. */
-function lastSeenInBlock(prev?: Confirmations): SeenInBlock | undefined {
+export function lastSeenInBlock(prev?: Confirmations): SeenInBlock | undefined {
   return prev && prev.depth > 0 ? prev : prev?.previous;
 }
 
@@ -405,6 +488,8 @@ export function assessReorg(
   chain: ChainId,
   prev: Confirmations | undefined,
   now: DepthResult,
+  /** For a split never seen in a block: set when it was sent, so its absence is worth a word. */
+  sent?: SentContext,
 ): ReorgAlert | undefined {
   const label = chain.toUpperCase();
   const seen = lastSeenInBlock(prev);
@@ -455,6 +540,8 @@ export function assessReorg(
             `so the coin is back on ${label} and still shared with BTC. Do NOT spend the BTC ` +
             "copy. Run `splayed broadcast` to send it again, or `splayed bump` to replace it.",
         }
+        : sent && !withinDropGrace(sent)
+        ? droppedFromMempool(sent)
         : undefined;
     case "unknown":
       return undefined;
@@ -487,6 +574,27 @@ export function nextConfirmations(
           { depth: seen.depth, at: seen.at, height: seen.height, blockHash: seen.blockHash },
       };
     }
+  }
+}
+
+/**
+ * What `track` records about a split that was never in a block. A failed or ambiguous lookup
+ * ("unknown") and a conflict keep the last record; once it is in a block there is none.
+ */
+export function nextUnmined(
+  prev: Unmined | undefined,
+  now: DepthResult,
+  at: string,
+): Unmined | undefined {
+  switch (now.state) {
+    case "confirmed":
+      return undefined;
+    case "mempool":
+      return { state: "mempool", at, lastInMempool: at };
+    case "absent":
+      return { state: "absent", at, lastInMempool: prev?.lastInMempool };
+    default:
+      return prev;
   }
 }
 

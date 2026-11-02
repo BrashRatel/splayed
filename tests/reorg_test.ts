@@ -5,9 +5,12 @@ import {
   assessReorg,
   confirmationDepth,
   type Confirmations,
+  DROP_GRACE_MS,
   nextConfirmations,
+  nextUnmined,
   recordReorg,
   resolveReorgs,
+  type SentContext,
   type TxProgress,
 } from "../src/core/execute.ts";
 import type { PlannedTx } from "../src/core/planner.ts";
@@ -110,6 +113,127 @@ Deno.test("depth: a backend that can't report spend details says unknown, not me
       .state,
     "unknown",
   );
+});
+
+/** A backend whose outputs answer by outpoint. */
+function stubBy(status: TxStatus, outputs: Record<string, OutputObservation>): ChainBackend {
+  return {
+    txStatus: () => Promise.resolve(status),
+    observeOutput: (txid: string, vout: number) => Promise.resolve(outputs[`${txid}:${vout}`]),
+  } as unknown as ChainBackend;
+}
+const twoInputs = {
+  inputs: [{ txid: "aa".repeat(32), vout: 1 }, { txid: "bb".repeat(32), vout: 0 }],
+} as unknown as PlannedTx;
+
+Deno.test("depth: absent only when every input was seen unspent", async () => {
+  const a = `${"aa".repeat(32)}:1`;
+  const b = `${"bb".repeat(32)}:0`;
+  const other = "dd".repeat(32);
+  const depth = (o: Record<string, OutputObservation>, st: TxStatus = { state: "absent" }) =>
+    confirmationDepth(stubBy(st, o), twoInputs, TXID, 105);
+  assertEquals((await depth({ [a]: unspent, [b]: unspent })).state, "absent");
+  // The second input went elsewhere: a conflict, not a drop.
+  assertEquals(await depth({ [a]: unspent, [b]: spentBy(other, 100) }), {
+    state: "conflict",
+    by: other,
+  });
+  // The backend can't place the second input (its transaction isn't found, or spent/missing
+  // can't be told apart): nothing can be said.
+  assertEquals((await depth({ [a]: unspent, [b]: { state: "absent" } })).state, "unknown");
+  assertEquals((await depth({ [a]: unspent, [b]: { state: "gone" } })).state, "unknown");
+});
+
+Deno.test("depth: an input whose own transaction can't be found is unknown, never absent or conflict", async () => {
+  // Electrum or RPC with txindex: the transaction is not found, nor is its input's. Used to be
+  // "conflict" (with txStatus) or "absent" (without), which would read as a drop.
+  for (const st of [{ state: "absent" }, { state: "unknown" }] as TxStatus[]) {
+    assertEquals(
+      (await confirmationDepth(stub(st, { state: "absent" }), planTx, TXID, 105)).state,
+      "unknown",
+      st.state,
+    );
+  }
+  assertEquals(
+    (await confirmationDepth(stub(undefined, { state: "absent" }), planTx, TXID, 105)).state,
+    "unknown",
+  );
+  // Node RPC without txindex: not in its mempool and the input unspent in its UTXO set is a real
+  // absence (it can't be in a block while its input is unspent).
+  assertEquals(
+    (await confirmationDepth(stub({ state: "unknown" }, unspent), planTx, TXID, 105)).state,
+    "absent",
+  );
+});
+
+const NOW = Date.parse("2026-11-02T12:00:00.000Z");
+const sentAgo = (minutes: number, extra: Partial<SentContext> = {}): SentContext => ({
+  status: "accepted",
+  sentAt: new Date(NOW - minutes * 60_000).toISOString(),
+  nowMs: NOW,
+  ...extra,
+});
+
+Deno.test("dropped: a sent split never in a block and now absent is reported, with what to do", () => {
+  const a = assessReorg("ecx", undefined, { state: "absent" }, sentAgo(60));
+  assertEquals(a?.kind, "evicted");
+  assertEquals(alertTitle("evicted"), "DROPPED");
+  assert(a!.detail.includes("accepted by the server (sent 2026-11-02 11:00 UTC)"), a!.detail);
+  assert(a!.detail.includes("mempool minimum") && a!.detail.includes("mempool expiry"));
+  assert(a!.detail.includes("do NOT spend the BTC copy"));
+  assert(a!.detail.includes("`splayed broadcast`") && a!.detail.includes("`splayed bump`"));
+  // Seen in the mempool before: says when.
+  const seenThere = assessReorg(
+    "ecx",
+    undefined,
+    { state: "absent" },
+    sentAgo(60, { lastInMempool: "2026-11-02T11:30:00.000Z" }),
+  );
+  assert(seenThere!.detail.includes("last seen 2026-11-02 11:30 UTC"), seenThere!.detail);
+  // A send whose result was unknown: it may never have arrived.
+  const unknown = assessReorg("ecx", undefined, { state: "absent" }, {
+    ...sentAgo(60),
+    status: "unknown",
+  });
+  assert(unknown!.detail.includes("never arrived, or it was dropped"), unknown!.detail);
+  // Not sent (no context), still in the mempool, unknown or conflicting: no DROPPED.
+  assertEquals(assessReorg("ecx", undefined, { state: "absent" }), undefined);
+  assertEquals(assessReorg("ecx", undefined, { state: "mempool" }, sentAgo(60)), undefined);
+  assertEquals(assessReorg("ecx", undefined, { state: "unknown" }, sentAgo(60)), undefined);
+  assertEquals(
+    assessReorg("ecx", undefined, { state: "conflict" }, sentAgo(60))?.kind,
+    "conflict",
+  );
+  // A split that was in a block is a reorg, not a drop from the mempool.
+  assertEquals(assessReorg("ecx", seen, { state: "absent" }, sentAgo(60))?.kind, "dropped");
+});
+
+Deno.test("dropped: just sent and never seen in a mempool gets a grace period; once seen, none", () => {
+  const minutes = DROP_GRACE_MS / 60_000;
+  assertEquals(assessReorg("ecx", undefined, { state: "absent" }, sentAgo(1)), undefined);
+  assertEquals(
+    assessReorg("ecx", undefined, { state: "absent" }, sentAgo(minutes + 1))?.kind,
+    "evicted",
+  );
+  assertEquals(
+    assessReorg(
+      "ecx",
+      undefined,
+      { state: "absent" },
+      sentAgo(1, { lastInMempool: new Date(NOW - 30_000).toISOString() }),
+    )?.kind,
+    "evicted",
+  );
+});
+
+Deno.test("unmined record: mempool sightings kept, absence recorded, lookups that fail keep it", () => {
+  const m = nextUnmined(undefined, { state: "mempool" }, "t1")!;
+  assertEquals(m, { state: "mempool", at: "t1", lastInMempool: "t1" });
+  const gone = nextUnmined(m, { state: "absent" }, "t2")!;
+  assertEquals(gone, { state: "absent", at: "t2", lastInMempool: "t1" });
+  assertEquals(nextUnmined(gone, { state: "unknown" }, "t3"), gone);
+  assertEquals(nextUnmined(gone, { state: "conflict" }, "t3"), gone);
+  assertEquals(nextUnmined(gone, { state: "confirmed", depth: 1 }, "t4"), undefined);
 });
 
 Deno.test("reorg: nothing to say about a split that was never seen confirmed", () => {

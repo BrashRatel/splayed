@@ -1806,8 +1806,8 @@ function viewPlans() {
               "div",
               { class: "muted" },
               pr.reorgs.some((r) => !r.resolved)
-                ? `${pr.reorgs.length} reorg alert(s), see above`
-                : `${pr.reorgs.length} reorg alert(s), resolved`,
+                ? `${pr.reorgs.length} alert(s), see above`
+                : `${pr.reorgs.length} alert(s), resolved`,
             )
             : null,
           t.chain !== "btc" && bumpable(pr)

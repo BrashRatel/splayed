@@ -17,16 +17,29 @@ export function bumpable(pr) {
   return !(pr.confirmations && pr.confirmations.depth > 0);
 }
 
-/** The depth line under a transaction's status, or null before it was ever in a block. */
+/**
+ * The depth line under a transaction's status. Before it was ever in a block: only when track
+ * found it on neither the chain nor the mempool, otherwise null.
+ */
 export function depthText(pr) {
   const c = pr.confirmations;
-  if (!c) return null;
+  if (!c) {
+    if (pr.unmined?.state !== "absent") return null;
+    return pr.unmined.lastInMempool
+      ? `dropped from the mempool (last seen ${utc(pr.unmined.lastInMempool)})`
+      : "not on the network";
+  }
   if (c.depth > 0) return `${c.depth} conf`;
   const was = c.previous ? ` (was ${c.previous.depth} conf)` : "";
   if (c.state === "mempool") return `back in the mempool${was}`;
   if (c.state === "absent") return `not on the chain${was}`;
   if (c.state === "conflict") return `conflict${was}`;
   return `0 conf${was}`;
+}
+
+/** The headline of an alert, as `track` prints it (alertTitle in src/core/execute.ts). */
+export function alertTitle(kind) {
+  return kind === "conflict" ? "CONFLICT" : kind === "evicted" ? "DROPPED" : "REORG";
 }
 
 /** Old progress files put "ECX: REORG. " (or "ECX: ") in front of the detail; the title says it. */
@@ -44,16 +57,21 @@ export function reorgAlerts(transactions) {
     const all = t.progress?.reorgs ?? [];
     if (!all.length) continue;
     const r = all[all.length - 1];
-    const title = r.kind === "conflict" ? "CONFLICT" : "REORG";
+    const title = alertTitle(r.kind);
     const count = all.length > 1 ? ` · ${all.length} alerts` : "";
     const head = `${title} ${t.chain.toUpperCase()} #${t.order} (${r.kind}, ${utc(r.at)}${count})`;
+    // A dropped split sent again: say so, rather than only "send it again".
+    const now = r.kind === "evicted" && !r.resolved && t.progress?.unmined?.state !== "absent" &&
+        t.progress?.broadcast?.status === "accepted"
+      ? " Now: sent again, waiting to confirm."
+      : "";
     out.push({
       active: !r.resolved,
       text: r.resolved
-        ? `Resolved ${utc(r.resolved)}: ${head}: confirmed deep enough again. Was: ${
-          detailOnly(r.detail)
-        }`
-        : `${head}: ${detailOnly(r.detail)}`,
+        ? `Resolved ${utc(r.resolved)}: ${head}: confirmed deep enough${
+          r.kind === "evicted" ? "" : " again"
+        }. Was: ${detailOnly(r.detail)}`
+        : `${head}: ${detailOnly(r.detail)}${now}`,
     });
   }
   return out;

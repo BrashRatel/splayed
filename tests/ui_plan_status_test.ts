@@ -87,3 +87,34 @@ Deno.test("Plans tab: the bump prompt shows the current rate and the BIP125 mini
   const q = bumpQuestion([tx]);
   assert(q.includes("ECX #2: now 2 sat/vB, a replacement needs at least 3"), q);
 });
+
+Deno.test("Plans tab: a split dropped from the mempool says so, is titled DROPPED and can be bumped", () => {
+  const dropped = {
+    broadcast: sent,
+    unmined: { state: "absent", at: "y", lastInMempool: "2026-11-02T10:05:00.000Z" },
+    reorgs: [{ at: "2026-11-02T12:00:00.000Z", kind: "evicted", detail: "Send it again." }],
+  };
+  assertEquals(depthText(dropped), "dropped from the mempool (last seen 2026-11-02 10:05:00 UTC)");
+  assertEquals(
+    depthText({ broadcast: sent, unmined: { state: "absent", at: "y" } }),
+    "not on the network",
+  );
+  assertEquals(depthText({ broadcast: sent, unmined: { state: "mempool", at: "y" } }), null);
+  assertEquals(bumpable(dropped), true);
+  const [a] = reorgAlerts([{ chain: "ecx", order: 2, progress: dropped }]);
+  assertEquals(a.active, true);
+  assertEquals(a.text, "DROPPED ECX #2 (evicted, 2026-11-02 12:00:00 UTC): Send it again.");
+  // Sent again: the alert stays open until it is deep, and says it was sent.
+  const [again] = reorgAlerts([{
+    chain: "ecx",
+    order: 2,
+    progress: { ...dropped, unmined: undefined },
+  }]);
+  assert(again.text.endsWith("Now: sent again, waiting to confirm."), again.text);
+  const [done] = reorgAlerts([{
+    chain: "ecx",
+    order: 2,
+    progress: { ...dropped, reorgs: [{ ...dropped.reorgs[0], resolved: "2026-11-02T13:00Z" }] },
+  }]);
+  assert(done.text.includes(": confirmed deep enough. Was: Send it again."), done.text);
+});

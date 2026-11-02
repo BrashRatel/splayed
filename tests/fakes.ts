@@ -22,6 +22,8 @@ export interface FakeChain {
   /** Mimic the real eCash Esplora bug: /tx/{txid}/status answers confirmed:false (not 404) for
    *  a txid that was never broadcast. */
   statusTrap?: boolean;
+  /** GET paths matching this answer HTTP 500 (a flaky or overloaded server). */
+  fail?: RegExp;
   feeEstimates?: Record<string, number>;
   broadcasts?: { txid: string; isolation: string; hex: string }[];
   /** Optional consensus stand-in: return a reject reason, or undefined to accept. */
@@ -66,6 +68,9 @@ export class FakeEsploraTransport implements Transport {
     const path = url.pathname.replace(/^\/api/u, "");
     this.chain.requests.push(path);
     if (this.chain.status429) return Promise.resolve(response(429, "slow down"));
+    if (spec.method !== "POST" && this.chain.fail?.test(path)) {
+      return Promise.resolve(response(500, "Internal Server Error"));
+    }
     const c = this.chain;
     let m: RegExpExecArray | null;
     if (spec.method === "POST" && path === "/tx") {

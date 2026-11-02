@@ -513,3 +513,190 @@ Deno.test("broadcast: the rest waits for an unverified TEST FIRST, and every hel
   assert(text.includes(`ECX #1 (${test.file}): not verified yet`), text);
   assert(text.includes("ECX #2 ("), text);
 });
+
+// ---- a split that was sent but never confirmed and fell out of the mempool ----
+
+type Tx1 = { chain: string; order: number; file: string; testFirst?: boolean };
+const ecxTx = (s: { plan: { transactions: Tx1[] } }, order: number) =>
+  s.plan.transactions.find((t) => t.chain === "ecx" && t.order === order)!;
+
+/** Moves a send's time back, past the grace `track` gives a split no mempool shows yet. */
+async function backdateSends(planDir: string, minutes = 60) {
+  const p = JSON.parse(await Deno.readTextFile(join(planDir, "progress.json")));
+  for (const e of Object.values(p.txs) as { broadcast?: { at: string } }[]) {
+    if (e.broadcast) {
+      e.broadcast.at = new Date(Date.parse(e.broadcast.at) - minutes * 60_000).toISOString();
+    }
+  }
+  await Deno.writeTextFile(join(planDir, "progress.json"), JSON.stringify(p));
+}
+
+Deno.test("dropped from the mempool: track alerts, delete is refused, Broadcast verified sends it again", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const ecx = s.chains.ecx;
+  mine(ecx); // TEST FIRST confirmed: the rest may go
+  mine(s.chains.xbt);
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const second = ecxTx(s, 2);
+  const id2 = (await progressOf(s.planDir)).txs[second.file].verified!.txid;
+  assertEquals(ecx.broadcasts!.at(-1)!.txid, id2);
+  // track sees it in the mempool, then it falls out of every mempool without confirming.
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  drop(ecx, id2);
+  s.out.length = 0;
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 1);
+  const err = s.err.join("\n");
+  assert(err.includes("!!! WARNING"), err);
+  assert(
+    err.includes(`ECX ${second.file}: DROPPED: This split was in the mempool (last seen`),
+    err,
+  );
+  assert(err.includes("mempool minimum") && err.includes("`splayed bump`"), err);
+  assert(s.out.join("\n").includes("DROPPED from the mempool, never confirmed"), s.out.join("\n"));
+  let p = (await progressOf(s.planDir)).txs[second.file] as Prog["txs"][string] & {
+    unmined?: { state: string; lastInMempool?: string };
+  };
+  assertEquals(p.broadcast!.status, "accepted"); // it was sent: still counts as sent
+  assertEquals(p.unmined!.state, "absent");
+  assert(p.unmined!.lastInMempool);
+  assertEquals(p.reorgs!.map((r) => r.kind), ["evicted"]);
+  assertEquals(p.confirmations, undefined); // never in a block: no depth record is invented
+  // Repeats on every track while it is out, recorded once.
+  assertEquals(await s.run("track", s.id), 1);
+  assertEquals((await progressOf(s.planDir)).txs[second.file].reorgs!.length, 1);
+  // Sent and not confirmed: the plan can't be deleted.
+  assertEquals(await s.run("plans", "delete", s.id, "--yes"), 1);
+
+  // Broadcast verified sends it again (bytes re-verified, inputs re-checked); nothing else.
+  const before = ecx.broadcasts!.length;
+  s.out.length = 0;
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, before + 1);
+  assertEquals(ecx.broadcasts!.at(-1)!.txid, id2);
+  assert(s.out.join("\n").includes("no longer in the mempool or on the chain"), s.out.join("\n"));
+  p = (await progressOf(s.planDir)).txs[second.file];
+  assertEquals(p.broadcast!.status, "accepted");
+  assertEquals(p.unmined, undefined);
+  // Back in the mempool: sending again is idempotent.
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, before + 1);
+  assert(s.out.join("\n").includes("already sent: in the mempool"), s.out.join("\n"));
+  // Deep: the alert is resolved.
+  mine(ecx);
+  ecx.tip += 59;
+  s.chains.xbt.tip += 59;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assert((await progressOf(s.planDir)).txs[second.file].reorgs!.every((r) => r.resolved));
+});
+
+Deno.test("dropped from the mempool: a TEST FIRST sent with --all is sent again when nothing else is pending", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--all", "--yes"), 0, s.err.join("\n"));
+  const ecx = s.chains.ecx;
+  const test = s.plan.transactions.find((t: Tx1) => t.chain === "ecx" && t.testFirst);
+  const testId = (await progressOf(s.planDir)).txs[test.file].verified!.txid;
+  drop(ecx, testId);
+  // Every ECX transaction is "accepted", so this used to stop at "Nothing to broadcast".
+  const before = ecx.broadcasts!.length;
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, before + 1);
+  assertEquals(ecx.broadcasts!.at(-1)!.txid, testId);
+  // A split no mempool has seen yet, sent minutes ago: no alarm yet.
+  drop(ecx, testId);
+  s.out.length = 0;
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assert(s.out.join("\n").includes("not on the network yet"), s.out.join("\n"));
+  await backdateSends(s.planDir);
+  assertEquals(await s.run("track", s.id), 1);
+  assert(s.err.join("\n").includes("DROPPED: This split was accepted by the server"));
+});
+
+Deno.test("dropped from the mempool: a failed lookup is never taken for a drop", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--all", "--yes"), 0, s.err.join("\n"));
+  const ecx = s.chains.ecx;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  await backdateSends(s.planDir);
+  const second = ecxTx(s, 2);
+  const id2 = (await progressOf(s.planDir)).txs[second.file].verified!.txid;
+  const before = JSON.stringify((await progressOf(s.planDir)).txs[second.file]);
+  drop(ecx, id2);
+  // The server mimics the eCash Esplora trap ({"confirmed":false} for any txid) and then fails
+  // the existence check: that used to read as "mempool"; it must not read as anything.
+  ecx.statusTrap = true;
+  ecx.fail = new RegExp(`^/tx/${id2}$`);
+  s.out.length = 0;
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 1);
+  const err = s.err.join("\n");
+  assert(!err.includes("DROPPED") && !err.includes("!!! WARNING"), err);
+  assert(err.includes(`ECX ${second.file}: couldn't check it`), err);
+  assert(s.out.join("\n").includes("? (lookup failed)"), s.out.join("\n"));
+  assert(s.out.join("\n").includes("XBT"), "the other transactions are still tracked");
+  assertEquals(JSON.stringify((await progressOf(s.planDir)).txs[second.file]), before);
+  // broadcast doesn't send on the strength of it either.
+  const sent = ecx.broadcasts!.length;
+  s.out.length = 0;
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, sent);
+  assert(s.out.join("\n").includes("couldn't check whether it is still on the network"));
+});
+
+Deno.test("broadcast: a server that already has the transaction is not a rejection", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  s.chains.ecx.accept = () => "txn-already-known";
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const test = s.plan.transactions.find((t: Tx1) => t.chain === "ecx" && t.testFirst);
+  const b = (await progressOf(s.planDir)).txs[test.file].broadcast!;
+  assertEquals(b.status, "accepted");
+  assertEquals(b.detail, "the server already had it");
+});
+
+Deno.test("dropped from the mempool: a fee-bumped original vanishing is expected; its replacement vanishing is not", async () => {
+  const s = await setup();
+  await signAll(s.planDir, s.plan);
+  assertEquals(await s.run("verify", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  const ecx = s.chains.ecx;
+  const oldTxid = ecx.broadcasts![0].txid;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n")); // seen in the mempool
+  assertEquals(await s.run("bump", s.id, "--chains", "ecx", "--tx", "1", "--fee-rate", "ecx=9"), 0);
+  const bumpId = `${s.id}-bump1`;
+  const bumpDir = join(s.dir, "plans", bumpId);
+  await signAll(bumpDir, JSON.parse(await Deno.readTextFile(join(bumpDir, "plan.json"))));
+  assertEquals(await s.run("verify", bumpId), 0, s.err.join("\n"));
+  drop(ecx, oldTxid); // the replacement evicts the original
+  assertEquals(await s.run("broadcast", bumpId, "--yes"), 0, s.err.join("\n"));
+  await backdateSends(s.planDir);
+  await backdateSends(bumpDir);
+  // The original is gone, as it should be: no alarm.
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
+  assertEquals(await s.run("track", bumpId), 0, s.err.join("\n"));
+  // The replacement falls out of the mempool too: both plans say so.
+  drop(ecx, ecx.broadcasts!.at(-1)!.txid);
+  s.err.length = 0;
+  assertEquals(await s.run("track", bumpId), 1);
+  assert(s.err.join("\n").includes("DROPPED: This split was in the mempool"), s.err.join("\n"));
+  s.err.length = 0;
+  assertEquals(await s.run("track", s.id), 1);
+  assert(s.err.join("\n").includes("no longer on the network either"), s.err.join("\n"));
+  // Neither plan can be deleted.
+  assertEquals(await s.run("plans", "delete", bumpId, "--yes"), 1);
+  assertEquals(await s.run("plans", "delete", s.id, "--yes"), 1);
+  // Broadcast verified on the bump plan sends the replacement again.
+  const n = ecx.broadcasts!.length;
+  assertEquals(await s.run("broadcast", bumpId, "--yes"), 0, s.err.join("\n"));
+  assertEquals(ecx.broadcasts!.length, n + 1);
+});

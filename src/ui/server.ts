@@ -389,6 +389,7 @@ async function plansView(dataDir: string) {
               : undefined,
             broadcast: progress.txs[t.file]?.broadcast,
             confirmations: progress.txs[t.file]?.confirmations,
+            unmined: progress.txs[t.file]?.unmined,
             reorgs: progress.txs[t.file]?.reorgs,
             replacedBy: progress.txs[t.file]?.replacedBy,
             /** The newest fee bump written for it and not sent yet. */

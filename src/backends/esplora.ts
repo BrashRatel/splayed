@@ -129,6 +129,10 @@ export class EsploraBackend implements ChainBackend {
       // of 404, so existence must be checked separately before trusting "unconfirmed" as mempool.
       const exists = await this.get(`/tx/${txid}`);
       if (exists.status === 404) return { state: "absent" };
+      if (exists.status < 200 || exists.status >= 300) {
+        // A failed existence check says nothing: not "mempool", and certainly not "absent".
+        throw new BackendError(`GET /tx/${txid} returned HTTP ${exists.status}`, exists.status);
+      }
       return { state: "mempool" };
     }
     if (typeof parsed.block_hash !== "string" || !HEX64.test(parsed.block_hash)) {

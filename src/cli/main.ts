@@ -88,19 +88,23 @@ import {
   findSignedFiles,
   type GateCheck,
   gateProblems,
+  lastSeenInBlock,
   loadPlanDir,
   loadProgress,
   matchArtifacts,
   mempoolChecks,
   type MempoolNode,
   nextConfirmations,
+  nextUnmined,
   ownPsbt,
   recordReorg,
   resolveReorgs,
   saveProgress,
+  type SentContext,
   testFirstGate,
   type TxProgress,
   verifySigned,
+  withinDropGrace,
 } from "../core/execute.ts";
 import { SigCheckError } from "../core/sigcheck.ts";
 import { parseTx } from "../core/tx.ts";
@@ -1526,6 +1530,28 @@ async function donorPreflight(
   }
 }
 
+/** Node answers to a send of a transaction it already has (Core, Knots, eCash, Electrum). */
+const ALREADY_KNOWN =
+  /txn-already-(in-mempool|known)|already in (the )?(block ?chain|mempool)|already have transaction/i;
+
+/** Where a split that was sent before is now, for "not sent this time". */
+function sentWhere(d: DepthResult): string {
+  switch (d.state) {
+    case "confirmed":
+      return `confirmed (${d.depth} deep)`;
+    case "mempool":
+      return "in the mempool";
+    case "conflict":
+      return `its input was spent by ${
+        d.by ?? "another transaction"
+      }, not by this split. Run \`splayed track\` and see docs/user/recovery.md`;
+    case "unknown":
+      return "this backend can't tell whether it is still on the network, so it isn't sent again";
+    default:
+      return d.state;
+  }
+}
+
 /** Why a transaction that was sent once is not sent again, or undefined if it may be. */
 function sentAlready(p: TxProgress): string | undefined {
   const b = p.broadcast!;
@@ -1569,16 +1595,22 @@ async function cmdBroadcast(
     const held = new Map<PlannedTx, string>();
     for (const chain of ["btc", "ecx", "xbt"] as const) {
       const ofChain = plan.transactions.filter((t) => t.chain === chain);
+      /** Sent and accepted before: sent again only if the chain shows it dropped out. */
+      const recheck: PlannedTx[] = [];
       for (const t of ofChain) {
         const p = progress.txs[t.file];
         if (!p?.verified) held.set(t, "not verified yet: upload the signed file and run verify");
+        else if (p.broadcast?.status === "accepted" && !p.replacedBy) recheck.push(t);
         else if (p.broadcast) {
           const why = sentAlready(p);
           if (why) held.set(t, why);
         }
       }
-      const pending = ofChain.filter((t) => progress.txs[t.file]?.verified && !held.has(t));
-      if (!pending.length) continue;
+      const sendable = () =>
+        ofChain.filter((t) =>
+          progress.txs[t.file]?.verified && !held.has(t) && !recheck.includes(t)
+        );
+      if (!sendable().length && !recheck.length) continue;
       const { backend: send, results } = await verifiedBackendsFor(
         config,
         chain,
@@ -1589,11 +1621,39 @@ async function cmdBroadcast(
       if (!send) {
         const why = `no broadcast backend passed: ${results.map((r) => r.detail).join("; ")}`;
         io.err(`${chain.toUpperCase()}: ${why}`);
-        for (const t of pending) held.set(t, why);
+        for (const t of [...sendable(), ...recheck]) held.set(t, why);
         continue;
       }
       opened.push(send);
       if (send.chain !== chain) throw new ExecuteError("Internal error: backend chain mismatch");
+      if (recheck.length) {
+        const tip = await send.tipHeight();
+        for (const t of recheck) {
+          const p = progress.txs[t.file];
+          let d: DepthResult;
+          try {
+            d = await confirmationDepth(send, t, p.verified!.txid, tip);
+          } catch (error) {
+            // Never send again on the strength of a failed lookup.
+            held.set(
+              t,
+              `already sent; couldn't check whether it is still on the network: ${
+                (error as Error).message
+              }`,
+            );
+            continue;
+          }
+          if (d.state === "absent") {
+            io.out(
+              `${chain.toUpperCase()} #${t.order}: sent before but no longer in the mempool or on ` +
+                "the chain, and its inputs are unspent: it can be sent again.",
+            );
+          } else held.set(t, `already sent: ${sentWhere(d)}`);
+        }
+        recheck.length = 0;
+      }
+      const pending = sendable();
+      if (!pending.length) continue;
       let allowed = pending;
       if (!all) {
         const gate = await testFirstGate({
@@ -1605,7 +1665,7 @@ async function cmdBroadcast(
         });
         if (!gate.open) {
           // Only the TEST FIRST transaction, when it is the one to send (again).
-          allowed = gate.sendTest && gate.test ? [gate.test] : [];
+          allowed = gate.sendTest && gate.test && pending.includes(gate.test) ? [gate.test] : [];
           io.out(`${chain.toUpperCase()}: ${gate.reason}`);
           for (const t of pending) held.set(t, gate.reason);
         }
@@ -1759,9 +1819,20 @@ async function cmdBroadcast(
         const got = await q.send.broadcast(q.hex, `broadcast:${q.txid}`);
         if (got !== q.txid) throw new BackendError(`Server answered with a different txid ${got}`);
         entry.broadcast.status = "accepted";
+        delete entry.unmined; // a fresh send: what track saw of the last one no longer applies
         io.out(`  sent ${q.t.chain.toUpperCase()} ${q.txid}`);
         if (q.t.replaces) await markReplaced(config, q.t, dir, plan.id);
       } catch (error) {
+        if (error instanceof BackendError && ALREADY_KNOWN.test(error.message)) {
+          // The server has it already (another send got there first): that is not a refusal.
+          entry.broadcast.status = "accepted";
+          entry.broadcast.detail = "the server already had it";
+          delete entry.unmined;
+          io.out(`  ${q.t.chain.toUpperCase()} ${q.txid}: the server already has it`);
+          if (q.t.replaces) await markReplaced(config, q.t, dir, plan.id);
+          await saveProgress(dir, progress);
+          continue;
+        }
         const explicit = error instanceof BackendError && error.status !== undefined &&
           error.status !== 429;
         entry.broadcast.status = explicit ? "rejected" : "unknown";
@@ -1824,6 +1895,7 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
   const alerts: string[] = [];
   const notes: string[] = [];
+  const failures: string[] = [];
   for (const chain of ["btc", "ecx", "xbt"] as const) {
     const txs = plan.transactions.filter((t) =>
       t.chain === chain && progress.txs[t.file]?.broadcast
@@ -1835,8 +1907,20 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
       for (const t of txs) {
         const p = progress.txs[t.file];
         let conf = "?";
+        let d: DepthResult | undefined;
         if (backend && tip !== undefined && p.verified) {
-          const d = await confirmationDepth(backend, t, p.verified.txid, tip);
+          try {
+            d = await confirmationDepth(backend, t, p.verified.txid, tip);
+          } catch (error) {
+            // A failed lookup says nothing: the record stays as it was, and nothing is reported
+            // as moved or dropped on the strength of it.
+            conf = "? (lookup failed)";
+            failures.push(
+              `${chain.toUpperCase()} ${t.file}: couldn't check it: ${(error as Error).message}`,
+            );
+          }
+        }
+        if (d && backend && tip !== undefined && p.verified) {
           const at = new Date().toISOString();
           const required = config.chains[chain].confirmations;
           conf = describeDepth(d, required);
@@ -1871,7 +1955,27 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
               );
             }
           } else {
-            const alert = assessReorg(chain, p.confirmations, d);
+            const st = p.broadcast?.status;
+            const sent: SentContext | undefined =
+              st === "accepted" || st === "sending" || st === "unknown"
+                ? {
+                  status: st,
+                  sentAt: p.broadcast!.at,
+                  lastInMempool: p.unmined?.lastInMempool,
+                  nowMs: Date.now(),
+                }
+                : undefined;
+            const neverInBlock = !lastSeenInBlock(p.confirmations);
+            if (d.state === "absent" && neverInBlock && sent && withinDropGrace(sent)) {
+              conf = "not on the network yet (sent a few minutes ago; run track again later)";
+            } else if (d.state === "absent" && neverInBlock && sent) {
+              conf = p.unmined?.lastInMempool
+                ? "DROPPED from the mempool, never confirmed"
+                : "not on the network, never confirmed";
+            }
+            const alert = assessReorg(chain, p.confirmations, d, sent);
+            // Mempool sightings of a split that was never in a block, for the next look.
+            p.unmined = neverInBlock ? nextUnmined(p.unmined, d, at) : undefined;
             if (alert) {
               alerts.push(
                 `${chain.toUpperCase()} ${t.file}: ${alertTitle(alert.kind)}: ${alert.detail}`,
@@ -1932,11 +2036,16 @@ async function cmdTrack(config: Config, io: CliIO, id: string | undefined) {
   }
   io.out(table(rows));
   for (const n of notes) io.out(`Note: ${n} Leave the BTC copy alone until it is.`);
+  for (const f of failures) io.err(`Warning: ${f}`);
   if (alerts.length) {
     io.err("");
     io.err("!!! WARNING: a split did not stay where it was put !!!");
     for (const a of alerts) io.err(`  ${a}`);
     io.err("Until every split is confirmed again, leave the BTC copies alone.");
+    return 1;
+  }
+  if (failures.length) {
+    io.err("Some transactions couldn't be checked; their records are unchanged. Try again later.");
     return 1;
   }
   io.out(
