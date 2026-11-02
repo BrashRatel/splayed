@@ -356,6 +356,8 @@ pre#log .cmd {
   font-size: 15px;
   line-height: 1.45;
   margin: 0 0 16px;
+  /* Questions from the CLI can list one line per chain. */
+  white-space: pre-line;
 }
 .modal-actions {
   display: flex;

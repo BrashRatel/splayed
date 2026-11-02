@@ -4,7 +4,51 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Changed
+
+- **TEST FIRST asks instead of refusing.** On each chain `broadcast` (**Broadcast verified**) still
+  sends the TEST FIRST transaction alone first. On a later run it no longer holds the rest back
+  until that transaction is confirmed: it says where it is now (confirmed N deep, in the mempool,
+  replaced by a fee bump, following bumps of bumps, superseded, dropped, in conflict, not verified,
+  unknown, or that the lookup failed) and asks one question for every chain whose rest is ready
+  ("Send the other 1 ECX and 1 XBT transaction(s) now?", phrased as reassurance once every test
+  spend is confirmed). `--yes` answers yes, `--all` sends everything at once as before, and "no"
+  sends none of the rest and says why per transaction. No state can leave the rest stuck. The
+  per-transaction checks before any send are unchanged. `testFirstGate` is replaced by
+  `describeTestFirst()` (`src/core/test_first.ts`). Questions in the web UI keep their line breaks.
+- **`bump --another`** writes a second replacement while one is written and unsent; `--yes` now only
+  skips the prompt (it used to do both).
+- **`track` exits 1 while any alert is open**, naming it ("… is still open (now: 1 of 50)"), e.g. a
+  split that is in a block again after a reorg but not deep enough yet. It used to print a note and
+  exit 0.
+
 ### Added
+
+- **A split that was sent but never confirmed and fell out of the mempool is flagged.** `track`
+  raises a **DROPPED** alert (exit 1, the same warning block as reorgs) for a split whose send was
+  accepted (or ended unknown), that was never in a block, and that is now on neither the chain nor
+  the mempool with its inputs unspent. It says when it was last seen in the mempool (`unmined` in
+  `progress.json`), names mempool minimum fee and mempool expiry as the likely causes, and says what
+  to do: send it again, or fee bump it if the fee was too low. A split no mempool has shown yet gets
+  10 minutes after its send first. **Broadcast verified** sends any such split again (not only a
+  TEST FIRST one, and also when nothing else on its chain is pending), with all the usual checks.
+  The split stays "accepted": it counts as sent and unsettled (`plans delete` refuses, the coin
+  picker shows it as broadcast). In the web UI the row says "dropped from the mempool (last seen
+  …)", the alert is titled DROPPED, and **Fee bump…** is offered. A fee bump's original vanishing
+  never alarms; the bump itself vanishing does, on both plans.
+- **Your own spends are recognised before anything is called a conflict.** When a split's input was
+  spent by another transaction, `track` and `broadcast` look it up among the verified transactions
+  of every plan (archived ones too, `classifySpender()` in `plan_admin.ts`): its own fee bump, at
+  any hop, marks it replaced (and withdraws a CONFLICT it got); another plan's transaction marks it
+  **superseded by plan …**, a note rather than an alarm, settled once that plan's transaction is
+  deep, not counted as sent, never bumped or sent again. Only an unknown spender is a CONFLICT, now
+  worded with the likely causes in order (another wallet or tool, a replayed BTC spend, and only
+  then a compromised key) and saying so when the backend can't name the spender.
+- **`track` follows bumps of bumps** to the replacement on the network
+  (`REPLACED by plan C (via
+  B)`), also through a bump whose send reply was lost. `replacedBy` now
+  records the replacement's txid and first input, so it can be followed even without its plan, and a
+  bump plan that a plan's `replacedBy` points to can't be deleted until that plan is archived.
 
 - **Coin picker in the web UI's plan form.** The New plan card lists the coins a plan could take
   (shared per the last scan, with the forks each is split from), each with a checkbox, value, short
@@ -86,6 +130,24 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   `GET /api/jobs/<id>`.)
 
 ### Fixed
+
+- **"Absent" is never concluded from an ambiguous answer.** `confirmationDepth` now needs every
+  input seen unspent (another input spent elsewhere is a conflict; an input whose own transaction
+  can't be found is unknown, where it used to read as absent or a conflict); Esplora's existence
+  check after the `{"confirmed":false}` trap throws on an HTTP error instead of answering "mempool";
+  and one failed lookup no longer aborts `track`: that row shows `? (lookup failed)`, its record is
+  unchanged, and `track` exits 1.
+- **A fee bump whose reply was lost** never marked its original replaced, so the original's `track`
+  raised a CONFLICT ("treat the key as compromised"). The original is now marked replaced wherever
+  the bump is found on the network: `broadcast`'s "already in the mempool / on chain" path, a server
+  answering that it already has it, and `track`'s unknown→accepted restore.
+- **A server that already has a transaction** ("txn-already-known", "already in block chain") is
+  recorded as accepted, not rejected.
+- **Older progress files** with a stale depth no longer let a send whose status is
+  unknown/sending/conflict (or that `track` saw leave its block) be deleted, and no longer hide
+  **Fee bump…** for it.
+- **A split marked conflicting whose own transaction is confirmed deep** goes back to accepted (and
+  counts for the donor rules again); so does a "rejected" send that `track` sees on the network.
 
 Findings from a real-browser check of reorgs, fee bumps and the donor screen.
 

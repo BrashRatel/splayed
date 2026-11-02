@@ -224,14 +224,18 @@ the **TEST FIRST** transaction on each chain is sent.
 
 ![Test first sent](../images/web-ui/13-broadcast-test-first.png)
 
-Wait for the test transactions to confirm on their chains, then press **Broadcast verified** again
-to send the rest.
+Wait for the test transactions to confirm on their chains (**Track confirmations**), then press
+**Broadcast verified** again. splayed says where each TEST FIRST transaction is now and asks before
+sending the rest: answer **Yes** once it is confirmed (you can also answer yes earlier; that is your
+call), **No** to wait.
 
 ![Everything broadcast](../images/web-ui/14-broadcast-all.png)
 
 If a send times out you'll see an _unknown_ result, never a false failure; pressing the button again
-is safe and never double-sends. **Broadcast all now…** skips the wait for the test transaction;
-avoid it until you are comfortable.
+is safe and never double-sends. A split that was sent but dropped out of the mempool shows a
+**DROPPED** alert and is sent again by **Broadcast verified** (or replace it with **Fee bump…**);
+see [Recovery](recovery.md#dropped-from-the-mempool). **Broadcast all now…** skips the TEST FIRST
+step; avoid it until you are comfortable.
 
 ## 9. Track and finish
 

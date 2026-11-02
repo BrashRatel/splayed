@@ -131,9 +131,12 @@ The full list of checks is in the
 [transaction model](../reference/transaction-model.md#what-verify-checks).
 
 `broadcast` sends only verified transactions, each only to its own chain over its own Tor circuit.
-On each chain it sends the **TEST FIRST** transaction alone and waits for it to confirm before
-sending the rest (`--all` overrides). An unknown result (timeout, Tor failure) is recorded as
-unknown, never as failed, and is safe to retry. Re-running is idempotent. Details:
+On each chain the first run sends the **TEST FIRST** transaction alone. Run `track` until it
+confirms, then `broadcast` again: it says where each TEST FIRST transaction is now (confirmed, in
+the mempool, replaced by a fee bump, dropped, in conflict…) and asks before sending the rest.
+`--yes` answers yes; `--all` sends everything at once. An unknown result (timeout, Tor failure) is
+recorded as unknown, never as failed, and is safe to retry. Re-running is idempotent, and sends
+again a split that has dropped out of the mempool. Details:
 [broadcast semantics](../reference/transaction-model.md#what-broadcast-does).
 
 `track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
@@ -144,6 +147,8 @@ spend: a coin that turns up later is flagged as [new and shared](#coins-that-tur
 
 - A split disappears, is re-mined, or its input is spent by something else: see
   [Recovery](recovery.md#reorgs).
+- A split that was sent never confirms and drops out of the mempool: see
+  [Recovery](recovery.md#dropped-from-the-mempool).
 - A split is stuck at too low a fee: see [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).
 
 ## Before real coins

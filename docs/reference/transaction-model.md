@@ -83,12 +83,20 @@ See [Advanced donor routes](../user/advanced-donor-routes.md).
   input is still unspent on that chain.
 - It saves progress to disk before sending.
 - Each transaction goes only to its own chain, over its own Tor circuit.
-- On each chain it sends the **TEST FIRST** (smallest) transaction alone and waits for it to confirm
-  before sending the rest (`--all` overrides). A fee bump that replaced the TEST FIRST transaction
-  counts once it is in a block; a TEST FIRST transaction that isn't verified yet holds the rest
-  back. The chain is asked each time, so a test spend that left the chain closes the gate again.
+- On each chain it sends the **TEST FIRST** (smallest) transaction alone first (again, if it has
+  dropped out of the mempool). On a later run it asks the chain where that transaction is now
+  (confirmed, in the mempool, replaced by a fee bump, following bumps of bumps, superseded, dropped,
+  in conflict, not verified, unknown) and asks one question, for every chain whose rest is ready,
+  before sending the rest. `--yes` answers yes; `--all` sends everything at once. A "no" sends none
+  of the rest. No state can hold the rest back for good: the question is always asked.
 - An unknown result (timeout, Tor failure) is recorded as unknown, never as failed, and is safe to
-  retry. Re-running is idempotent; a split that `track` saw leave the chain is sent again.
+  retry. A server answering that it already has the transaction counts as accepted. Re-running is
+  idempotent: a transaction sent before is asked about on the chain and sent again only if it is in
+  neither a block nor the mempool and its inputs are unspent (a reorg, or dropped from the mempool).
+  A failed lookup never leads to a re-send.
+- Before treating a spent input as a conflict, it looks the spender up among every plan's verified
+  transactions: its own fee bump marks the original replaced, and another plan's transaction marks
+  it superseded. Neither is sent again.
 - Whatever it doesn't send, it says why, per transaction.
 - In the BTC-first route, the XBT transaction is held back until the coin is gone from BTC and ECX.
 

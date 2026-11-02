@@ -67,8 +67,9 @@ deno task cli dest set xbt "tr([fp/86h/0h/0h]xpub.../0/*)"
 deno task cli plan --xbt-signer knots                 # write unsigned PSBTs
 # sign each PSBT in your wallet, save as <name>.signed.psbt, then:
 deno task cli verify <plan-id>
-deno task cli broadcast <plan-id>
+deno task cli broadcast <plan-id>    # each chain's TEST FIRST transaction goes first, alone
 deno task cli track <plan-id>
+deno task cli broadcast <plan-id>    # says where the test is, asks, then sends the rest
 ```
 
 Prefer a browser? `deno task ui` (or `./splayed ui` for the release binary) runs the same steps in a

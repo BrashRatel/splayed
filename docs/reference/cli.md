@@ -55,7 +55,7 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 | `plans delete <plan> [--yes]`                               | Delete a plan's folder for good, after a confirmation. Refused while any of its transactions was sent and isn't confirmed to the chain's required depth (a fee-bumped original never is: archive it instead). Takes a plan id only, never a path. |
 | `verify <plan> [signed files...] [--no-mempool]`            | Check signed PSBTs/transactions. See [what verify checks](transaction-model.md#what-verify-checks).                                                                                                                                               |
 | `broadcast <plan> [--all] [--yes]`                          | Send verified transactions. See [what broadcast does](transaction-model.md#what-broadcast-does).                                                                                                                                                  |
-| `track <plan>`                                              | Confirmations of broadcast transactions; warns on reorgs and conflicts.                                                                                                                                                                           |
+| `track <plan>`                                              | Confirmations of broadcast transactions; warns (exit 1) on reorgs, splits dropped from the mempool and conflicts, and while any such alert is open.                                                                                               |
 
 ### `plan` options
 
@@ -75,6 +75,7 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 | Command                                                                        | Purpose                                           |
 | ------------------------------------------------------------------------------ | ------------------------------------------------- |
 | `bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--yes]` | RBF replacement plan at a higher fee.             |
+| `bump <plan> ... --another`                                                    | Write one even though a bump is unsent.           |
 | `bump <plan> --tx N --drop txid:vout [--drop ...]`                             | Replace one batch transaction without some coins. |
 | `bump <plan> --cpfp [--chains ...] [--tx N ...] --fee-rate ecx=20`             | Child-pays-for-parent; the rate is for the pair.  |
 
