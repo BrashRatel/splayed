@@ -227,7 +227,9 @@ the **TEST FIRST** transaction on each chain is sent.
 Wait for the test transactions to confirm on their chains (**Track confirmations**), then press
 **Broadcast verified** again. splayed says where each TEST FIRST transaction is now and asks before
 sending the rest: answer **Yes** once it is confirmed (you can also answer yes earlier; that is your
-call), **No** to wait.
+call), **No** to wait. If the TEST FIRST transaction has **not** gone out at all (not verified,
+rejected, in conflict, superseded by another plan…), the question says so first and **No** is the
+default button: sending the rest then skips the test.
 
 ![Everything broadcast](../images/web-ui/14-broadcast-all.png)
 
@@ -254,7 +256,10 @@ be spent normally from your original wallet.
 - **A banner appears above the table saying REORG or CONFLICT.** A confirmed split changed
   (re-mined, dropped, or its coin was spent another way). Leave the BTC copies alone and read
   [Recovery](recovery.md#reorgs). A dropped split is sent again with **Broadcast verified**. Once
-  the split is confirmed deep enough again, the banner turns grey and says **Resolved**.
+  the split is confirmed deep enough again, the banner turns grey and says **Resolved**. An alert
+  that can't resolve by itself (a stranger's spend, a dropped split you won't send again) can be
+  muted with **Acknowledge alerts…** once you have dealt with it; it then turns grey and says
+  **Acknowledged**. **Archive** acknowledges a plan's alerts too.
 - **A transaction is stuck unconfirmed.** Use **Fee bump…** on its row (or **Fee bump all
   unconfirmed…**) to create a higher-fee replacement. Sign, verify and broadcast the new plan
   exactly as above. See [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).

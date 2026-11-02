@@ -14,6 +14,16 @@ deno task demo-ui           # UI filled with in-memory test chains
 `tests/` uses fake chains and fake Tor/SOCKS/Electrum/RPC servers (`tests/fakes.ts`), so nothing
 touches the network. `testdata/unified_sighash.json` holds 166 Knots vectors for the XBT digest.
 
+The end-to-end harness (`tests/e2e.ts`: a wallet, a scan and a written plan, plus signers) runs on
+any of four backend kinds over the same fake chains: Esplora, Electrum (`FakeElectrumConn`, an
+in-memory server that names spenders from the script history) and node RPC with and without
+`txindex` (`FakeNodeRpcTransport`: `gettxout` sees the mempool, `getrawtransaction` finds a
+confirmed transaction only with `txindex`, nothing names a spender). `setup({ backend })` picks one;
+`useBackend(kind)` switches a running scenario, as a user or a fail-over would. Paths whose outcome
+depends on what a backend can see (own spends, lost send replies, conflicts, the TEST FIRST
+question) are tested on each: `tests/backends_e2e_test.ts`, `alerts_e2e_test.ts`,
+`test_first_yes_test.ts`.
+
 ## Regtest integration suite
 
 `deno task test:integration` needs Docker Compose v2, internet access for the first build and

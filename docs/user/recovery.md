@@ -5,13 +5,14 @@
 `track` remembers the block each split was confirmed in. If a later `track` finds that a split that
 was confirmed has changed, it says so loudly and exits with status 1:
 
-| What happened                                                                                    | What `track` says                                                         |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Re-mined in a different block (a reorg)                                                          | `REORG`, with the old and new block. Still confirmed; depth restarts      |
-| Back in the mempool                                                                              | `REORG`: back in the mempool                                              |
-| Gone from the chain and the mempool, input unspent again                                         | `REORG`: the coin is shared with BTC again. `broadcast` can send it again |
-| Input spent by a different transaction (an outside spend, or a BTC spend replayed onto the fork) | `CONFLICT`. The split is marked conflicting and will not be re-sent       |
-| Input spent by one of your own fee bumps or plans                                                | No alarm: `REPLACED by plan …` or `superseded by plan …`, see below       |
+| What happened                                                                                    | What `track` says                                                                              |
+| ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Re-mined in a different block (a reorg)                                                          | `REORG`, with the old and new block. Still confirmed; depth restarts                           |
+| Back in the mempool                                                                              | `REORG`: back in the mempool                                                                   |
+| Gone from the chain and the mempool, input unspent again                                         | `REORG`: the coin is shared with BTC again. `broadcast` can send it again                      |
+| Input spent by a different transaction (an outside spend, or a BTC spend replayed onto the fork) | `CONFLICT`. The split is marked conflicting and is not re-sent while that spend holds the coin |
+| That other transaction later leaves the chain, input unspent again                               | `DROPPED`: the coin is shared with BTC again. `broadcast` can send it again                    |
+| Input spent by one of your own fee bumps or plans                                                | No alarm: `REPLACED by plan …` or `superseded by plan …`, see below                            |
 
 Blocks are named by height and the last 8 hex digits of their hash (the first digits are zeros on
 every real block).
@@ -22,8 +23,9 @@ again and `plans delete` keeps refusing the plan. The warning repeats on every `
 split is in a block again; once it (or the fee bump that replaced it) is confirmed to the required
 depth, the alert is marked resolved (muted in the web UI).
 
-Every open alert keeps `track` at exit status 1 until it is resolved, including a split that is in a
-block again but not yet deep enough (`… is still open (now: 1 of 50)`).
+Every open alert keeps `track` at exit status 1 until it is resolved or
+[acknowledged](#acknowledging-an-alert), including a split that is in a block again but not yet deep
+enough (`… is still open (now: 1 of 50)`).
 
 A split that left the chain is sent again by **Broadcast verified** (`broadcast <plan>`): its bytes
 are verified again, the backend's identity is checked and its inputs must be unspent, as for any
@@ -41,13 +43,42 @@ among the verified transactions of all your plans (archived ones too):
   split is marked `superseded by plan …`. That is a note, not an alarm: nothing is sent or bumped
   for it again, and the plan can be deleted once the other plan's transaction is confirmed deep
   enough (`track` records how deep).
+- **The split itself** (a server whose status lookup is behind its spend index): no conflict; the
+  spend says where it is.
 - **Anything else**: `CONFLICT`. The likely causes, most likely first: the coin was spent with
   another wallet or tool (a fork wallet, say); an ordinary BTC spend of it was replayed onto the
   fork; only if neither applies, the key may be compromised. A backend that can't name the spender
-  (node RPC without `txindex`) is said to be unable to, rather than implying a stranger.
+  is said to be unable to, rather than implying a stranger.
+
+Node RPC never names the transaction that spent an input. Before calling it a conflict, each of your
+plans' transactions that spends the same coin is looked up on the node by its txid (this needs
+`txindex` for a confirmed one); one that is there is the spender. A split already recorded as
+`superseded` stays so unless there is positive evidence the other plan's transaction no longer holds
+the coin: the split itself is on the network, its inputs are seen unspent, or a named, different
+transaction spent them. A backend that can't tell changes nothing, so switching to (or failing over
+to) a node RPC backend never turns a superseded split into a false `CONFLICT`.
 
 A split marked conflicting whose own transaction later shows up confirmed deep enough goes back to
-`accepted`.
+`accepted`. If instead the transaction that conflicted with it leaves the chain and the mempool and
+the split's inputs are seen unspent again, `track` closes the `CONFLICT` and raises a `DROPPED`
+alert: the coin is shared with BTC again, and **Broadcast verified** (`broadcast <plan>`) can send
+the split again, with all its checks (or replace it with **Fee bump…**).
+
+### Acknowledging an alert
+
+Some alerts can't close by themselves: a stranger's spend of the coin, or a dropped split you
+decided not to send again. Once you have dealt with one, or decided to leave it, acknowledge it:
+
+```sh
+deno task cli track <plan> --ack        # lists the open alerts and asks; --yes skips the question
+```
+
+In the web UI, **Acknowledge alerts…** under the alert does the same. **Archive** acknowledges a
+plan's open alerts too. An acknowledged alert stays in `progress.json` (`acknowledged` with the
+time), is still shown, muted ("Acknowledged alert: …", grey in the web UI), and no longer makes
+`track` exit 1. It doesn't change anything on the chain: a coin that is still shared with BTC stays
+shared. A new alert is loud again, and so is the same kind of trouble after the split was back on
+the network (an acknowledged `DROPPED` alert ends once the split is in the mempool again).
 
 ## Dropped from the mempool
 
@@ -98,14 +129,18 @@ and exits 1; `broadcast` doesn't send it again. Per backend:
   server's index.
 - **Node RPC**: without `txindex` the node can't say whether a transaction was ever confirmed, but
   an input that is unspent in its UTXO set proves the split is in neither a block nor the mempool,
-  so a drop is still recognised; if the input can't be found, the answer is `unknown`.
+  so a drop is still recognised. The split's own output in the UTXO set proves it is confirmed (and
+  how deep) or in the mempool. If neither can be seen (the input is gone and the destination wallet
+  has already spent the output), the answer is `unknown`, and `broadcast` doesn't send again a split
+  whose earlier send ended unclear.
 
 Until every split is confirmed again, leave the BTC copies alone. `scan` also warns when a spend it
 saw last time has disappeared or been replaced by a different transaction.
 
 Reorg detection needs a backend that can report a transaction's own status: Esplora, Electrum, or
-node RPC. Node RPC without `txindex` can't tell a confirmed transaction from one that never existed,
-so `track` shows `unknown` rather than guessing.
+node RPC. Node RPC without `txindex` can't tell a confirmed transaction from one that never existed;
+it follows a split by the split's own unspent output, and shows `unknown` rather than guessing once
+that output is spent.
 
 ## Stuck transactions: fee bump (RBF)
 
@@ -131,8 +166,11 @@ replay-protected exactly like the original. Sign it in your wallet and `verify` 
 - When the replacement is sent (or found on the network later, if the reply was lost), the original
   is marked `replaced`, with the replacement's txid, and `track` shows `REPLACED by plan ...`. A
   replacement can be bumped again (`bump <bump plan>`); `track` follows the chain of bumps
-  (`REPLACED by plan C (via B)`). If the original confirms first, the replacement is refused and
-  `track` says so.
+  (`REPLACED by plan C (via B)`). If the original confirms first, sending the replacement is
+  refused; if it confirms after the replacement was sent, `track` says so once (a note, not an
+  alert: the coin is split), marks the replacement (and any bump of it) `superseded` by the original
+  and follows the original from then on. If the original is back in the mempool instead of its
+  replacement, `track` says that: whichever confirms first stands.
 - A bump plan that an original points to can't be deleted while the original's plan isn't archived:
   `track` and `broadcast` follow it there.
 - One replacement at a time: while a bump plan for a transaction is written but not sent, `bump`

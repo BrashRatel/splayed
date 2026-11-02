@@ -153,6 +153,14 @@ Wanted, but this is the work pre-alpha testers help with.
     that was never broadcast, which made the fee-bump pre-check falsely believe a replacement
     already landed and skip sending it. Fixed in `EsploraBackend.txStatus`.
 - [ ] Remote node RPC over an onion address, end to end.
+- [ ] Electrum on XBT (164-byte headers): a block's hash is read from the next header, so a split
+      confirmed in the tip block can't be placed (`? (lookup failed)`) until the next block. Check
+      what a real server answers for `blockchain.block.header` at tip+1, and fall back to the
+      header's own BLAKE2b hash or "confirmed, hash unknown" if needed. (Found writing the fake
+      Electrum server for package 2g; the fake serves tip+1.)
+- [ ] The lost-reply, own-spend and conflict paths on node RPC with and without `txindex` against
+      the regtest nodes (they are covered against fakes that mimic `gettxout`/`getrawtransaction`
+      only).
 
 ### Platforms
 
@@ -171,6 +179,16 @@ Wanted, but this is the work pre-alpha testers help with.
       Unreleased). Checked in Chromium (Playwright) against fake chains.
 
 ### Safety follow-ups
+
+- [x] **Independent review of wp/2f (package 2g).** Superseded kept on node RPC, own spends found by
+      txid when the backend can't name the spender, `--yes` only answers the TEST FIRST question
+      while the test spend is on the network, alerts can be acknowledged (`track --ack`, archive),
+      the original beating its fee bump settles, a conflict whose spend left the chain can be sent
+      again. End-to-end tests now run on Esplora, Electrum and node RPC with and without `txindex`.
+- [ ] **A TEST FIRST transaction that can't go out this run holds the rest of its chain** (gate or
+      donor problems, or node RPC without `txindex` that can't tell whether an unclear send got
+      through) until it can, or until `--all`. Consider offering the TEST FIRST question in that
+      case too, as for every other state.
 
 - [ ] **`tr(<64 hex>)` in descriptors.** `parseDescriptor` accepts a bare 32-byte hex key in `tr()`
       as an x-only public key, so a hex private key pasted there isn't recognised as one. Consider

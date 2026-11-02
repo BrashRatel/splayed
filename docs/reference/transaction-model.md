@@ -84,19 +84,31 @@ See [Advanced donor routes](../user/advanced-donor-routes.md).
 - It saves progress to disk before sending.
 - Each transaction goes only to its own chain, over its own Tor circuit.
 - On each chain it sends the **TEST FIRST** (smallest) transaction alone first (again, if it has
-  dropped out of the mempool). On a later run it asks the chain where that transaction is now
-  (confirmed, in the mempool, replaced by a fee bump, following bumps of bumps, superseded, dropped,
-  in conflict, not verified, unknown) and asks one question, for every chain whose rest is ready,
-  before sending the rest. `--yes` answers yes; `--all` sends everything at once. A "no" sends none
-  of the rest. No state can hold the rest back for good: the question is always asked.
+  dropped out of the mempool). The rest of that chain is told what happened to it: it goes now, it
+  is already on the network, or it isn't sent this run and why. On a later run it asks the chain
+  where that transaction is now (confirmed, in the mempool, replaced by a fee bump, following bumps
+  of bumps, superseded, dropped, in conflict, not verified, unknown) and asks one question, for
+  every chain whose rest is ready, before sending the rest. A "no" sends none of the rest. No state
+  can hold the rest back for good: the question is always asked.
+- `--yes` answers that question only for a chain whose TEST FIRST spend (or the fee bump that
+  replaced it) is confirmed or in the mempool. In every other state (not verified, not sent,
+  rejected, in conflict, superseded, dropped, unknown, a failed lookup) no test spend is on the
+  network: the rest of that chain is not sent, each says why, and `broadcast` exits 1. Run it
+  without `--yes` to answer yourself: the question then says plainly that the test has **not** gone
+  out and recommends no (the web UI makes No the default button); yes still sends the rest. `--all`
+  sends everything at once, as before.
 - An unknown result (timeout, Tor failure) is recorded as unknown, never as failed, and is safe to
   retry. A server answering that it already has the transaction counts as accepted. Re-running is
   idempotent: a transaction sent before is asked about on the chain and sent again only if it is in
   neither a block nor the mempool and its inputs are unspent (a reorg, or dropped from the mempool).
-  A failed lookup never leads to a re-send.
+  A failed lookup never leads to a re-send. A send whose result was unknown is looked up first:
+  found on the chain or in the mempool it is recorded as accepted (never taken for a conflict
+  because its input is spent, by itself); on a backend that can't tell (node RPC without `txindex`,
+  once the split's own outputs are spent) it is held, not sent again.
 - Before treating a spent input as a conflict, it looks the spender up among every plan's verified
   transactions: its own fee bump marks the original replaced, and another plan's transaction marks
-  it superseded. Neither is sent again.
+  it superseded. Neither is sent again. Node RPC never names the spender, so each of this tool's
+  transactions that spends the same coin is looked up there by its txid instead.
 - Whatever it doesn't send, it says why, per transaction.
 - In the BTC-first route, the XBT transaction is held back until the coin is gone from BTC and ECX.
 
@@ -105,3 +117,20 @@ See [Advanced donor routes](../user/advanced-donor-routes.md).
 Esplora's `/tx/{txid}/outspend/{n}` reports "unspent" even for transactions that don't exist, so
 existence is always checked first with `/tx/{txid}`. Node RPC without `txindex` can't report spend
 depth or fetch previous transactions, so those coins stay `pending`.
+
+Where a split is (`track`, `broadcast`, the TEST FIRST question) is asked in this order: the
+transaction's own status; then what spent its inputs; then, if neither can tell, its own first
+output. An output in the UTXO set (node RPC's `gettxout` includes the mempool) proves the split is
+confirmed (its depth comes from the output's confirmations) or in the mempool, so node RPC without
+`txindex` can follow a split until its destination wallet spends that output. An input spent by the
+split's own txid is never a conflict, even when the status lookup didn't find it yet.
+
+| Backend              | Names a spender | Sees a confirmed transaction by txid | Notes                                                      |
+| -------------------- | --------------- | ------------------------------------ | ---------------------------------------------------------- |
+| Esplora              | yes             | yes                                  | existence checked first (see above)                        |
+| Electrum             | yes             | yes (from the script's history)      |                                                            |
+| Node RPC + `txindex` | no              | yes                                  | own spends found by asking about this tool's txids         |
+| Node RPC             | no              | no (mempool only)                    | falls back to the split's own unspent output; else unknown |
+
+The end-to-end tests run the broadcast and track paths against all four (`tests/e2e.ts`,
+`tests/backends_e2e_test.ts`).

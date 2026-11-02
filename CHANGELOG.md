@@ -4,6 +4,54 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Fixed (independent review of wp/2f)
+
+- **Superseded stays superseded on node RPC.** `track` used to drop "superseded by plan …" whenever
+  the backend didn't name the other plan's transaction, which node RPC never does: with `txindex`
+  that became a false **CONFLICT** ("the key may be compromised", exit 1), without it a split that
+  the next `broadcast` marked in conflict. It is now cleared only on positive evidence (this split
+  on the network, its inputs seen unspent, or a named, different spender). When the backend can't
+  name a spender, each of this tool's transactions spending the same coin is looked up by txid
+  (`identifySpender()` in `plan_admin.ts`) before anything is called a CONFLICT.
+- **`--yes` no longer answers the TEST FIRST question for a test that never went out.** It answers
+  only while the TEST FIRST spend (or a fee bump of it) is confirmed or in the mempool; when it is
+  not verified, not sent, rejected, in conflict, superseded, dropped or unknown, the rest of that
+  chain is not sent, each says why, and `broadcast` exits 1. Answered yourself, the question now
+  starts "The TEST FIRST transaction has NOT gone out on …", says what skipping it risks and
+  recommends no (the web UI makes **No** the default button); yes still sends the rest (a soft
+  gate). `--all` is unchanged. `TestFirstStatus` gains `out`.
+- **A split is never in conflict with itself.** When the status lookup missed a split but its input
+  showed spent by the split's own txid (it reached the mempool in between, or the server lags),
+  `track` called it a CONFLICT; that spend now says where it is. `classifySpender()` returns
+  `"self"` for the split's own txid.
+- **`broadcast` looks up a send whose result was unclear before checking its inputs.** On node RPC a
+  split that had got through had its input "gone" with no named spender and was marked conflict; it
+  is now recorded as accepted ("already on chain: an earlier send got through"). A backend that
+  can't tell holds it instead of sending again or calling it a conflict.
+- **Node RPC without `txindex` can follow a split**: when neither the transaction's status nor its
+  inputs can tell, its own first output in the UTXO set proves it is confirmed (with its depth) or
+  in the mempool (`confirmationDepth()`).
+- **Alerts that could never close.** `track <plan> --ack [--yes]` acknowledges the open alerts after
+  listing them (in the web UI: **Acknowledge alerts…**), and archiving a plan acknowledges its
+  alerts too. Acknowledged alerts stay in `progress.json` (`acknowledged`), are shown muted
+  ("Acknowledged alert: …", grey in the web UI) and no longer make `track` exit 1; a new alert is
+  loud again, and an acknowledged off-network alert ends once the split is back. The original
+  confirming after its fee bump was sent is no longer an alert repeated forever: `track` notes it
+  once, marks the bump plan(s) `superseded` by the original and follows the original from then on.
+- **A conflict can end.** When the transaction that conflicted with a split leaves the chain and the
+  mempool and the split's inputs are seen unspent, `track` closes the CONFLICT, raises a DROPPED
+  alert (the coin is shared with BTC again) and sets the split to `unknown`, so **Broadcast
+  verified** can send it again with its checks.
+- **Wording.** The rest of a chain is told what happens to its TEST FIRST transaction in this run
+  (it goes now; it is already on the network; or it isn't sent, and why) instead of always "goes
+  first, in this run". `broadcast` recognises an accepted original whose input its own unrecorded
+  fee bump spent, and marks it replaced instead of "spent by …, not by this split". A replaced
+  original back in the mempool reads as itself ("back instead of its replacement"), not "the coin
+  was then spent by plan <the original>". Long txids wrap in the web UI's question box.
+- **Tests on every backend.** The end-to-end harness moved to `tests/e2e.ts` and runs against
+  Esplora, Electrum (an in-memory server) and node RPC with and without `txindex`
+  (`FakeNodeRpcTransport`); the broadcast, track, own-spend and TEST FIRST paths are tested on each.
+
 ### Changed
 
 - **TEST FIRST asks instead of refusing.** On each chain `broadcast` (**Broadcast verified**) still
@@ -12,10 +60,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   replaced by a fee bump, following bumps of bumps, superseded, dropped, in conflict, not verified,
   unknown, or that the lookup failed) and asks one question for every chain whose rest is ready
   ("Send the other 1 ECX and 1 XBT transaction(s) now?", phrased as reassurance once every test
-  spend is confirmed). `--yes` answers yes, `--all` sends everything at once as before, and "no"
-  sends none of the rest and says why per transaction. No state can leave the rest stuck. The
-  per-transaction checks before any send are unchanged. `testFirstGate` is replaced by
-  `describeTestFirst()` (`src/core/test_first.ts`). Questions in the web UI keep their line breaks.
+  spend is confirmed). `--yes` answers yes (only while the test spend is on the network: see Fixed
+  above), `--all` sends everything at once as before, and "no" sends none of the rest and says why
+  per transaction. No state can leave the rest stuck. The per-transaction checks before any send are
+  unchanged. `testFirstGate` is replaced by `describeTestFirst()` (`src/core/test_first.ts`).
+  Questions in the web UI keep their line breaks.
 - **`bump --another`** writes a second replacement while one is written and unsent; `--yes` now only
   skips the prompt (it used to do both).
 - **`track` exits 1 while any alert is open**, naming it ("… is still open (now: 1 of 50)"), e.g. a

@@ -134,14 +134,19 @@ The full list of checks is in the
 On each chain the first run sends the **TEST FIRST** transaction alone. Run `track` until it
 confirms, then `broadcast` again: it says where each TEST FIRST transaction is now (confirmed, in
 the mempool, replaced by a fee bump, dropped, in conflict…) and asks before sending the rest.
-`--yes` answers yes; `--all` sends everything at once. An unknown result (timeout, Tor failure) is
-recorded as unknown, never as failed, and is safe to retry. Re-running is idempotent, and sends
-again a split that has dropped out of the mempool. Details:
-[broadcast semantics](../reference/transaction-model.md#what-broadcast-does).
+`--yes` answers yes only while the TEST FIRST spend is confirmed or in the mempool; if it never went
+out (not verified, rejected, in conflict, superseded…), `--yes` sends none of the rest and says why,
+and answering yourself means answering a question that says so plainly. `--all` sends everything at
+once. An unknown result (timeout, Tor failure) is recorded as unknown, never as failed, and is safe
+to retry. Re-running is idempotent, and sends again a split that has dropped out of the mempool.
+Details: [broadcast semantics](../reference/transaction-model.md#what-broadcast-does).
 
-`track` shows confirmations against your configured depth. When the splits are deep, run `scan`: the
-BTC copies then show as separated and can be spent normally. Keep scanning now and then before you
-spend: a coin that turns up later is flagged as [new and shared](#coins-that-turn-up-later).
+`track` shows confirmations against your configured depth, and warns (exit 1) about anything that
+needs you: see [Recovery](recovery.md). An alert you have dealt with, or decided to leave, can be
+acknowledged with `track <plan> --ack`; it is then shown muted. When the splits are deep, run
+`scan`: the BTC copies then show as separated and can be spent normally. Keep scanning now and then
+before you spend: a coin that turns up later is flagged as
+[new and shared](#coins-that-turn-up-later).
 
 ## When something goes wrong
 
