@@ -2,6 +2,17 @@
 
 All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
+## Unreleased
+
+### Added
+
+- **Progress while commands run.** Long steps now report structured progress (Tor start-up,
+  each backend identity check, addresses checked per chain during a scan, and the cross-check
+  with a known total). The web UI shows the latest step and the elapsed time under the Activity
+  header while a command runs, so a slow Tor connection or scan no longer looks hung. The
+  terminal output is unchanged. (`src/core/progress.ts`; `progress` on `CliIO` and on job
+  snapshots from `GET /api/jobs/<id>`.)
+
 ## 0.1.0-pre-alpha.1 (2026-11-01)
 
 ### Changed

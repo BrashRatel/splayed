@@ -20,6 +20,7 @@ import {
 import { DescriptorError } from "../core/descriptors.ts";
 import { verifyIdentity } from "../core/identity.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId, isChainId } from "../core/profiles.ts";
+import type { ProgressSink } from "../core/progress.ts";
 import {
   describeDonor,
   donorKey,
@@ -175,6 +176,8 @@ export interface CliIO {
   env: Record<string, string | undefined>;
   transportFactory?: TransportFactory;
   streamFactory?: StreamFactory;
+  /** Structured progress for the web UI. Unset in the terminal, which has its log lines. */
+  progress?: ProgressSink;
 }
 
 const defaultIO: CliIO = {
@@ -546,7 +549,21 @@ async function torFor(
   if (route.via !== "socks" || !route.tor) return;
   const provider = io.tor ??
     ((c: Config, log: (m: string) => void) => torManager.ensure(c.tor, c.dataDir, log));
-  config.torSocks = await provider(config, (m) => io.out(m));
+  io.progress?.({ phase: "tor", chain, detail: "connecting through Tor" });
+  // The manager is shared by every command in this process; report its state only while this
+  // command is waiting on it.
+  const unsubscribe = io.progress
+    ? torManager.onChange((s) => {
+      if (s.state === "starting") {
+        io.progress?.({ phase: "tor", chain, done: s.progress, total: 100, detail: s.summary });
+      }
+    })
+    : undefined;
+  try {
+    config.torSocks = await provider(config, (m) => io.out(m));
+  } finally {
+    unsubscribe?.();
+  }
 }
 
 /**
@@ -567,8 +584,10 @@ async function verifiedBackendsFor(
   );
   for (const [i, b] of candidates.entries()) {
     let detail: string;
+    const step = { phase: "identity" as const, chain, done: i, total: candidates.length };
     try {
       await torFor(config, chain, b, io);
+      io.progress?.({ ...step, detail: `checking server ${i + 1} of ${candidates.length}` });
       const backend = await createBackend(config, chain, b, {
         transportFactory: io.transportFactory,
         streamFactory: io.streamFactory,
@@ -733,6 +752,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
     result = await runScan(config, parsedDescriptors(wallet, networkForProfile(config.profile)), {
       backends,
       log: (m) => io.out(m),
+      progress: io.progress,
       rpcRange,
     });
   } finally {

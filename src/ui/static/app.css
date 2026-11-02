@@ -462,3 +462,34 @@ input[type="file"]::file-selector-button {
   width: 100%;
   margin-top: .5rem;
 }
+
+/* Progress line while a command runs (job-progress in the activity panel). */
+.job-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 0.9em;
+}
+.job-progress .spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-progress .spinner {
+    animation: none;
+  }
+}
+.job-progress.hidden {
+  display: none;
+}

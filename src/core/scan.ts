@@ -3,6 +3,7 @@ import type { ChainBackend, FoundUtxo, OutputObservation } from "../backends/typ
 import type { Config } from "./config.ts";
 import type { ParsedDescriptor } from "./descriptors.ts";
 import { CHAIN_IDS, type ChainId } from "./profiles.ts";
+import { type ProgressSink, throttleProgress } from "./progress.ts";
 import type { CoinRecord } from "./state.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
 
@@ -27,6 +28,10 @@ export interface ScanDeps {
   random?: () => number;
   /** Address range scanned per branch with node RPC (scantxoutset has no gap limit). */
   rpcRange?: number;
+  /** Structured progress for the web UI (throttled here). */
+  progress?: ProgressSink;
+  /** Clock for progress throttling; tests replace it. */
+  now?: () => number;
 }
 
 interface Origin {
@@ -54,6 +59,7 @@ export async function runScan(
   const random = deps.random ?? Math.random;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const rpcRange = deps.rpcRange ?? 1000;
+  const progress = throttleProgress(deps.progress ?? (() => {}), 250, deps.now);
   const warnings: string[] = [];
   const tips: ScanResult["tips"] = {};
   const addressesRevealed: ScanResult["addressesRevealed"] = {};
@@ -97,10 +103,16 @@ export async function runScan(
       continue;
     }
     backendsUsed[chain] = { url: backend.config.url, route: backend.route.via };
+    progress({ phase: "discovery", chain, done: 0, detail: "addresses checked" });
     try {
       tips[chain] = await backend.tipHeight();
       if (backend.scanDescriptors) {
         log(`${chain.toUpperCase()}: scanning the UTXO set on your node (this can take minutes)…`);
+        progress({
+          phase: "discovery",
+          chain,
+          detail: "scanning the UTXO set on your node (this can take minutes)",
+        });
         const requests: { desc: string; range?: [number, number] }[] = [];
         descriptors.forEach((d, descriptorIndex) => {
           for (const branch of d.branches) {
@@ -149,6 +161,12 @@ export async function runScan(
                 origins.set(out.scriptPubKey, origin);
                 await pace(backend);
                 revealed++;
+                progress({
+                  phase: "discovery",
+                  chain,
+                  done: revealed,
+                  detail: "addresses checked",
+                });
                 const count = await backend.addressTxCount(out.address, out.scriptPubKey);
                 if (count > 0) {
                   lastUsed = Math.max(lastUsed, i);
@@ -163,6 +181,7 @@ export async function runScan(
           }
         }
         addressesRevealed[chain] = revealed;
+        progress.flush();
         log(`${chain.toUpperCase()}: checked ${revealed} address(es)`);
       } else {
         warnings.push(`${chain.toUpperCase()}: backend can't discover coins`);
@@ -183,7 +202,14 @@ export async function runScan(
   if (tasks.length) {
     log(`Cross-checking ${coins.size} coin(s) across chains (${tasks.length} lookups)…`);
   }
+  let checked = 0;
   for (const { key, chain } of shuffle(tasks, random)) {
+    progress({
+      phase: "crosscheck",
+      done: checked++,
+      total: tasks.length,
+      detail: "cross-checking coins on the other chains",
+    });
     const backend = deps.backends[chain];
     const slot = observed.get(key)!;
     if (!backend) {
@@ -197,6 +223,14 @@ export async function runScan(
     } catch (error) {
       slot[chain] = { state: "unknown", error: (error as Error).message };
     }
+  }
+  if (tasks.length) {
+    progress({
+      phase: "crosscheck",
+      done: tasks.length,
+      total: tasks.length,
+      detail: "cross-checking coins on the other chains",
+    });
   }
 
   const coinList = [...coins.entries()].map(([key, coin]) => ({

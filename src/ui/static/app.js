@@ -140,6 +140,7 @@ async function pollJob() {
   state.after += job.lines.length;
   state.job = job;
   if (job.question && questionShown !== job.question.id) ask(job.question);
+  showProgress(job);
   if (job.done) {
     logLine(`(exit ${job.exitCode})`, job.exitCode ? "err" : "muted");
     setBusy(false);
@@ -167,8 +168,50 @@ function ask(question) {
   document.getElementById("modal-no").onclick = () => answer(false);
 }
 
+// Mirrors describeProgress() in src/core/progress.ts.
+function describeProgress(p) {
+  const chain = p.chain ? `${p.chain.toUpperCase()}: ` : "";
+  const label = {
+    tor: "Tor",
+    identity: "checking server",
+    discovery: "addresses checked",
+    crosscheck: "cross-checking coins",
+  }[p.phase] ?? p.phase;
+  let counts = "";
+  if (p.done !== undefined) {
+    counts = p.phase === "tor"
+      ? ` ${p.done}%`
+      : p.total !== undefined
+      ? ` (${p.done} of ${p.total})`
+      : ` (${p.done})`;
+  }
+  return `${chain}${p.detail ?? label}${counts}`;
+}
+
+function elapsed(since) {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(since)) / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+/** The "what's happening now" line under the activity header, while a command runs. */
+function showProgress(job) {
+  const box = document.getElementById("job-progress");
+  if (!box) return;
+  if (!job || job.done) {
+    box.classList.add("hidden");
+    return;
+  }
+  const what = job.progress ? describeProgress(job.progress) : `running ${job.args[0]}`;
+  const wait = job.question ? " · waiting for your answer" : "";
+  document.getElementById("job-progress-text").textContent = `${what} · ${
+    elapsed(job.startedAt)
+  }${wait}`;
+  box.classList.remove("hidden");
+}
+
 function setBusy(busy) {
   document.getElementById("job-state").textContent = busy ? "running…" : "idle";
+  if (!busy) showProgress(null);
   for (const b of document.querySelectorAll("section#view button")) b.disabled = busy;
 }
 

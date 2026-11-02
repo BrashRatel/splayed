@@ -4,6 +4,7 @@
  * can't: every action is a CLI command with the same checks and the same prompts.
  */
 import type { CliIO } from "../cli/main.ts";
+import type { Progress } from "../core/progress.ts";
 
 export interface JobLine {
   stream: "out" | "err";
@@ -18,6 +19,8 @@ export interface JobSnapshot {
   done: boolean;
   exitCode?: number;
   startedAt: string;
+  /** The latest progress report while the job runs; cleared when it ends. */
+  progress?: Progress & { at: string };
 }
 
 /** Commands the UI may run. `ui` itself and anything not listed are refused. */
@@ -97,6 +100,9 @@ export class JobRunner {
       ...this.baseIO,
       out: (text) => job.lines.push({ stream: "out", text }),
       err: (text) => job.lines.push({ stream: "err", text }),
+      progress: (p) => {
+        if (!job.done) job.progress = { ...p, at: new Date().toISOString() };
+      },
       confirm: (text) =>
         new Promise<boolean>((resolve) => {
           const qid = crypto.randomUUID();
@@ -118,6 +124,7 @@ export class JobRunner {
       .finally(() => {
         job.done = true;
         job.question = undefined;
+        job.progress = undefined;
       });
     return this.snapshot(job);
   }
@@ -154,6 +161,7 @@ export class JobRunner {
       done: job.done,
       exitCode: job.exitCode,
       startedAt: job.startedAt,
+      progress: job.progress,
     };
   }
 }
