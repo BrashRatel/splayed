@@ -191,10 +191,16 @@ async function setup(opts: { nodes?: boolean; brokenBtcNode?: boolean } = {}) {
   await Deno.writeTextFile(join(dir, ".cookie"), "__cookie__:x");
   const out: string[] = [];
   const err: string[] = [];
+  /** What every question is answered, and the questions asked. */
+  const answer = { yes: true };
+  const questions: string[] = [];
   const io: CliIO = {
     out: (t) => out.push(t),
     err: (t) => err.push(t),
-    confirm: () => true,
+    confirm: (q) => {
+      questions.push(q);
+      return answer.yes;
+    },
     env: {},
     tor: () => Promise.resolve({ host: "127.0.0.1", port: 9050 }),
     transportFactory: (_config, chain, backend) => {
@@ -222,7 +228,21 @@ async function setup(opts: { nodes?: boolean; brokenBtcNode?: boolean } = {}) {
   for await (const e of Deno.readDir(plansDir)) id = e.name;
   const planDir = join(plansDir, id);
   const plan = JSON.parse(await Deno.readTextFile(join(planDir, "plan.json")));
-  return { chains, dir, run, out, err, plan, planDir, id, contacted, rpc, coins: { a, b } };
+  return {
+    chains,
+    dir,
+    run,
+    out,
+    err,
+    plan,
+    planDir,
+    id,
+    contacted,
+    rpc,
+    coins: { a, b },
+    answer,
+    questions,
+  };
 }
 
 async function signAll(
@@ -266,10 +286,24 @@ Deno.test("verify -> broadcast (test first) -> track -> broadcast the rest", asy
   // The ECX bytes on the wire carry the marker; the XBT ones carry 0x21.
   assertEquals(parseTx(s.chains.ecx.broadcasts![0].hex).lockTime, 499_999_998);
   assertEquals(sigHashTypes(parseTx(s.chains.xbt.broadcasts![0].hex)), [0x21]);
-  // Unconfirmed: a second run waits.
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0);
-  assert(s.out.join("\n").includes("waiting for the TEST FIRST transaction"));
+  // Unconfirmed: a second run says where each TEST FIRST transaction is and asks, once for both
+  // chains; "no" sends nothing.
+  s.answer.yes = false;
+  s.questions.length = 0;
+  assertEquals(await s.run("broadcast", s.id), 1);
+  assertEquals(s.questions.length, 1);
+  const q = s.questions[0];
+  assert(q.includes("to prove the signer, the destination and the route work"), q);
+  assert(
+    /ECX: the TEST FIRST transaction \(ecx\/001-[0-9a-f]{8}\.psbt\) is in the mempool/.test(q),
+    q,
+  );
+  assert(q.includes("XBT: the TEST FIRST transaction"), q);
+  assert(q.includes("Send the other 1 ECX and 1 XBT transaction(s) now?"), q);
+  assert(s.out.join("\n").includes("not sent: you chose to wait"), s.out.join("\n"));
   assertEquals(s.chains.ecx.broadcasts!.length, 1);
+  assertEquals(s.chains.xbt.broadcasts!.length, 1);
+  s.answer.yes = true;
   // Mine the test transactions, then the rest goes out.
   for (const c of [s.chains.ecx, s.chains.xbt]) {
     for (const [k, v] of c.spends) {
@@ -279,7 +313,13 @@ Deno.test("verify -> broadcast (test first) -> track -> broadcast the rest", asy
       }
     }
   }
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  s.questions.length = 0;
+  s.out.length = 0;
+  assertEquals(await s.run("broadcast", s.id), 0, s.err.join("\n"));
+  // Confirmed: the question reassures, and it is the only one asked.
+  assertEquals(s.questions.length, 1);
+  assert(s.questions[0].startsWith("The TEST FIRST spend went through:"), s.questions[0]);
+  assert(s.questions[0].includes("is confirmed (1 deep)"), s.questions[0]);
   assertEquals(s.chains.ecx.broadcasts!.length, 2);
   assertEquals(s.chains.xbt.broadcasts!.length, 2);
   assertEquals(await s.run("track", s.id), 0);
@@ -465,20 +505,25 @@ Deno.test("TEST FIRST replaced by a fee bump: the rest goes once the replacement
   assertEquals(await s.run("broadcast", bumpId, "--yes"), 0, s.err.join("\n"));
   assertEquals((await progressOf(s.planDir)).txs[test.file].broadcast!.status, "replaced");
 
-  // Replacement unconfirmed: the rest waits, and says why.
+  // Replacement unconfirmed: the question says so; "no" sends nothing.
   s.out.length = 0;
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  s.questions.length = 0;
+  s.answer.yes = false;
+  assertEquals(await s.run("broadcast", s.id), 1);
   assertEquals(ecx.broadcasts!.length, 2);
   assert(
-    s.out.join("\n").includes(`replaced by plan ${bumpId}, which is mempool`),
-    s.out.join("\n"),
+    s.questions[0].includes(`was replaced by plan ${bumpId}, which is in the mempool`),
+    s.questions[0],
   );
-  assert(s.out.join("\n").includes("Nothing to broadcast right now:"));
+  assert(s.out.join("\n").includes("Nothing sent:"));
+  s.answer.yes = true;
 
   // Replacement confirmed: "Broadcast verified" on the original plan sends the rest.
   mine(ecx);
   mine(s.chains.xbt);
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  s.questions.length = 0;
+  assertEquals(await s.run("broadcast", s.id), 0, s.err.join("\n"));
+  assert(s.questions[0].includes(`which is confirmed (1 deep)`), s.questions[0]);
   assertEquals(ecx.broadcasts!.length, 3);
   const rest = s.plan.transactions.find((t: { chain: string; order: number }) =>
     t.chain === "ecx" && t.order === 2
@@ -503,7 +548,7 @@ Deno.test("bump --another writes a second replacement anyway, with a warning; --
   assert(await Deno.stat(join(s.dir, "plans", `${s.id}-bump2`)));
 });
 
-Deno.test("broadcast: the rest waits for an unverified TEST FIRST, and every held one says why", async () => {
+Deno.test("broadcast: with an unverified TEST FIRST it asks before sending the rest, and every held one says why", async () => {
   const s = await setup();
   await signAll(s.planDir, s.plan);
   const test = s.plan.transactions.find((t: { chain: string; testFirst: boolean }) =>
@@ -514,12 +559,24 @@ Deno.test("broadcast: the rest waits for an unverified TEST FIRST, and every hel
     .map((t: { file: string }) => join(s.planDir, t.file.replace(/\.psbt$/u, ".signed.psbt")));
   assertEquals(await s.run("verify", s.id, ...others), 0, s.err.join("\n"));
   s.out.length = 0;
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  s.answer.yes = false;
+  assertEquals(await s.run("broadcast", s.id), 1);
   assertEquals(s.chains.ecx.broadcasts, undefined); // used to go out without its test
+  // Two questions only in this mixed case: the rest of ECX (after its TEST FIRST), then the XBT
+  // TEST FIRST transaction's own first send, which needs the usual yes.
+  assertEquals(s.questions.length, 2);
+  assert(s.questions[0].includes("isn't verified yet"), s.questions[0]);
+  assert(s.questions[1].startsWith("Broadcast these now?"), s.questions[1]);
   const text = s.out.join("\n");
-  assert(text.includes("isn't verified yet"), text);
   assert(text.includes(`ECX #1 (${test.file}): not verified yet`), text);
-  assert(text.includes("ECX #2 ("), text);
+  assert(text.includes("ECX #2 (") && text.includes("not sent: you chose to wait"), text);
+  assertEquals(s.chains.xbt.broadcasts, undefined);
+  // "yes" sends the rest without the test: the user's call, nothing is stuck. XBT still sends
+  // only its TEST FIRST transaction.
+  s.answer.yes = true;
+  assertEquals(await s.run("broadcast", s.id), 0, s.err.join("\n"));
+  assertEquals(s.chains.ecx.broadcasts!.length, 1);
+  assertEquals(s.chains.xbt.broadcasts!.length, 1);
 });
 
 // ---- a split that was sent but never confirmed and fell out of the mempool ----
@@ -764,6 +821,17 @@ Deno.test("own spends: a bump of a bump is followed by track, with no false alar
   const text = s.out.join("\n");
   assert(text.includes(`REPLACED by plan ${c.bumpId} (via ${b.bumpId}) (confirmed, 1 deep)`), text);
   assertEquals((await progressOf(s.planDir)).txs[test.file].reorgs, undefined);
+  // Broadcast verified on the original: the question follows the bumps, and the rest goes.
+  const n = s.chains.ecx.broadcasts!.length;
+  s.questions.length = 0;
+  assertEquals(await s.run("broadcast", s.id), 0, s.err.join("\n"));
+  assert(
+    s.questions[0].includes(
+      `was replaced by plan ${c.bumpId} (via ${b.bumpId}), which is confirmed (1 deep)`,
+    ),
+    s.questions[0],
+  );
+  assertEquals(s.chains.ecx.broadcasts!.length, n + 1);
   assertEquals(await s.run("track", b.bumpId), 0, s.err.join("\n"));
   // The last bump, deep: it is still the link the others follow, so it can't be deleted.
   s.chains.ecx.tip += 60;
@@ -816,6 +884,12 @@ Deno.test("own spends: a fee bump whose send reply was lost is recognised, howev
     assertEquals(p.replacedBy!.plan, b.bumpId, first);
     assertEquals(p.replacedBy!.txid, b.txid, first);
     assertEquals(p.reorgs, undefined, first);
+    // The rest of the plan goes out after the usual question.
+    const n = s.chains.ecx.broadcasts!.length;
+    s.questions.length = 0;
+    assertEquals(await s.run("broadcast", s.id), 0, s.err.join("\n"));
+    assert(s.questions[0].includes(`replaced by plan ${b.bumpId}, which is confirmed`), first);
+    assertEquals(s.chains.ecx.broadcasts!.length, n + 1, first);
   }
 });
 
@@ -835,6 +909,12 @@ Deno.test("own spends: a deep fee bump plan is kept while the original follows i
   s.err.length = 0;
   assertEquals(await s.run("track", s.id), 0, s.err.join("\n"));
   assert(s.out.join("\n").includes(`REPLACED by plan ${b.bumpId} (confirmed, 101 deep)`));
+  // Followed by txid for the TEST FIRST question too; the rest goes.
+  const n = s.chains.ecx.broadcasts!.length;
+  s.questions.length = 0;
+  assertEquals(await s.run("broadcast", s.id), 0, s.err.join("\n"));
+  assert(s.questions[0].includes(`which is confirmed (101 deep)`), s.questions[0]);
+  assertEquals(s.chains.ecx.broadcasts!.length, n + 1);
 });
 
 Deno.test("own spends: a coin in two plans: the plan that lost is superseded, not in conflict", async () => {
@@ -905,6 +985,16 @@ Deno.test("own spends: a stranger's spend is a CONFLICT that lists the likely ca
   assert(err.includes("replayed onto ECX"), err);
   assert(err.includes("only if neither applies, the key may be compromised"), err);
   assert(!err.includes("treat the key as compromised"), err);
+  // broadcast says so in its question, and sends the rest only on yes.
+  s.answer.yes = false;
+  s.questions.length = 0;
+  const n = s.chains.ecx.broadcasts!.length;
+  assertEquals(await s.run("broadcast", s.id), 1);
+  assert(
+    s.questions[0].includes(`is in conflict: its input was spent by ${stranger}`),
+    s.questions[0],
+  );
+  assertEquals(s.chains.ecx.broadcasts!.length, n);
 });
 
 Deno.test("track: a split marked conflict that is deep in the chain itself is accepted again", async () => {

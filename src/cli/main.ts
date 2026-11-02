@@ -108,12 +108,12 @@ import {
   retractConflicts,
   saveProgress,
   type SentContext,
-  testFirstGate,
   type TxProgress,
   verifySigned,
   withinDropGrace,
 } from "../core/execute.ts";
 import { SigCheckError } from "../core/sigcheck.ts";
+import { describeTestFirst, type TestFirstStatus } from "../core/test_first.ts";
 import { parseTx } from "../core/tx.ts";
 import { BackendError } from "../backends/types.ts";
 import { observationCell, privacyLevel, sats, shortOutpoint, table } from "./format.ts";
@@ -185,12 +185,16 @@ Splitting (guided route: forks first, BTC untouched):
                                   and the other chains must reject.
   broadcast <plan> [--all] [--yes]
                                   Send verified transactions, each only to its own chain, each
-                                  over its own Tor circuit. Sends the TEST FIRST transaction alone
-                                  until it (or the fee bump that replaced it) confirms (--all
-                                  overrides). Says why for each transaction it doesn't send.
-  track <plan>                    Confirmations of broadcast transactions. Warns loudly if a split
-                                  that was confirmed leaves the chain, is re-mined in another
-                                  block, or has its input spent by a different transaction.
+                                  over its own Tor circuit. On each chain the TEST FIRST
+                                  transaction goes alone first; the next run says where it is and
+                                  asks before sending the rest (--yes answers yes, --all sends
+                                  everything at once). Sends again a split that dropped out of the
+                                  mempool. Says why for each transaction it doesn't send.
+  track <plan>                    Confirmations of broadcast transactions. Warns loudly (exit 1)
+                                  if a split that was confirmed leaves the chain or is re-mined in
+                                  another block, a sent split drops out of the mempool, or its
+                                  input is spent by a transaction that isn't one of your plans;
+                                  and while any such alert is open.
   bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--another] [--yes]
                                   Stuck split? Write a new plan that spends the same inputs at a
                                   higher fee (RBF, BIP125). Sign, verify and broadcast it like any
@@ -1605,6 +1609,10 @@ async function cmdBroadcast(
     /** Why a transaction is not being sent this time, for the summary. */
     const held = new Map<PlannedTx, string>();
     let ownIndex: Map<string, OwnTx> | undefined;
+    /** Chains whose TEST FIRST transaction went out before: its status, for the question. */
+    const asks = new Map<ChainId, TestFirstStatus>();
+    /** Sent only if the user says yes to that question (or passes --yes). */
+    const gated = new Set<PlannedTx>();
     for (const chain of ["btc", "ecx", "xbt"] as const) {
       const ofChain = plan.transactions.filter((t) => t.chain === chain);
       /** Sent and accepted before: sent again only if the chain shows it dropped out. */
@@ -1667,19 +1675,31 @@ async function cmdBroadcast(
       const pending = sendable();
       if (!pending.length) continue;
       let allowed = pending;
-      if (!all) {
-        const gate = await testFirstGate({
+      const test = all ? undefined : ofChain.find((t) => t.testFirst);
+      if (test && pending.includes(test)) {
+        // The TEST FIRST transaction goes alone: its first send, or again after it dropped out.
+        allowed = [test];
+        const why = `the TEST FIRST transaction (${test.file}) goes first, in this run. Run ` +
+          "broadcast again to send the rest (it says where the test is and asks), or pass --all";
+        for (const t of pending) if (t !== test) held.set(t, why);
+        if (pending.length > 1) {
+          io.out(
+            `${chain.toUpperCase()}: sending only the TEST FIRST transaction this time; the rest ` +
+              "waits for the next broadcast.",
+          );
+        }
+      } else if (test) {
+        // Sent before (or it can't be sent): say where it is, and ask before sending the rest.
+        const status = await describeTestFirst({
           dataDir: config.dataDir,
           plan,
           progress,
           chain,
           backend: send,
         });
-        if (!gate.open) {
-          // Only the TEST FIRST transaction, when it is the one to send (again).
-          allowed = gate.sendTest && gate.test && pending.includes(gate.test) ? [gate.test] : [];
-          io.out(`${chain.toUpperCase()}: ${gate.reason}`);
-          for (const t of pending) held.set(t, gate.reason);
+        if (status) {
+          asks.set(chain, status);
+          for (const t of pending) gated.add(t);
         }
       }
       for (const t of allowed) held.delete(t);
@@ -1832,14 +1852,54 @@ async function cmdBroadcast(
       }
     }
     await saveProgress(dir, progress);
+    // The TEST FIRST step: one question for every chain whose rest is ready to go.
+    let agreed = false;
+    let declined = false;
+    const gatedQueue = queue.filter((q) => gated.has(q.t));
+    if (gatedQueue.length) {
+      const chains = [...new Set(gatedQueue.map((q) => q.t.chain as ChainId))];
+      const lines = chains.map((c) => `${c.toUpperCase()}: ${asks.get(c)!.text}.`);
+      const allConfirmed = chains.every((c) => asks.get(c)!.confirmed);
+      const counts = chains.map((c) =>
+        `${gatedQueue.filter((q) => q.t.chain === c).length} ${c.toUpperCase()}`
+      ).join(" and ");
+      io.out(allConfirmed ? "TEST FIRST: the test spend went through." : "TEST FIRST:");
+      for (const l of lines) io.out(`  ${l}`);
+      const question = [
+        allConfirmed
+          ? "The TEST FIRST spend went through:"
+          : "The TEST FIRST step is there to prove the signer, the destination and the route " +
+            "work before more coins move. Where it is now:",
+        ...lines.map((l) => `  ${l}`),
+        `Send the other ${counts} transaction(s) now? Each goes only to its own chain.`,
+      ].join("\n");
+      agreed = yes || await io.confirm(question);
+      if (!agreed) {
+        declined = true;
+        for (const q of gatedQueue) {
+          held.set(
+            q.t,
+            `not sent: you chose to wait (${asks.get(q.t.chain as ChainId)!.text}). Run ` +
+              "broadcast again when you're ready",
+          );
+        }
+        queue.splice(0, queue.length, ...queue.filter((q) => !gated.has(q.t)));
+      }
+    }
     const notNow = plan.transactions.filter((t) => held.has(t));
     if (!queue.length) {
-      io.out(notNow.length ? "Nothing to broadcast right now:" : "Nothing to broadcast right now.");
+      io.out(
+        declined
+          ? "Nothing sent:"
+          : notNow.length
+          ? "Nothing to broadcast right now:"
+          : "Nothing to broadcast right now.",
+      );
     } else if (notNow.length) io.out("Not sent this time:");
     for (const t of notNow) {
       io.out(`  ${t.chain.toUpperCase()} #${t.order} (${t.file}): ${held.get(t)}`);
     }
-    if (!queue.length) return 0;
+    if (!queue.length) return declined ? 1 : 0;
     for (const chain of ["btc", "ecx", "xbt"] as const) {
       const items = queue.filter((q) => q.t.chain === chain);
       if (items.length) {
@@ -1850,7 +1910,12 @@ async function cmdBroadcast(
         );
       }
     }
-    if (!yes && !(await io.confirm("Broadcast these now? Each goes only to its own chain."))) {
+    // Already asked about everything going out (the rest after a TEST FIRST): don't ask twice.
+    const askedAll = agreed && queue.every((q) => gated.has(q.t));
+    if (
+      !yes && !askedAll &&
+      !(await io.confirm("Broadcast these now? Each goes only to its own chain."))
+    ) {
       io.out("Nothing sent.");
       return 1;
     }
