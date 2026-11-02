@@ -1179,6 +1179,58 @@ function viewDonors() {
   ];
 }
 
+/** Archived plans: still on disk (donor records and fee-bump links read them), just out of the way. */
+function archivedPlansCard(plans) {
+  return h(
+    "div",
+    { class: "card" },
+    h(
+      "details",
+      {},
+      h("summary", {}, `Archived plans (${plans.length})`),
+      h(
+        "p",
+        { class: "note" },
+        "Archived plans are hidden here but kept on disk. Deleting is refused while a plan has transactions that were sent and aren't confirmed yet.",
+      ),
+      h(
+        "table",
+        {},
+        h(
+          "tr",
+          {},
+          ...["Plan", "Created", "Archived", "Transactions", ""].map((x) => h("th", {}, x)),
+        ),
+        ...plans.map((p) =>
+          h(
+            "tr",
+            {},
+            h("td", { class: "mono" }, p.id),
+            h("td", {}, new Date(p.createdAt).toLocaleString()),
+            h("td", {}, p.archivedAt === "unknown" ? "" : new Date(p.archivedAt).toLocaleString()),
+            h("td", {}, String(p.transactions.length)),
+            h(
+              "td",
+              {},
+              h(
+                "button",
+                { class: "secondary", onclick: () => run(["plans", "unarchive", p.id]) },
+                "Restore",
+              ),
+              " ",
+              h(
+                "button",
+                { class: "danger", onclick: () => run(["plans", "delete", p.id]) },
+                "Delete…",
+              ),
+            ),
+          )
+        ),
+      ),
+    ),
+  );
+}
+
 function viewPlans() {
   const o = state.overview;
   const signer = h(
@@ -1229,7 +1281,8 @@ function viewPlans() {
       h("button", { onclick: create }, "Create plan"),
     ),
   )];
-  for (const p of state.plans?.plans ?? []) {
+  const allPlans = state.plans?.plans ?? [];
+  for (const p of allPlans.filter((x) => !x.archivedAt)) {
     const rows = p.transactions.map((t) => {
       const fileInput = h("input", { type: "file", class: "mw190" });
       const upload = async () => {
@@ -1436,9 +1489,22 @@ function viewPlans() {
             "Fee bump all unconfirmed…",
           )
           : null,
+        h("span", { class: "grow" }),
+        h(
+          "button",
+          { class: "secondary", onclick: () => run(["plans", "archive", p.id]) },
+          "Archive",
+        ),
+        h(
+          "button",
+          { class: "danger", onclick: () => run(["plans", "delete", p.id]) },
+          "Delete…",
+        ),
       ),
     ));
   }
+  const archived = allPlans.filter((x) => x.archivedAt);
+  if (archived.length) view.push(archivedPlansCard(archived));
   const dev = devCard();
   if (dev) view.push(dev);
   return view;

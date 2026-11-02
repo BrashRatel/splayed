@@ -22,6 +22,16 @@ import { verifyIdentity } from "../core/identity.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId, isChainId } from "../core/profiles.ts";
 import type { ProgressSink } from "../core/progress.ts";
 import {
+  archivedAt,
+  archivePlan,
+  deletePlan,
+  deletionNotes,
+  PlanAdminError,
+  planFolder,
+  unarchivePlan,
+  unsettledTransactions,
+} from "../core/plan_admin.ts";
+import {
   describeDonor,
   donorKey,
   evaluateDonors,
@@ -137,7 +147,11 @@ Splitting (guided route: forks first, BTC untouched):
                                   split with plain SIGHASH_ALL signatures. Donors are checked
                                   absent on BTC and ECX and must come from an XBT coinbase or a
                                   split this tool verified. See docs/user/advanced-donor-routes.md.
-  plans                           List written plans
+  plans                           List written plans (archived ones separately)
+  plans archive <plan>            Hide a plan from the list; nothing is deleted
+  plans unarchive <plan>          Bring an archived plan back
+  plans delete <plan> [--yes]     Delete a plan's folder for good. Refused while any of its
+                                  transactions was sent and isn't confirmed yet
   verify <plan> [signed files...] [--no-mempool]
                                   Check signed PSBTs/transactions: same tx as planned, replay
                                   marker (ECX) or 0x21 on every signature (XBT), every signature
@@ -309,7 +323,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
           yes: flags.yes === true,
         });
       case "plans":
-        return await cmdPlans(config, io);
+        return await cmdPlans(config, io, args, flags.yes === true);
       case "verify":
         return await cmdVerify(config, io, args, flags["no-mempool"] === true);
       case "broadcast":
@@ -338,7 +352,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
     if (
       error instanceof ConfigError || error instanceof GateClosedError ||
       error instanceof PlanError || error instanceof BumpError ||
-      error instanceof ExecuteError ||
+      error instanceof ExecuteError || error instanceof PlanAdminError ||
       error instanceof DescriptorError || error instanceof PolicyError ||
       error instanceof TorUnavailableError || error instanceof TorStartError
     ) {
@@ -1257,7 +1271,40 @@ async function cmdDonor(
   }
 }
 
-async function cmdPlans(config: Config, io: CliIO) {
+async function cmdPlans(config: Config, io: CliIO, args: string[], yes: boolean) {
+  const [action, id, ...extra] = args;
+  if (action !== undefined) {
+    if (!id || extra.length) throw new UsageError("plans archive|unarchive|delete <plan>");
+    if (action === "archive") {
+      await archivePlan(config.dataDir, id);
+      io.out(
+        `Archived plan ${id}. Its folder is kept; \`splayed plans unarchive ${id}\` undoes it.`,
+      );
+      return 0;
+    }
+    if (action === "unarchive") {
+      await unarchivePlan(config.dataDir, id);
+      io.out(`Plan ${id} is back in the list.`);
+      return 0;
+    }
+    if (action === "delete") {
+      const { dir, plan } = await planFolder(config.dataDir, id);
+      const unsettled = await unsettledTransactions(config, dir, plan);
+      if (unsettled.length) {
+        // deletePlan refuses too; say it before asking anything.
+        await deletePlan(config, id);
+      }
+      for (const note of await deletionNotes(dir, plan)) io.out(`Note: ${note}`);
+      if (!yes && !(await io.confirm(`Delete plan ${id} and all its files for good?`))) {
+        io.out("Nothing deleted.");
+        return 1;
+      }
+      await deletePlan(config, id);
+      io.out(`Deleted plan ${id}.`);
+      return 0;
+    }
+    throw new UsageError("plans archive|unarchive|delete <plan>");
+  }
   const dir = join(config.dataDir, PLANS_DIR);
   const ids: string[] = [];
   try {
@@ -1269,7 +1316,15 @@ async function cmdPlans(config: Config, io: CliIO) {
     io.out("No plans yet.");
     return 0;
   }
-  for (const id of ids.sort()) io.out(`${id}  ${join(dir, id)}`);
+  const archived: string[] = [];
+  for (const id of ids.sort()) {
+    if (await archivedAt(join(dir, id))) archived.push(id);
+    else io.out(`${id}  ${join(dir, id)}`);
+  }
+  if (archived.length) {
+    io.out(`Archived (${archived.length}):`);
+    for (const id of archived) io.out(`  ${id}  ${join(dir, id)}`);
+  }
   return 0;
 }
 

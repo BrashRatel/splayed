@@ -197,7 +197,7 @@ Wanted, but this is the work pre-alpha testers help with.
         patient over Tor and watch the activity log) — same issue as Tor bootstrap, it looks hung
         but is just slow, especially noticeable on re-scans after a split;
   - [x] edit scan gap limit and jitter;
-  - [ ] archive or delete plans;
+  - [x] archive or delete plans;
   - [ ] show the per-coin plan, verify and broadcast state on the Coins tab;
   - [ ] an opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just

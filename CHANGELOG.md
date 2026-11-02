@@ -6,6 +6,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Archive and delete plans** (`plans archive|unarchive|delete <plan>`, and **Archive** /
+  **Delete…** buttons on the Plans tab with an "Archived plans" section). Archiving leaves a marker
+  in the plan's folder rather than moving it, because the donor rules and fee-bump tracking read
+  plan folders. Deleting asks first, says what would be lost, takes a plan id only (never a path),
+  and is refused while any transaction of the plan was sent and isn't confirmed to the chain's
+  required depth.
+
 - **Web UI flow.** Progress boxes inside the Network tab (while checking servers over Tor) and the
   Coins tab (while scanning), with the current step, elapsed time and a note on why it's slow. The
   UI moves on by itself from Network to Wallet once the settings are confirmed, and from Wallet to

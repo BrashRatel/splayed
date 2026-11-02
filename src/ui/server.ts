@@ -12,6 +12,7 @@ import { type Config, loadConfig, networkConfirmed, routeForBackend } from "../c
 import { networkForProfile, parseDescriptor } from "../core/descriptors.ts";
 import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
 import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
+import { archivedAt } from "../core/plan_admin.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
 import { loadDonorScan } from "../core/donors.ts";
 import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
@@ -249,6 +250,7 @@ async function plansView(dataDir: string) {
       );
       out.push({
         id,
+        archivedAt: await archivedAt(planDir),
         createdAt: plan.createdAt,
         route: plan.route,
         xbtSigner: plan.xbtSigner,
