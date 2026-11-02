@@ -11,6 +11,7 @@ path.
 | [User guide (CLI)](user/guide.md)                      | The same walkthrough from the command line            |
 | [Signers](user/signers.md)                             | Which wallet signs which chain; air-gapped QR         |
 | [Network and privacy](user/network-and-privacy.md)     | Tor, your own nodes, what is revealed                 |
+| Run it in Docker                                       | [Docker](user/docker.md)                              |
 | [Web UI](user/web-ui.md)                               | The browser interface                                 |
 | [Recovery](user/recovery.md)                           | Reorgs, fee bumps (RBF), CPFP                         |
 | [Advanced donor routes](user/advanced-donor-routes.md) | Stock hardware wallets for XBT; moving BTC first      |

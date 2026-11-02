@@ -4,6 +4,16 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Added (Phase 4)
+
+- **Docker image** (`docker/Dockerfile`, `docker/compose.yml`, `docs/user/docker.md`):
+  - runs the web UI in proxied mode or any CLI command;
+  - non-root, read-only root filesystem, data in a volume;
+  - the entrypoint creates the access token on first start;
+  - Tor from Debian's signed repository, started by splayed inside the container;
+  - a variant with Tor in its own container (`docker/compose.tor.yml`), for amd64 and arm64.
+- `SPLAYED_TOR_MODE` environment variable (`auto` | `managed` | `system`).
+
 ### Added (Phase 3)
 
 - **Web UI behind another server** (`ui --listen HOST:PORT --allowed-host NAME --token-file PATH`,

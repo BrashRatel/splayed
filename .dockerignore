@@ -1,0 +1,7 @@
+.git
+.data
+dist
+node_modules
+vendor/tor
+docs/images
+*.tmp

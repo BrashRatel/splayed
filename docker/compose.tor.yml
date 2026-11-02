@@ -1,0 +1,31 @@
+# Variant: Tor in its own container. Use together with compose.yml:
+#
+#   docker compose -f docker/compose.yml -f docker/compose.tor.yml up -d --build
+#
+# splayed is set to Tor mode "system": it only uses this Tor and never starts its own, and stops
+# (fails closed) if it can't reach it. Tor's SocksPort keeps IsolateSOCKSAuth on by default, so
+# splayed's per-chain and per-broadcast circuits stay separate.
+services:
+  tor:
+    build:
+      context: .
+      dockerfile: tor.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - tor-data:/var/lib/tor
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # No ports published: only the splayed container reaches it, on the compose network.
+
+  splayed:
+    depends_on: [tor]
+    environment:
+      SPLAYED_TOR_MODE: "system"
+      SPLAYED_TOR_SOCKS: "tor:9050"
+
+volumes:
+  tor-data:

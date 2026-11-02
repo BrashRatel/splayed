@@ -233,6 +233,7 @@ Web UI:
 Global options:
   --data-dir DIR    (env SPLAYED_DATA_DIR)   --tor-socks HOST:PORT (env SPLAYED_TOR_SOCKS)
   --profile ID      (env SPLAYED_PROFILE)    --json   -h, --help
+  Tor mode can also come from env SPLAYED_TOR_MODE (auto | managed | system).
 `;
 
 /** How a question is put. `recommend: "no"`: answering yes skips a safety step. */

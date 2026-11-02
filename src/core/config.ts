@@ -224,7 +224,8 @@ export async function loadConfig(options: LoadOptions): Promise<Config> {
   }
   const socksText = options.torSocks ?? env.SPLAYED_TOR_SOCKS ??
     (typeof tor.socks === "string" ? tor.socks : undefined);
-  const mode = tor.mode ?? "auto";
+  // SPLAYED_TOR_MODE lets a container fix the mode (e.g. "system" with a Tor sidecar).
+  const mode = env.SPLAYED_TOR_MODE ?? tor.mode ?? "auto";
   if (mode !== "auto" && mode !== "system" && mode !== "managed") {
     throw new ConfigError('tor.mode must be "auto", "system" or "managed"');
   }

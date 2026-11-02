@@ -164,6 +164,9 @@ Wanted, but this is the work pre-alpha testers help with.
 
 ### Platforms
 
+- [ ] Build and run the Docker image (`docker/`): `docker compose -f docker/compose.yml up --build`,
+      sign in, scan over the container's Tor; the Tor-container variant; a `buildx` amd64+arm64
+      build. Written without a Docker daemon, so not built yet.
 - [ ] `deno task fetch-tor --all` and smoke-test the macOS and Windows Tor bundles (only Linux
       x86_64 has been fetched and run), then `compile` and package each platform.
 - [ ] Managed Tor bootstraps on macOS and Windows.

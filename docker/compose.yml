@@ -1,0 +1,31 @@
+# splayed web UI in Docker, reachable from this machine only.
+#
+#   docker compose -f docker/compose.yml up -d --build
+#   docker compose -f docker/compose.yml exec splayed cat /data/ui-token   # the access token
+#   open http://localhost:8080/
+#
+# splayed starts its own Tor inside the container for public backends. For a separate Tor
+# container instead, add docker/compose.tor.yml (see docs/user/docker.md).
+services:
+  splayed:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: splayed:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080" # loopback only: don't publish the UI on your LAN
+    volumes:
+      - splayed-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Host names your browser uses for this UI (exact, comma-separated).
+      SPLAYED_UI_ALLOWED_HOSTS: "localhost:8080,127.0.0.1:8080"
+
+volumes:
+  splayed-data:
