@@ -682,3 +682,8 @@ tr.new-shared-row td {
 .picker-reason.bad {
   color: var(--bad);
 }
+
+/* Sign-in card (proxied mode, or a tab without the token). */
+.signin {
+  max-width: 620px;
+}

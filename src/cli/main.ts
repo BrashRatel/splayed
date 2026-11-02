@@ -223,6 +223,12 @@ Splitting (guided route: forks first, BTC untouched):
 Web UI:
   ui [--port N] [--open]          Local web interface (127.0.0.1 only) that runs these same
                                   commands, prompts included
+  ui --listen HOST:PORT --allowed-host NAME[:PORT] ... --token-file PATH
+                                  Behind another server (Docker, StartOS, a reverse proxy):
+                                  answers only to the allowed host names, with the access token
+                                  from the file (env SPLAYED_UI_LISTEN, SPLAYED_UI_ALLOWED_HOSTS
+                                  comma-separated, SPLAYED_UI_TOKEN_FILE)
+  ui --new-token-file PATH        Write a new random access token to PATH (mode 0600) and exit
 
 Global options:
   --data-dir DIR    (env SPLAYED_DATA_DIR)   --tor-socks HOST:PORT (env SPLAYED_TOR_SOCKS)
@@ -313,6 +319,10 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         add: { type: "boolean" },
         drop: { type: "string", multiple: true },
         tx: { type: "string", multiple: true },
+        listen: { type: "string" },
+        "allowed-host": { type: "string", multiple: true },
+        "token-file": { type: "string" },
+        "new-token-file": { type: "string" },
       },
     });
   } catch (error) {
@@ -397,7 +407,13 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
           yes: flags.yes === true,
         });
       case "ui":
-        return await cmdUi(dataDir, io, flags.port, flags.open === true);
+        return await cmdUi(dataDir, io, flags.port, flags.open === true, {
+          listen: flags.listen ?? io.env.SPLAYED_UI_LISTEN,
+          allowedHosts: (flags["allowed-host"] as string[] | undefined) ??
+            io.env.SPLAYED_UI_ALLOWED_HOSTS?.split(",").map((x) => x.trim()).filter(Boolean),
+          tokenFile: flags["token-file"] ?? io.env.SPLAYED_UI_TOKEN_FILE,
+          newTokenFile: flags["new-token-file"],
+        });
       default:
         throw new UsageError(`Unknown command "${command}"`);
     }
@@ -3085,23 +3101,102 @@ async function cmdCpfp(
   return refused ? 1 : 0;
 }
 
+const TOKEN_TEXT = /^[A-Za-z0-9_-]{32,256}$/u;
+
+/** The access token from a token file: long, URL-safe, and not readable by other users. */
+async function readTokenFile(path: string): Promise<string> {
+  let st: Deno.FileInfo;
+  try {
+    st = await Deno.stat(path);
+  } catch (error) {
+    throw new UsageError(`Can't read the token file ${path}: ${(error as Error).message}`);
+  }
+  if (Deno.build.os !== "windows" && st.mode !== null && (st.mode & 0o077) !== 0) {
+    throw new UsageError(
+      `The token file ${path} can be read by other users: chmod 600 it (or make a new one with ` +
+        "`splayed ui --new-token-file`).",
+    );
+  }
+  const text = (await Deno.readTextFile(path)).trim();
+  if (!TOKEN_TEXT.test(text)) {
+    throw new UsageError(
+      `The token in ${path} must be 32+ characters of A-Z, a-z, 0-9, - and _ (a generated one: ` +
+        "`splayed ui --new-token-file`).",
+    );
+  }
+  return text;
+}
+
+/** HOST:PORT, [v6]:PORT or a bare port. */
+function parseListen(text: string): { hostname: string; port: number } {
+  const m = /^(?:\[([^\]]+)\]|([^:]+)):(\d{1,5})$/u.exec(text.trim());
+  const port = Number(m?.[3]);
+  if (!m || !Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new UsageError(`--listen must be HOST:PORT (got "${text}")`);
+  }
+  return { hostname: m[1] ?? m[2], port };
+}
+
 async function cmdUi(
   dataDir: string,
   io: CliIO,
   portFlag: string | undefined,
   open: boolean,
+  opts: { listen?: string; allowedHosts?: string[]; tokenFile?: string; newTokenFile?: string } =
+    {},
 ): Promise<number> {
-  const port = portFlag === undefined ? 0 : Number(portFlag);
+  const { createToken, startUi } = await import("../ui/server.ts");
+  if (opts.newTokenFile) {
+    const tmp = `${opts.newTokenFile}.tmp-${crypto.randomUUID()}`;
+    await Deno.writeTextFile(tmp, createToken() + "\n", { mode: 0o600 });
+    if (Deno.build.os !== "windows") await Deno.chmod(tmp, 0o600);
+    await Deno.rename(tmp, opts.newTokenFile);
+    io.out(`Wrote a new access token to ${opts.newTokenFile}. The old one no longer works.`);
+    return 0;
+  }
+  let hostname = "127.0.0.1";
+  let port = portFlag === undefined ? 0 : Number(portFlag);
+  if (opts.listen) ({ hostname, port } = parseListen(opts.listen));
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new UsageError("--port must be 0-65535");
   }
-  const { startUi } = await import("../ui/server.ts");
+  const loopback = ["127.0.0.1", "localhost", "::1"].includes(hostname);
+  // Proxied mode: behind another server, on this machine (allowed hosts on loopback) or not.
+  const proxied = !loopback || !!opts.allowedHosts?.length;
+  if (!loopback && !opts.allowedHosts?.length) {
+    throw new UsageError(
+      `Listening on ${hostname} needs --allowed-host with the name(s) the browser uses ` +
+        "(e.g. --allowed-host splayed.local or localhost:8080).",
+    );
+  }
+  if (proxied && !opts.tokenFile) {
+    throw new UsageError(
+      `Listening on ${hostname} needs --token-file (create one with \`splayed ui --new-token-file PATH\`).`,
+    );
+  }
+  const token = opts.tokenFile ? await readTokenFile(opts.tokenFile) : undefined;
   const { out: _o, err: _e, confirm: _c, ...baseIO } = io;
-  const ui = startUi({ dataDir, port, run: main, baseIO });
-  io.out(`splayed UI: ${ui.url}`);
-  io.out(
-    "Open that exact URL (it carries a one-time access token). Only this machine can reach it.",
-  );
+  const ui = startUi({
+    dataDir,
+    port,
+    hostname,
+    allowedHosts: proxied ? opts.allowedHosts : undefined,
+    token,
+    run: main,
+    baseIO,
+  });
+  if (proxied) {
+    io.out(`splayed UI listening on ${hostname}:${ui.port}, answering only to:`);
+    for (const h of opts.allowedHosts!) io.out(`  ${h}`);
+    io.out(`The access token is in ${opts.tokenFile}; the page asks for it.`);
+  } else if (token) {
+    io.out(`splayed UI: http://127.0.0.1:${ui.port}/  (access token in ${opts.tokenFile})`);
+  } else {
+    io.out(`splayed UI: ${ui.url}`);
+    io.out(
+      "Open that exact URL (it carries a one-time access token). Only this machine can reach it.",
+    );
+  }
   io.out("Press Ctrl+C to stop; a Tor started by splayed stops with it.");
   if (open) {
     const opener = Deno.build.os === "darwin"

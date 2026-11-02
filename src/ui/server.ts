@@ -420,11 +420,16 @@ export interface UiOptions {
   staticDir?: string;
   token?: string;
   /**
-   * TEST ENVIRONMENTS ONLY (the regtest playground). Listens on every interface and answers any
-   * Host name on our port, so another machine on the LAN can open it. The token is still required
-   * and is sent over plain HTTP. The real `splayed ui` never sets this.
+   * Address to listen on. Default 127.0.0.1 (only this machine). Anything else is "proxied mode"
+   * (Docker, StartOS, a reverse proxy) and needs `allowedHosts`.
    */
-  listenOnAllInterfaces?: boolean;
+  hostname?: string;
+  /**
+   * Host names (as the browser sends them in the Host header, `name` or `name:port`) that this UI
+   * answers to. Giving any turns on proxied mode (needs `token`); required when `hostname` isn't
+   * loopback. Exact, case-insensitive matches; no wildcards.
+   */
+  allowedHosts?: string[];
   /** TEST ENVIRONMENTS ONLY: lets the page mine blocks on regtest nodes. Never set by `ui`. */
   devTools?: {
     heights(): Promise<Record<string, number>>;
@@ -432,10 +437,50 @@ export interface UiOptions {
   };
 }
 
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1"]);
+
+/** Refuses wrong tokens in bulk: after 5 within a minute, one attempt per 2 s, up to 1 min. */
+export class TokenThrottle {
+  #failures: number[] = [];
+  #blockedUntil = 0;
+  #delay = 2000;
+  constructor(private readonly now: () => number = Date.now) {}
+  /** Milliseconds to wait before another attempt is looked at; 0 when one may be tried now. */
+  waitMs(): number {
+    return Math.max(0, this.#blockedUntil - this.now());
+  }
+  failed(): void {
+    const t = this.now();
+    this.#failures = [...this.#failures.filter((f) => t - f < 60_000), t];
+    if (this.#failures.length >= 5) {
+      this.#blockedUntil = t + this.#delay;
+      this.#delay = Math.min(this.#delay * 2, 60_000);
+    }
+  }
+  succeeded(): void {
+    this.#failures = [];
+    this.#delay = 2000;
+  }
+}
+
 export function startUi(
   options: UiOptions,
 ): { url: string; token: string; port: number; server: Deno.HttpServer } {
+  const hostname = options.hostname ?? "127.0.0.1";
+  const allowed = new Set((options.allowedHosts ?? []).map((h) => h.trim().toLowerCase()));
+  // Proxied mode: allowed host names are given (e.g. nginx on this machine forwarding to
+  // 127.0.0.1), or the address isn't loopback (Docker, StartOS), which then requires them.
+  const proxied = allowed.size > 0 || !LOOPBACK.has(hostname);
+  if (proxied && !allowed.size) {
+    throw new Error(
+      `Listening on ${hostname} needs at least one allowed host name (--allowed-host).`,
+    );
+  }
+  if (proxied && !options.token) {
+    throw new Error(`Listening on ${hostname} needs a token file (--token-file).`);
+  }
   const token = options.token ?? createToken();
+  const throttle = new TokenThrottle();
   const staticDir = options.staticDir ?? fileURLToPath(new URL("./static/", import.meta.url));
   const jobs = new JobRunner(options.run, options.baseIO, options.dataDir);
   let port = 0;
@@ -444,9 +489,12 @@ export function startUi(
   const handler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
     const host = req.headers.get("host");
-    // DNS-rebinding defence: only our own loopback host names are answered.
-    const loopbackHost = host === `127.0.0.1:${port}` || host === `localhost:${port}`;
-    if (!loopbackHost && !(options.listenOnAllInterfaces && host?.endsWith(`:${port}`))) {
+    // DNS-rebinding defence: only our own host names are answered. On loopback that's
+    // 127.0.0.1/localhost on our port; in proxied mode exactly the configured names.
+    const hostOk = proxied
+      ? !!host && allowed.has(host.toLowerCase())
+      : host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+    if (!hostOk) {
       return new Response("Forbidden", { status: 403, headers: SECURITY_HEADERS });
     }
     if (!url.pathname.startsWith("/api/")) {
@@ -458,20 +506,34 @@ export function startUi(
         headers: { ...SECURITY_HEADERS, "Content-Type": asset.type },
       });
     }
+    const wait = throttle.waitMs();
+    if (wait) {
+      const r = json(
+        { error: `Too many wrong tokens. Try again in ${Math.ceil(wait / 1000)} s.` },
+        429,
+      );
+      r.headers.set("Retry-After", String(Math.ceil(wait / 1000)));
+      return r;
+    }
     const auth = req.headers.get("authorization");
     if (!constantTimeEqual(auth?.replace(/^Bearer /u, "") ?? null, token)) {
+      throttle.failed();
       return json(
-        { error: "Missing or wrong token. Open the URL printed by `splayed ui`." },
+        {
+          error: proxied
+            ? "Missing or wrong access token."
+            : "Missing or wrong token. Open the URL printed by `splayed ui`.",
+        },
         401,
       );
     }
+    throttle.succeeded();
     if (req.method !== "GET") {
       const origin = req.headers.get("origin");
-      if (
-        origin !== null && origin !== `http://127.0.0.1:${port}` &&
-        origin !== `http://localhost:${port}` &&
-        !(options.listenOnAllInterfaces && origin === `http://${host}`)
-      ) {
+      const sameOrigin = proxied
+        ? origin === `https://${host}` || origin === `http://${host}`
+        : origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+      if (origin !== null && !sameOrigin) {
         return json({ error: "Cross-origin request refused" }, 403);
       }
       if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {
@@ -695,7 +757,7 @@ export function startUi(
   };
 
   const server = Deno.serve({
-    hostname: options.listenOnAllInterfaces ? "0.0.0.0" : "127.0.0.1",
+    hostname,
     port: options.port ?? 0,
     onListen: () => {},
   }, handler);

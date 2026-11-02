@@ -4,7 +4,9 @@ import { bumpable, bumpQuestion, depthText, isOpenAlert, reorgAlerts } from "./p
 // splayed web UI. Every action runs a splayed CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
-const token = (() => {
+// The access token: from the URL fragment (`splayed ui` prints such a link), or typed into the
+// sign-in form. Kept for this tab only (sessionStorage), sent only as a bearer header.
+let token = (() => {
   const m = /token=([\w-]+)/.exec(location.hash);
   if (m) {
     sessionStorage.setItem("splayed-token", m[1]);
@@ -122,9 +124,70 @@ async function api(path, options = {}) {
     try {
       msg = (await res.json()).error ?? msg;
     } catch { /* not json */ }
+    if (res.status === 401 && token) {
+      // The token was replaced (e.g. "Reset UI token"): sign in again.
+      signOut();
+    }
     throw new Error(msg);
   }
   return res.headers.get("content-type")?.includes("json") ? res.json() : res;
+}
+
+// ---------- sign in ----------
+
+function signOut() {
+  token = null;
+  try {
+    sessionStorage.removeItem("splayed-token");
+  } catch { /* nothing stored */ }
+  state.overview = null;
+  render();
+}
+
+/** Asks for the access token when the page has none (proxied mode, or a new tab). */
+function signInForm() {
+  const input = h("input", {
+    type: "password",
+    autocomplete: "off",
+    placeholder: "access token",
+    class: "grow",
+  });
+  const status = h("p", { class: "note" });
+  const submit = async () => {
+    const value = input.value.trim();
+    if (!value) return;
+    status.textContent = "Checking…";
+    const res = await fetch("/api/overview", { headers: { Authorization: `Bearer ${value}` } })
+      .catch((e) => ({ ok: false, status: 0, json: () => ({ error: e.message }) }));
+    if (!res.ok) {
+      let msg = res.status === 401 ? "Wrong access token." : `HTTP ${res.status}`;
+      try {
+        if (res.status !== 401) msg = (await res.json()).error ?? msg;
+      } catch { /* not json */ }
+      status.textContent = msg;
+      return;
+    }
+    token = value;
+    try {
+      sessionStorage.setItem("splayed-token", value);
+    } catch { /* this tab only, in memory */ }
+    await start();
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+  return h(
+    "div",
+    { class: "card signin" },
+    h("h2", {}, "Sign in"),
+    h(
+      "p",
+      { class: "note" },
+      "Enter the access token for this splayed UI. It is in the token file the server was started with (Docker: the path it printed; StartOS: the “Show UI token” action). It is kept for this browser tab only.",
+    ),
+    h("div", { class: "row" }, input, h("button", { onclick: submit }, "Sign in")),
+    status,
+  );
 }
 
 // ---------- jobs (CLI commands) ----------
@@ -1952,13 +2015,7 @@ function render() {
   const view = document.getElementById("view");
   view.replaceChildren();
   if (!token) {
-    view.append(
-      h(
-        "div",
-        { class: "banner bad" },
-        "No access token. Open the exact URL printed by `splayed ui`.",
-      ),
-    );
+    view.append(signInForm());
     return;
   }
   if (!state.overview) return;
@@ -2119,7 +2176,7 @@ setInterval(async () => {
   } catch { /* ignore */ }
 }, 2000);
 
-(async () => {
+async function start() {
   if (!token) return render();
   await refresh();
   const current = await api("/api/jobs/current").catch(() => null);
@@ -2129,4 +2186,5 @@ setInterval(async () => {
     setBusy(true);
     pollJob();
   }
-})();
+}
+start();

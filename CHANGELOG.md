@@ -6,6 +6,16 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added (Phase 3)
 
+- **Web UI behind another server** (`ui --listen HOST:PORT --allowed-host NAME --token-file PATH`,
+  and the `SPLAYED_UI_*` environment variables): for Docker, StartOS or a reverse proxy.
+  - It answers only to the allowed Host names, and write requests need a matching `Origin`.
+  - The access token is read from a file (`ui --new-token-file` makes one) and entered on a sign-in
+    screen, kept for that tab only.
+  - Wrong tokens are throttled.
+  - It refuses to listen beyond loopback without allowed hosts and a token file.
+  - The test-only "listen on all interfaces" option is gone; the regtest playground uses proxied
+    mode with its own addresses.
+
 - **`config backend detect`** (and **Detect chain & add** on the Network tab): asks a backend which
   chain it follows by running each chain's identity checks, and with `--add` adds it to that chain.
   Refuses a backend that matches no chain (or more than one). Useful for a node whose flavour you

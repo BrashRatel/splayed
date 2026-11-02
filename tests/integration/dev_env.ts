@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { type CliIO, main } from "../../src/cli/main.ts";
 import { parseDescriptor, REGTEST_NETWORK } from "../../src/core/descriptors.ts";
 import type { ChainId } from "../../src/core/profiles.ts";
-import { startUi } from "../../src/ui/server.ts";
+import { createToken, startUi } from "../../src/ui/server.ts";
 import { CHAINS, copyBlocks, docker, nodesOnPorts, waitReady } from "./cluster.ts";
 import {
   makeRegtestProfile,
@@ -361,12 +361,23 @@ async function ui(flags: Record<string, string>) {
   };
   const port = Number(flags.port ?? UI_PORT);
   const lan = (flags.bind ?? "0.0.0.0") !== "127.0.0.1";
+  // On the LAN the UI runs in proxied mode: it answers only to this machine's own names and
+  // addresses on this port, with a token made for this run.
+  const lanHosts = lan
+    ? [
+      Deno.hostname(),
+      `${Deno.hostname()}.local`,
+      "localhost",
+      "127.0.0.1",
+      ...Deno.networkInterfaces().filter((i) => i.family === "IPv4").map((i) => i.address),
+    ].map((h) => `${h}:${port}`)
+    : undefined;
   const server = startUi({
     dataDir: APP_DIR,
     port,
     run: main,
     baseIO,
-    listenOnAllInterfaces: lan,
+    ...(lan ? { hostname: "0.0.0.0", allowedHosts: lanHosts, token: createToken() } : {}),
     devTools: {
       heights: async () => {
         const out: Record<string, number> = {};
@@ -389,8 +400,9 @@ async function ui(flags: Record<string, string>) {
   console.log("Open that exact URL: it carries the access token. Ctrl+C to stop.");
   console.log(
     lan
-      ? `Test environment: also listening on all interfaces. From the LAN open ` +
-        `http://<this-host>:${server.port}/ with the same #token=... (plain HTTP, so use a ` +
+      ? `Test environment: also listening on all interfaces, answering to ${
+        lanHosts!.join(", ")
+      }. From the LAN open one of those with the same #token=... (plain HTTP, so use a ` +
         `network you trust; --bind 127.0.0.1 keeps it local).`
       : `From another machine, forward the same port first:  ssh -L ${server.port}:127.0.0.1:${server.port} <this-host>\n` +
         `and open http://localhost:${server.port}/#token=...`,

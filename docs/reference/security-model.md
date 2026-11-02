@@ -60,3 +60,21 @@ playground's UI binds to all interfaces by default; it is a test environment onl
 - `src/core/profiles.ts`: pinned replay constants and chain checkpoints.
 - `src/net/`: Tor/SOCKS routing, the no-clearnet-fallback policy, and the HTTP client.
 - `src/ui/server.ts`: the local web UI's access controls.
+
+## Web UI behind another server (proxied mode)
+
+`splayed ui` normally listens on 127.0.0.1 with a one-time token in the URL fragment. For Docker,
+StartOS or a reverse proxy it can run in proxied mode instead (`--listen`, `--allowed-host`,
+`--token-file`):
+
+- **Host names:** only the configured Host names are answered (DNS-rebinding defence), and write
+  requests must come from one of them (`Origin`). `X-Forwarded-*` headers are not trusted.
+- **Token:** the access token comes from a file the server checks at start-up (32+ characters, not
+  readable by other users). It is never printed, never put in a URL query or a cookie, and the page
+  keeps it in sessionStorage for one tab.
+- **No cookies:** there are none, so there's no cross-site request surface.
+- **Wrong tokens** are throttled (5 per minute, then one attempt every 2 s, doubling to 60 s), with
+  no attempted values logged.
+- **TLS** is the proxy's job. Over plain HTTP on a LAN the token travels in the clear.
+- **Defaults:** the server refuses to listen on a non-loopback address without allowed hosts and a
+  token file.
