@@ -48,28 +48,32 @@ Then open <http://localhost:8080/> and paste the token.
 
 ### StartOS
 
-Install the [splayed-startos](https://github.com/BrashRatel/splayed-startos) package. It runs the
-web UI behind the StartOS proxy, reaches public servers over the Tor service, and can use your
-Bitcoin node.
+Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
+[releases page](https://github.com/BrashRatel/splayed/releases), or build it from
+[splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
+StartOS proxy, reaches public servers over the Tor service, and can use your Bitcoin node.
 
-### Release binary (Linux x86_64)
+### Release binary
 
-No Deno install needed; Tor is bundled. Download, verify, then run from the
+No Deno install needed; Tor is bundled (Linux aarch64: install `tor` yourself). Archives are
+published for Linux x86_64 and aarch64, macOS arm64 and x86_64, and Windows x86_64 on the
 [releases page](https://github.com/BrashRatel/splayed/releases) (pre-alpha releases aren't marked
-"latest" on GitHub, so go there directly):
+"latest" on GitHub, so go there directly). Only the Linux x86_64 one has been run from a clean
+extract so far. Download, verify, then run; Linux x86_64 shown, other platforms are the same with
+their archive name:
 
 ```sh
 curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
 curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS
 curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS.asc
-sha256sum -c SHA256SUMS                 # check the download
+sha256sum -c --ignore-missing SHA256SUMS   # check the download
 gpg --verify SHA256SUMS.asc SHA256SUMS  # check it against the key in SECURITY.md
 tar xzf splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
 cd splayed-0.1.0-pre-alpha.1-linux-x86_64
 ```
 
 Then run the same commands as below, with `./splayed` in place of `deno task cli` (and
-`./splayed ui` in place of `deno task ui`). Other platforms: run from source for now.
+`./splayed ui` in place of `deno task ui`).
 
 ### From source (any platform Deno supports)
 

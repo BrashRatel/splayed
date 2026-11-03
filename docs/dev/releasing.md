@@ -13,8 +13,10 @@ deno task package                      # every platform's archive and SHA256SUMS
 `deno task package` (`scripts/package_release.ts`) cross-compiles Linux x86_64 and aarch64, macOS
 arm64 and x86_64 and Windows x86_64 from one Linux machine, adds each platform's pinned Tor bundle
 (Linux aarch64 has none yet and needs `tor` on `PATH`), and writes `.tar.gz` archives (`.zip` for
-Windows) plus `SHA256SUMS`. Sign the sums yourself: `gpg --detach-sign --armor SHA256SUMS`. Only the
-Linux x86_64 archive has been run from a clean extract; run the others on their platforms first.
+Windows) plus `SHA256SUMS`. Add the StartOS packages (below) to `dist/release/`, rebuild the sums
+with `sha256sum` over every file except `SHA256SUMS`, then sign them yourself:
+`gpg --detach-sign --armor SHA256SUMS`. Only the Linux x86_64 archive has been run from a clean
+extract; run the others on their platforms first.
 
 ## Docker and StartOS images
 

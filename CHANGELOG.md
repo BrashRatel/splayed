@@ -2,7 +2,10 @@
 
 All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
-## Unreleased
+## 0.1.0-pre-alpha.1 (2026-11-03)
+
+The tag was re-cut on 2026-11-03 with everything below. The first cut (2026-11-01, listed after this
+section) was never public.
 
 ### Added
 
@@ -378,7 +381,7 @@ Findings from a real-browser check of reorgs, fee bumps and the donor screen.
   FIRST and pending badges are readable in the light theme; the regtest **Mine** buttons track the
   plan you last broadcast, tracked or bumped rather than the newest one.
 
-## 0.1.0-pre-alpha.1 (2026-11-01)
+## 0.1.0-pre-alpha.1, first cut (2026-11-01)
 
 ### Changed
 
