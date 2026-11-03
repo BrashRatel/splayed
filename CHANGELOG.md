@@ -27,6 +27,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Fixed
 
+- **`track` no longer looks like a success when it couldn't look.** A chain with no reachable
+  backend that passes the identity check (Tor down, servers unreachable) was skipped silently: the
+  row showed `?`, the run exited 0 and said "when every split is deep enough, run scan". It now
+  names the chain and the reasons, shows `? (no backend)` and exits 1, with the records unchanged.
+
 - **A gateway or server error on broadcast is no longer recorded as a rejection.** A 502/503/504 or
   408 from the server in front of an Esplora node (or a node still starting up, RPC -28) said
   nothing about the transaction, which may have been relayed, but `broadcast` marked it "rejected",

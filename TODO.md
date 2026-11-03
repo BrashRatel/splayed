@@ -27,9 +27,9 @@ No known high- or medium-impact bugs are open. Highest impact first:
 - [ ] Finish the pre-merge review of the `ui-deploy` branch (first pass done 2026-11-03: the web UI
       server and jobs, token and host handling, UR/CBOR parsing, wipe, plan archive/delete, the
       broadcast send loop, depth and spender logic, scan changes, PSBT merge, the Docker and StartOS
-      wiring; its one real finding is fixed and archived). Not read line by line yet: `cmdTrack` and
-      `assessReorg`, `cmdBump`, the wallet-import builders in `ur_wallet.ts`, and the new UI scripts
-      (`app.js`, `wallet_qr.js`).
+      wiring; its two real findings are fixed and archived). Not read line by line yet: `cmdTrack`
+      and `assessReorg`, `cmdBump`, the wallet-import builders in `ur_wallet.ts`, and the new UI
+      scripts (`app.js`, `wallet_qr.js`).
 
 ### Signers
 

@@ -26,6 +26,11 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **`track` skipped a chain with no usable backend silently (2026-11-03, found in the pre-merge
+  review):** `cmdTrack` ignored the "no backend passed" result, so an unreachable chain showed `?`
+  and the run exited 0 with the "run scan" advice. It now reports the chain and exits 1. Every other
+  caller of `verifiedBackendsFor` already refused or threw. Test in
+  `tests/track_unreachable_test.ts`.
 - **A 5xx/408 broadcast reply was recorded as an explicit rejection (2026-11-03, found in the
   pre-merge review):** a gateway error in front of an Esplora node can hide a send that went
   through, yet `broadcast` held it as "rejected" and the coin counted as unsent.

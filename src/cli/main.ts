@@ -2473,12 +2473,21 @@ async function cmdTrack(
       t.chain === chain && progress.txs[t.file]?.broadcast
     );
     if (!txs.length) continue;
-    const { backend } = await verifiedBackendsFor(config, chain, io, true);
+    const { backend, results } = await verifiedBackendsFor(config, chain, io, true);
+    if (!backend) {
+      // Looking is track's whole job: a chain it couldn't reach is a failure, not a quiet "?".
+      failures.push(
+        `${chain.toUpperCase()}: couldn't check ${txs.length} transaction(s): no backend passed ` +
+          `the chain check (${
+            results.map((r) => `${r.url}: ${r.detail}`).join("; ") || "none set"
+          })`,
+      );
+    }
     try {
       const tip = backend ? await backend.tipHeight() : undefined;
       for (const t of txs) {
         const p = progress.txs[t.file];
-        let conf = "?";
+        let conf = backend ? "?" : "? (no backend)";
         let d: DepthResult | undefined;
         if (backend && tip !== undefined && p.verified) {
           try {
