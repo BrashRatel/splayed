@@ -26,6 +26,16 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **Pre-merge review of the `ui-deploy` branch (2026-11-03):** the web UI server and jobs (Host and
+  Origin checks, constant-time token compare, throttle, CSP, fixed static map, plan-id validation,
+  command allowlist), the `ui` command's listen/token-file/allowed-host handling and the Docker and
+  StartOS wiring, UR/CBOR parsing bounds, the wallet-import builders, `wipe`, plan archive and
+  delete, the broadcast send loop, depth and spender logic, `assessReorg` and all of `cmdTrack`,
+  `cmdBump` (replacements keep the locktime, sequences and PSBT metadata, so replay protection
+  carries through; fee cap, dust and relay-minimum guards), the scan changes, the PSBT merge, and
+  the new UI scripts (no `innerHTML`/`eval`; the page never passes `--yes` and `--all` only behind a
+  confirmation). Two real findings, both fixed (below); the rest held up. Unit (252) and integration
+  (135 steps, real Core, Knots and eCash) suites pass.
 - **`track` skipped a chain with no usable backend silently (2026-11-03, found in the pre-merge
   review):** `cmdTrack` ignored the "no backend passed" result, so an unreachable chain showed `?`
   and the run exited 0 with the "run scan" advice. It now reports the chain and exits 1. Every other
