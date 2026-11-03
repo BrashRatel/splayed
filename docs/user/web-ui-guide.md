@@ -1,7 +1,7 @@
 # Web UI guide
 
-A step-by-step walkthrough of separating your coins using only the browser interface. No
-command-line knowledge is needed beyond the one command that starts it.
+A step-by-step walkthrough of separating your coins, one wallet with a single key, using only the
+browser interface.
 
 > The screenshots use demo data on test chains, so addresses and amounts are not real. Your screens
 > will show your own coins.
@@ -11,8 +11,10 @@ command-line knowledge is needed beyond the one command that starts it.
 [3. Wallet](#3-wallet-add-your-coins-and-destinations) · [4. Coins](#4-coins-find-whats-shared) ·
 [5. Plan](#5-plan-create-the-transactions) · [6. Sign](#6-sign-in-your-wallet) ·
 [7. Verify](#7-verify) · [8. Broadcast](#8-broadcast) · [9. Track](#9-track-and-finish) ·
-[If something goes wrong](#if-something-goes-wrong) ·
-[Advanced](#advanced-stock-hardware-wallets-and-moving-btc-first)
+[If something goes wrong](#if-something-goes-wrong)
+
+Multisig wallets, QR wallet import, alerts and plan housekeeping, and stock hardware wallets are in
+the [Advanced UI guide](advanced-ui-guide.md).
 
 ## Before you start
 
@@ -28,48 +30,36 @@ them**.
 
 **You will need:**
 
-- splayed itself: either the [release binary](https://github.com/BrashRatel/splayed/releases) (Linux
-  x86_64, bundles Tor, no install needed) or [Deno 2.x](https://deno.com) to run from source. A
-  terminal for the one start-up command either way.
+- splayed, installed with one of the options under [Quick start](../../README.md#quick-start) in the
+  README (Docker, StartOS or the release binary).
 - Your wallet's **output descriptor** (an xpub-based, public-keys-only string). Export it from your
   wallet. Never paste a seed or private key; splayed refuses them.
 - **Two destination wallets**, one for ECX and one for XBT, where the separated coins will go. A new
   seed for each is best. You need their descriptors too (ending in `/*`).
 - A **signer** for each chain. ECX works with any wallet, including hardware wallets. XBT needs one
   that supports the `0x21` signature (see [Signers](signers.md)). If you only have a stock hardware
-  wallet, see [Advanced](#advanced-stock-hardware-wallets-and-moving-btc-first).
-- Tor, if you use the default public servers. splayed starts its own if none is running (the release
-  binary bundles it; from source, run `deno task fetch-tor` first or install Tor yourself).
+  wallet, see the [donor routes](advanced-donor-routes.md).
 
 > **Not security-reviewed** (see [TODO.md](../../TODO.md)). Start with one small coin.
 
 ## 1. Start the UI
 
-**Release binary:** in the folder you extracted it to, run `./splayed ui`.
+Install and start splayed as described in the [README Quick start](../../README.md#quick-start). The
+release binary starts the UI with `./splayed ui`; from source, `deno task ui`. Docker and StartOS
+show the UI at their own address.
 
-**From source,** in a terminal in the splayed folder:
-
-```sh
-deno install     # first time only
-deno task ui
-```
-
-Your browser opens the interface. It only listens on your own computer, and the link includes a
-random access token, so open it from that terminal output if it doesn't open automatically. (In
-[Docker](docker.md) or on another server, the page asks for the access token instead: a sign-in
-screen, remembered for that browser tab only.)
+On your own computer the UI opens in your browser, listens only on that computer, and the link
+includes a random access token, so open it from the terminal output if it doesn't open by itself. In
+[Docker](docker.md) or on another server, the page asks for the access token instead.
 
 A **Setup guide** above every tab lists the steps below, ticks off what's done and explains the next
-one; **Guide: on/off** in the tab bar hides it. **Burn history**, in the header next to the theme
-button, starts over: it forgets your wallet, scan results and plans (after a question that defaults
-to No), resets the network confirmation, and keeps your servers and settings. It warns first if sent
-transactions are still unconfirmed.
+one.
 
 ![Setup guide on first launch](../images/web-ui/01-setup-guide.png)
 
 The header always shows two status pills: whether **Tor** is running, and whether your **network
 settings are confirmed**. The **Activity** panel on the right shows what splayed is doing, in plain
-text. Use the **Burn eyes** button if you prefer a light theme (it then reads **Go back**).
+text.
 
 ## 2. Network: decide where queries go
 
@@ -113,21 +103,12 @@ re-confirm.
 Open the **Wallet** tab.
 
 **Import your wallet.** Paste your output descriptor into the box, optionally add a label, and press
-**Import**. Or press **Scan QR** and show it your signer's xpub export (SeedSigner: Export Xpub) or
-your coordinator's wallet QR. For a **multisig** wallet, scan each cosigner's multisig xpub in turn
-(**Add cosigner**), set how many signatures are required, and **check that the first receive address
-matches your coordinator** (e.g. Sparrow) before pressing **Use this**. Without a camera, paste the
-QR text instead.
-
-![Multisig wallet from three SeedSigner exports](../images/web-ui/07-wallet-qr-multisig.png)
+**Import**. Or press **Scan QR** and show it your signer's xpub export (SeedSigner: Export Xpub).
 
 ![Wallet imported](../images/web-ui/08-wallet-imported.png)
 
 splayed lists the first addresses of the wallet. **Check that they match what your wallet shows**
 before going on. If they don't, press **Forget** and re-check the descriptor.
-
-Supported wallet types: single-key (`pkh`, `wpkh`, `sh(wpkh)`, Taproot `tr`) and multisig
-(`sh`/`wsh`/`sh(wsh)` with `multi` or `sortedmulti`).
 
 **Set where the split coins go.** Paste the destination descriptor for ECX and for XBT into their
 cards (or use **Scan QR**) and press **Set destination** on each. Once both are set, the UI moves on
@@ -159,16 +140,6 @@ Each coin shows its state on every chain. The **Status** column tells you what t
 
 Click **details** under a shared coin to see its next steps.
 
-When a later scan finds shared coins that weren't there before (a deposit to an old address, a coin
-beyond the earlier gap limit, a split that left the chain), a red banner at the top of **Coins**
-lists them, their rows get a **new** badge, and once you have a plan a pill in the header points to
-them. Don't spend those coins on BTC until they are split; plan them like the others: **Plan these
-coins** on the banner opens the plan form with only those coins ticked.
-
-![New shared coins after a rescan](../images/web-ui/12-new-shared-coins.png)
-
-![Plan these coins](../images/web-ui/14-plan-these-coins.png)
-
 ## 5. Plan: create the transactions
 
 Open **Plans & signing**.
@@ -182,12 +153,8 @@ Choose:
 - **Batching:** _one coin per transaction_ keeps your coins unlinked (recommended). The other
   options combine coins into fewer transactions, which publicly links their addresses.
 - **Fees (sat/vB):** leave blank for an automatic estimate, or set your own per chain.
-- **Coins:** the coins that are still shared, with the forks each one is split from. Every coin that
-  isn't in a plan yet starts ticked; untick the ones to leave for later. A coin already in a plan
-  shows "in plan …" and whether that plan was broadcast. It starts unticked, because planning it
-  again makes a second transaction spending the same coin and only one of the two can confirm.
-  **Select all**, **Select none** and **Only new shared coins** change the pick; the line under the
-  list shows how many coins are picked and their value.
+- **Coins:** the coins that are still shared. Every coin that isn't in a plan yet starts ticked;
+  untick the ones to leave for later.
 
 Press **Create plan** (it stays disabled, with the reason, while no coin is picked). splayed
 re-checks each coin, fetches its previous transaction, and writes one unsigned file (PSBT) per
@@ -228,12 +195,6 @@ Then bring each **signed** transaction back:
 ![Signed files uploaded](../images/web-ui/17-signed-uploaded.png)
 
 Each uploaded row shows a green **received** note. Do all rows before verifying.
-
-**Multisig:** each cosigner signs the same unsigned file, and you upload (or scan) each one's result
-in turn. The signatures are combined, and the row shows how many it has ("1 of 2 signatures", "needs
-1 more signature"). Verify only passes once enough cosigners have signed. Uploading the same
-cosigner twice changes nothing. On the command line, save each cosigner's file next to the original
-as `<name>.signed.psbt` (any names); `splayed verify` combines the files for the same transaction.
 
 ## 7. Verify
 
@@ -294,45 +255,24 @@ be spent normally from your original wallet.
 
 ## If something goes wrong
 
-- **A banner appears above the table saying REORG or CONFLICT.** A confirmed split changed
+- **A banner appears above the table saying REORG, CONFLICT or DROPPED.** A split you sent changed
   (re-mined, dropped, or its coin was spent another way). Leave the BTC copies alone and read
-  [Recovery](recovery.md#reorgs). A dropped split is sent again with **Broadcast verified**. Once
-  the split is confirmed deep enough again, the banner turns grey and says **Resolved**. An alert
-  that can't resolve by itself (a stranger's spend, a dropped split you won't send again) can be
-  muted with **Acknowledge alerts…** once you have dealt with it; it then turns grey and says
-  **Acknowledged**. **Archive** acknowledges a plan's alerts too.
-
-  ![A DROPPED alert](../images/web-ui/24-alert-dropped.png)
-- **A transaction is stuck unconfirmed.** Use **Fee bump…** on its row (or **Fee bump all
-  unconfirmed…**) to create a higher-fee replacement. Sign, verify and broadcast the new plan
-  exactly as above. See [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).
+  [Recovery](recovery.md#reorgs); alerts are explained in the
+  [Advanced UI guide](advanced-ui-guide.md#alerts).
+- **A transaction is stuck unconfirmed.** Use **Fee bump…** on its row to create a higher-fee
+  replacement. Sign, verify and broadcast the new plan exactly as above. See
+  [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).
 - **A coin stays `pending` or `unverified`.** Wait and scan again; if it persists, the server can't
   report enough detail. Adding a node with `txindex=1` helps (see
   [Network and privacy](network-and-privacy.md#using-your-own-nodes)).
 - **Verify says a signature isn't `0x21`.** Your XBT signer ignored the request. Use one from
   [Signers](signers.md).
-
-**Tidying up.** **Archive** on a plan moves it to **Archived plans** at the bottom of the tab (kept
-on disk; **Restore** brings it back). **Delete…** removes it for good, and is refused while any of
-its transactions was sent and isn't confirmed yet.
-
-![Archived plans](../images/web-ui/25-archived-plans.png)
-
-## Advanced: stock hardware wallets and moving BTC first
-
-Switch **Advanced** on at the right of the tab bar to reveal a **Donors** tab.
-
-![Donors tab](../images/web-ui/26-donors-tab.png)
-
-A **donor** is a coin that exists on only one chain. Spending it in the same transaction makes the
-transaction invalid everywhere else, so a normal wallet signature is enough. This lets a **stock
-hardware wallet** do the XBT step, and lets you move your **BTC** copy first. Import the donor
-wallet, scan it, tick donors, then **Create plan with donors**. Donors have strict origin rules and
-each one publicly links the donor wallet to your coins; read
-[Advanced donor routes](advanced-donor-routes.md) before using them.
+- **Something else:** multisig wallets, coins that show up in a later scan, starting over, archiving
+  plans and the Donors tab are in the [Advanced UI guide](advanced-ui-guide.md).
 
 ## Related
 
+- [Advanced UI guide](advanced-ui-guide.md): multisig, alerts, housekeeping, donors.
 - [Web UI reference](web-ui.md) for the security model of the interface.
 - [Signers](signers.md), [Network and privacy](network-and-privacy.md), [Recovery](recovery.md).
 - The same steps from the command line: [User guide](guide.md).

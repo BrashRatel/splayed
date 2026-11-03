@@ -34,6 +34,24 @@ last**:
 
 ## Quick start
 
+### Docker
+
+Runs the web UI in a container with Tor inside; your data lives in a volume. See
+[Docker](docs/user/docker.md).
+
+```sh
+docker compose -f docker/compose.yml up -d --build
+docker compose -f docker/compose.yml exec splayed cat /data/ui-token   # your access token
+```
+
+Then open <http://localhost:8080/> and paste the token.
+
+### StartOS
+
+Install the [splayed-startos](https://github.com/BrashRatel/splayed-startos) package. It runs the
+web UI behind the StartOS proxy, reaches public servers over the Tor service, and can use your
+Bitcoin node.
+
 ### Release binary (Linux x86_64)
 
 No Deno install needed; Tor is bundled. Download, verify, then run from the
@@ -111,7 +129,8 @@ described in [SECURITY.md](SECURITY.md).
 
 ## Project
 
-Open work and release blockers: [TODO.md](TODO.md). History: [CHANGELOG.md](CHANGELOG.md).
+Open work: [TODO.md](TODO.md) (finished items: [dev archive](docs/dev/todo-archive.md)). History:
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Credits and license
 

@@ -5,17 +5,18 @@ path.
 
 ## I want to separate my coins
 
-| Doc                                                    | Read it for                                                      |
-| ------------------------------------------------------ | ---------------------------------------------------------------- |
-| [Web UI guide](user/web-ui-guide.md)                   | **Start here:** step-by-step with screenshots, no CLI            |
-| [User guide (CLI)](user/guide.md)                      | The same walkthrough from the command line                       |
-| [Signers](user/signers.md)                             | Which wallet signs which chain; air-gapped QR                    |
-| [Network and privacy](user/network-and-privacy.md)     | Tor, your own nodes, what is revealed                            |
-| Run it in Docker                                       | [Docker](user/docker.md)                                         |
-| Run it on StartOS                                      | [splayed-startos](https://github.com/BrashRatel/splayed-startos) |
-| [Web UI](user/web-ui.md)                               | The browser interface                                            |
-| [Recovery](user/recovery.md)                           | Reorgs, fee bumps (RBF), CPFP                                    |
-| [Advanced donor routes](user/advanced-donor-routes.md) | Stock hardware wallets for XBT; moving BTC first                 |
+| Doc                                                              | Read it for                                               |
+| ---------------------------------------------------------------- | --------------------------------------------------------- |
+| [Web UI guide](user/web-ui-guide.md)                             | **Start here:** step-by-step with screenshots, no CLI     |
+| [User guide (CLI)](user/guide.md)                                | The same walkthrough from the command line                |
+| [Signers](user/signers.md)                                       | Which wallet signs which chain; air-gapped QR             |
+| [Network and privacy](user/network-and-privacy.md)               | Tor, your own nodes, what is revealed                     |
+| [Docker](user/docker.md)                                         | Run the web UI in a container, with Tor inside            |
+| [splayed-startos](https://github.com/BrashRatel/splayed-startos) | Run it on a StartOS server (separate repo)                |
+| [Web UI](user/web-ui.md)                                         | The browser interface                                     |
+| [Recovery](user/recovery.md)                                     | Reorgs, fee bumps (RBF), CPFP                             |
+| [Advanced donor routes](user/advanced-donor-routes.md)           | Stock hardware wallets for XBT; moving BTC first          |
+| [Advanced UI guide](user/advanced-ui-guide.md)                   | Multisig, QR wallet import, plan housekeeping, Donors tab |
 
 ## I want to understand or audit it
 
@@ -37,8 +38,6 @@ path.
 
 ## Project files
 
-[TODO.md](../TODO.md) (open work and release blockers), [CHANGELOG.md](../CHANGELOG.md),
-[SECURITY.md](../SECURITY.md).
-
-Work in progress on the `ui-deploy` branch:
-[plan, status and handoff notes](dev/ui-deploy-handoff.md).
+[TODO.md](../TODO.md) (open work), [dev archive](dev/todo-archive.md) (finished work, including the
+[`ui-deploy` branch handoff notes](dev/archive/ui-deploy-handoff.md)),
+[CHANGELOG.md](../CHANGELOG.md), [SECURITY.md](../SECURITY.md).

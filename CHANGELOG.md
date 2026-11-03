@@ -51,9 +51,10 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 [`BrashRatel/splayed-startos`](https://github.com/BrashRatel/splayed-startos) packs this branch for
 StartOS (SDK 3.1.1, x86_64 and aarch64). It is at `v0.1.0:3`: the Bitcoin node is switched on at
 first install when one is already installed, and its check retries every 20 s until the node answers
-(no restart after the RPC-login task); a **Burn history** action runs `splayed wipe`. Run on an x86
-StartOS 0.4.1 device (Tor, local node and the first steps worked); the `:3` build is waiting for a
-device test.
+(no restart after the RPC-login task); a **Burn history** action runs `splayed wipe`. Tested on an
+x86 StartOS 0.4.1 device: Web UI and token, the node and its retry loop, **Burn history**, a scan
+over Tor, and backup and restore all work. Still open: an aarch64 build, a real icon and a first-run
+view of the package's instructions.
 
 ### Added (Phase 4)
 

@@ -42,7 +42,7 @@ The most sensitive parts:
 
 See [TODO.md](TODO.md). In short:
 
-- Nothing has moved real coins on mainnet yet, and the code has not had an independent security
-  review.
+- The code has not had an independent security review, and only one real coin has been split on
+  mainnet.
 - Backends have been tested against regtest nodes and a few default servers, not against every kind
   of real server.

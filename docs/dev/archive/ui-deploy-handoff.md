@@ -1,5 +1,9 @@
 # `ui-deploy` branch: plan, status and handoff notes
 
+> **Archived (2026-11-03).** This is a snapshot of the `ui-deploy` branch plan and status as of
+> 2026-11-02, kept for history. It is no longer updated: everything still open from it is tracked in
+> [TODO.md](../../../TODO.md), and finished work is in [todo-archive.md](../todo-archive.md).
+
 For whoever picks this branch up next (person or agent). Updated 2026-11-02.
 
 The branch adds UI and deployment work on top of `main` (`f948971`). **Merge it into `main` only
@@ -52,16 +56,18 @@ Decisions made along the way:
      and fixed there: a second cosigner's signed PSBT replaced the first (now merged; 3-of-5
      tested). Found and not fixed: multisig PSBTs carry mainnet xpub version bytes in
      `PSBT_GLOBAL_XPUB`, which Shrike refuses on regtest and Sparrow most likely does too (see
-     TODO.md).
+     [TODO.md](../../../TODO.md)).
    - **StartOS:** `v0.1.0:0` was installed on a real x86 StartOS 0.4.1 device and worked (Web UI,
      token, Tor scan, local node on the second try). `v0.1.0:3` (node on by default when Bitcoin is
-     installed, retry loop, **Burn history** action) is built and pushed, not yet tested on a
-     device; `make arm` and backup/restore are still open. The build needs `make`, `node`/`npm`,
-     `jq`, `start-cli` and a packaging workspace (`start-cli s9pk init-workspace` in the folder that
-     holds the repo). Check first: the Web UI answers (no 403 from the Host check behind the StartOS
-     proxy), Show UI token and sign-in, a scan over the Tor service, and with Use the Bitcoin node
-     the bitcoind task, then the node added to the right chain. Also back up and restore. The icon
-     is a placeholder drawn for the package. The device is an x86 StartOS 0.4.1 running on mainnet.
+     installed, retry loop, **Burn history** action) was tested on the same device and works,
+     including Show/Reset UI token, a Tor scan, and backup/restore; `make arm`, a real icon and a
+     first-run view of the package's instructions are still open. The build needs `make`,
+     `node`/`npm`, `jq`, `start-cli` and a packaging workspace (`start-cli s9pk init-workspace` in
+     the folder that holds the repo). Check first: the Web UI answers (no 403 from the Host check
+     behind the StartOS proxy), Show UI token and sign-in, a scan over the Tor service, and with Use
+     the Bitcoin node the bitcoind task, then the node added to the right chain. Also back up and
+     restore. The icon is a placeholder drawn for the package. The device is an x86 StartOS 0.4.1
+     running on mainnet.
    - **One final review of the whole branch**, focusing on track/broadcast and on A1 (the network
      boundary).
 

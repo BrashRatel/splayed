@@ -392,6 +392,12 @@ const archived = page.locator(".card", { hasText: "Archived plans" });
 await archived.locator("summary").click();
 await shotOf("25-archived-plans", archived);
 
+// ---- Burn history: the question, answered No ----
+await page.click("#wipe-all");
+await page.waitForSelector("#modal:not(.hidden)");
+await shot("27-burn-history", false);
+await page.click("#modal-no");
+
 // ---- Advanced: donors ----
 await page.click("#advanced-toggle");
 await tab("donors");

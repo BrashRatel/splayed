@@ -1,7 +1,7 @@
 # Security model
 
-To report a vulnerability, see [SECURITY.md](../../SECURITY.md). Known gaps and release blockers are
-in [TODO.md](../../TODO.md).
+To report a vulnerability, see [SECURITY.md](../../SECURITY.md). Known gaps are in
+[TODO.md](../../TODO.md).
 
 ## Keyless
 

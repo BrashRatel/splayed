@@ -173,5 +173,4 @@ asks again, because `track` stops following it; with `--yes` it refuses in that 
 
 ## Before real coins
 
-Read [TODO.md](../../TODO.md). It lists the release gates and open work (live tests with real
-signers, real Tor runs, confirming checkpoints). Start with one small coin.
+Read [TODO.md](../../TODO.md) for open work and known issues. Start with one small coin.

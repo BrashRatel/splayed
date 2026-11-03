@@ -17,6 +17,35 @@ deno task cli plan --xbt-signer knots
 
 Valid names: `knots`, `sparrow-blake2b`, `shrike`, `embit`, `privkeyio-firmware`.
 
+## Wallets tested
+
+"Mainnet" means a real coin was split with it, verified and broadcast. "Regtest" means it signed our
+PSBTs on the [regtest playground](../dev/regtest-playground.md). Anything not listed has not been
+tried; please send a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
+
+**Software**
+
+| Wallet                  | Chain | Tested  | Notes                                                              |
+| ----------------------- | ----- | ------- | ------------------------------------------------------------------ |
+| Sparrow (BLAKE2b build) | XBT   | Regtest | Single-sig. Could not open a multisig PSBT on regtest (see below). |
+| Shrike                  | XBT   | Regtest | Single-sig. Refuses a multisig PSBT on regtest (see below).        |
+| Bitcoin Knots wallet    | XBT   | Not yet |                                                                    |
+| embit                   | XBT   | Not yet |                                                                    |
+
+**Hardware**
+
+| Wallet                                                       | Chain | Tested  | Notes                                                                                   |
+| ------------------------------------------------------------ | ----- | ------- | --------------------------------------------------------------------------------------- |
+| SeedSigner, stock firmware                                   | ECX   | Mainnet | Animated QR both ways. Also 2-of-3 multisig and QR wallet import on regtest.            |
+| SeedSigner, [unified-sighash fork][fork] (`p10.img`, v0.8.7) | XBT   | Mainnet | Experimental and unaudited. Plain-signing firmware can't make 0x21.                     |
+| Jade, Keystone, Passport                                     | ECX   | Not yet | Animated QR (`crypto-psbt`) should work; untried.                                       |
+| Coldcard, Trezor, Ledger                                     | ECX   | Not yet | Need to accept locktime 499,999,998 and keep the sequences. Can't sign XBT (see above). |
+
+[fork]: https://github.com/privkeyio/seedsigner
+
+Multisig PSBTs on a non-mainnet network carry mainnet xpub version bytes in their global xpub
+fields, which some wallets refuse. Mainnet is not affected.
+
 ## Stock hardware wallets and XBT
 
 They can't make 0x21 signatures. Options:
@@ -68,9 +97,9 @@ ECX marker needs:
    and a plain `SIGHASH_ALL`/`DEFAULT` signature.
 
 **XBT** needs a signer that makes `SIGHASH_ALL|SIGHASH_UNIFIED` (0x21) signatures. Stock SeedSigner
-firmware can't do this. `--xbt-signer privkeyio-firmware` in `planner.ts` (`src/core/planner.ts`)
-refers to the SIGHASH_UNIFIED-aware SeedSigner fork at
-[github.com/privkeyio/seedsigner](https://github.com/privkeyio/seedsigner). Tested with release
+firmware can't do this. Use the SIGHASH_UNIFIED-aware fork at
+[github.com/privkeyio/seedsigner](https://github.com/privkeyio/seedsigner) (the signer name
+`privkeyio-firmware`). Tested with release
 [`v0.8.7-unified-sighash.6`](https://github.com/privkeyio/seedsigner/releases/tag/v0.8.7-unified-sighash.6)
 ("Take embit 0.8.0-unified-sighash.4"), the `p10.img` asset from that release. It is marked
 **experimental and unaudited** — test with the smallest coin first, and plan with
@@ -86,6 +115,3 @@ refers to the SIGHASH_UNIFIED-aware SeedSigner fork at
 6. `verify` should report every XBT signature as `SIGHASH_ALL|UNIFIED` (0x21), verified under the
    unified digest. If it instead reports a plain `SIGHASH_ALL` signature, the firmware silently
    dropped the 0x21 request — don't broadcast; such a transaction would also be valid on BTC.
-
-Confirmed working on mainnet (2026-11-01): both splits of a real coin, verified and broadcast, with
-the XBT split reaching 2 confirmations.

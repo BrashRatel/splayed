@@ -1,9 +1,9 @@
 # Regenerating the doc screenshots
 
-The images in `docs/images/web-ui/` (used by the [Web UI guide](../user/web-ui-guide.md)) are
-produced by a script that drives the real web UI against in-memory test chains, the same fakes as
-`deno task demo-ui`. No network, Docker or real coins are involved. Re-run it whenever the UI
-changes.
+The images in `docs/images/web-ui/` (used by the [Web UI guide](../user/web-ui-guide.md) and the
+[Advanced UI guide](../user/advanced-ui-guide.md)) are produced by a script that drives the real web
+UI against in-memory test chains, the same fakes as `deno task demo-ui`. No network, Docker or real
+coins are involved. Re-run it whenever the UI changes.
 
 ## Run it
 
@@ -12,7 +12,7 @@ changes.
 deno run -A npm:playwright@1.64.1 install chromium
 
 # regenerate all screenshots (default output: docs/images/web-ui/)
-deno run -A --no-lock scripts/docs_screenshots.ts [output-dir]
+deno run -A scripts/docs_screenshots.ts [output-dir]
 ```
 
 Playwright is pinned in the script (`PLAYWRIGHT`), because each Playwright release drives one
@@ -20,15 +20,18 @@ browser build. When bumping it, install that release's browser. If you already h
 Chromium or `chrome-headless-shell` and can't download Playwright's own, point the script at it:
 
 ```sh
-SPLAYED_SHOTS_CHROMIUM=/path/to/chrome-headless-shell deno run -A --no-lock scripts/docs_screenshots.ts
+SPLAYED_SHOTS_CHROMIUM=/usr/bin/chromium deno run -A scripts/docs_screenshots.ts
 ```
 
-`--no-lock` keeps Playwright out of `deno.lock`; it is loaded at run time and is not a project
-dependency. A full run takes a few minutes: the scan uses the default jitter, so the progress boxes
-can be captured.
+Run it with the project's lockfile, not `--no-lock`: without it Deno can resolve newer npm versions
+than the lock pins and refuse them under the minimum-dependency-age policy. Playwright is loaded at
+run time and is not a project dependency, and the run leaves `deno.lock` unchanged. A full run takes
+a few minutes: the scan uses the default jitter, so the progress boxes can be captured.
 
 After a run, shrink the PNGs before committing (UI screenshots lose nothing visible at 256 colours),
-e.g. with `pngquant --force --ext .png 256 docs/images/web-ui/*.png`.
+e.g. with `pngquant --force --ext .png 256 docs/images/web-ui/*.png`, or with Pillow
+(`Image.open(f).convert("RGB").quantize(256, dither=Image.Dither.NONE).save(f, optimize=True)`). Raw
+output is about 7 MB; shrunk it is about 2.5 MB.
 
 On Linux, Chromium needs system libraries. If it fails to start with "error while loading shared
 libraries", install them with `deno run -A npm:playwright install-deps` (needs sudo), or use your
@@ -46,14 +49,14 @@ whole route in a headless browser:
 4. new shared coins after a deposit, and "Plan these coins";
 5. the plan form with the coin picker, the QR export, signing with test keys, upload and verify;
 6. broadcast: TEST FIRST, the question about the rest, then everything;
-7. tracking, a DROPPED alert, archived plans, and the Donors tab.
+7. tracking, a DROPPED alert, archived plans, the Burn history question, and the Donors tab.
 
 It writes one PNG per step, named `NN-name.png`.
 
 ## Changing a screenshot
 
 - Add or rename a step in `scripts/docs_screenshots.ts` (the `shot("NN-name")` calls), then update
-  the image references in `docs/user/web-ui-guide.md`.
+  the image references in `docs/user/web-ui-guide.md` or `docs/user/advanced-ui-guide.md`.
 - Selectors use the visible button labels, so a renamed button in `src/ui/static/app.js` needs the
   same change in the script.
 - The images show demo data (fake chains, test keys). Don't capture a real wallet.
