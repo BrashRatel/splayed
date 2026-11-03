@@ -24,7 +24,8 @@
   --muted: #5d6673;
   color-scheme: light;
 }
-#theme-toggle {
+#theme-toggle,
+#wipe-all {
   background: none;
   border: 1px solid var(--line);
   color: var(--text);

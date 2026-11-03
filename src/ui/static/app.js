@@ -87,7 +87,7 @@ function setGuide(on) {
   render();
 }
 document.getElementById("guide-toggle").addEventListener("click", () => setGuide(!guideOn));
-// "Get amnesia" is the CLI's `wipe`: it lists what goes, then asks (No is the default button).
+// "Burn history" is the CLI's `wipe`: it lists what goes, then asks (No is the default button).
 document.getElementById("wipe-all").addEventListener("click", () => run(["wipe"]));
 
 // ---------- helpers ----------
@@ -279,7 +279,7 @@ async function pollJob() {
       state.planSel = null;
       setGuide(true);
       selectTab("network");
-      flash("Amnesia complete. Start again: confirm the network settings.");
+      flash("History burned. Start again: confirm the network settings.");
     }
     return;
   }

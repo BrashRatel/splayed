@@ -60,7 +60,7 @@ random access token, so open it from that terminal output if it doesn't open aut
 screen, remembered for that browser tab only.)
 
 A **Setup guide** above every tab lists the steps below, ticks off what's done and explains the next
-one; **Guide: on/off** in the tab bar hides it. **Get amnesia**, in the header next to the theme
+one; **Guide: on/off** in the tab bar hides it. **Burn history**, in the header next to the theme
 button, starts over: it forgets your wallet, scan results and plans (after a question that defaults
 to No), resets the network confirmation, and keeps your servers and settings. It warns first if sent
 transactions are still unconfirmed.

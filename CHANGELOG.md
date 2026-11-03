@@ -6,7 +6,7 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
-- **`splayed wipe` and a Get amnesia button** in the web UI header (next to the theme button, which
+- **`splayed wipe` and a Burn history button** in the web UI header (next to the theme button, which
   now reads Burn eyes / Go back): forgets the wallet, destinations, scan results and all plans, and
   resets the network confirmation, keeping the network settings and any servers you added. It asks
   first (No is the default), warns about sent transactions that aren't confirmed yet, and with

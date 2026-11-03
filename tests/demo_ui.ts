@@ -3,7 +3,7 @@ import { HDKey } from "@scure/bip32";
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { type CliIO, main } from "../src/cli/main.ts";
 import { parseDescriptor } from "../src/core/descriptors.ts";
-import { startUi } from "../src/ui/server.ts";
+import { createToken, startUi } from "../src/ui/server.ts";
 import { fakeChain, FakeEsploraTransport, fund, spendReal } from "./fakes.ts";
 
 const seed = (w: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(w));
@@ -53,12 +53,27 @@ for (
   if (code) console.error("step failed", a[0]);
 }
 const { out: _o, err: _e, confirm: _c, ...baseIO } = io;
+// DEMO_LAN=1: also listen on the LAN (plain HTTP, fake chains, a random token for this run). The
+// UI then answers only to this machine's own names and addresses on the port.
+const lan = Deno.env.get("DEMO_LAN") === "1";
+const port = 8765;
+const lanHosts = lan
+  ? [
+    Deno.hostname(),
+    `${Deno.hostname()}.local`,
+    "localhost",
+    "127.0.0.1",
+    ...Deno.networkInterfaces().filter((i) => i.family === "IPv4").map((i) => i.address),
+  ].map((h) => `${h}:${port}`)
+  : undefined;
 const ui = startUi({
   dataDir: dir,
   run: main,
   baseIO,
-  port: 8765,
-  token: "demo-token-demo-token-demo-token-demo-tok",
+  port,
+  token: lan ? createToken() : "demo-token-demo-token-demo-token-demo-tok",
+  ...(lan ? { hostname: "0.0.0.0", allowedHosts: lanHosts } : {}),
 });
 console.log(ui.url);
+if (lan) console.log(`LAN: answers to ${lanHosts!.join(", ")} (same #token=...)`);
 await ui.server.finished;
