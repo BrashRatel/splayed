@@ -21,6 +21,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Fixed
 
+- **A TEST FIRST transaction that can't go out in this run no longer leaves the rest of its chain
+  waiting.** When it is held back (a conflict, an earlier send that can't be checked, a gate or
+  donor problem), `broadcast` now says where it is and asks about the rest straight away, like in
+  every other state: No is recommended, `--yes` doesn't answer, `--all` still sends everything. A
+  test found already confirmed or in the mempool lets the rest go in the same run, instead of asking
+  you to run `broadcast` again.
+
 - **A bare 32-byte hex key in a descriptor is refused** (it was accepted as an x-only key in
   `tr()`). It looks the same as a raw private key, so a pasted secret wasn't recognised as one. Use
   an xpub or a 33-byte compressed public key.

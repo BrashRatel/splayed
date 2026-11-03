@@ -158,14 +158,12 @@ Deno.test("finding 6: broadcast after a lost reply records a send that got throu
     assertEquals(await s.run("broadcast", s.id, "--yes"), 0, `${kind}: ${s.err.join("\n")}`);
     const p = (await progressOf(s.planDir)).txs[test.file];
     assertEquals(p.broadcast!.status, "accepted", `${kind}: ${s.out.join("\n")}`);
-    assertEquals(s.chains.ecx.broadcasts!.length, n, `${kind}: not sent again`);
+    assertEquals(s.chains.ecx.broadcasts!.length, n + 1, `${kind}: the test itself not sent again`);
     const out = s.out.join("\n");
     assert(out.includes("already on chain"), `${kind}: ${out}`);
-    // Finding 7a: the rest is told what happened to the test, not "goes first, in this run".
+    // The test is found already confirmed, so the rest goes in the same run (--yes answers).
     assert(!out.includes("goes first, alone, in this run"), `${kind}: ${out}`);
-    assert(out.includes(`(${test.file}) is already on the network`), `${kind}: ${out}`);
-    // The next run asks about the rest as usual, and --yes answers: the test is confirmed.
-    assertEquals(await s.run("broadcast", s.id, "--yes"), 0, `${kind}: ${s.err.join("\n")}`);
+    assert(out.includes("TEST FIRST: the test spend went through."), `${kind}: ${out}`);
     assertEquals(s.chains.ecx.broadcasts!.length, n + 1, kind);
   }
 });
@@ -186,10 +184,12 @@ Deno.test("finding 6: node RPC without txindex that can't see the earlier send h
   spendReal(s.chains.ecx, testId, 0, s.chains.ecx.tip, 3);
   await s.useBackend("rpc");
   s.out.length = 0;
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  // The test can't be seen, so --yes doesn't answer for the rest: held, with the reason.
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 1, s.err.join("\n"));
   const p = (await progressOf(s.planDir)).txs[test.file];
   assertEquals(p.broadcast!.status, "unknown");
   assert(s.out.join("\n").includes("this backend can't tell"), s.out.join("\n"));
+  assert(s.out.join("\n").includes("--yes doesn't answer for ECX"), s.out.join("\n"));
   assertEquals(s.chains.ecx.broadcasts!.length, 1);
 });
 

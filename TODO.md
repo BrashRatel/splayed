@@ -10,10 +10,6 @@ No known high-impact bugs are open. Highest impact first:
 
 ### Medium
 
-- [ ] **A TEST FIRST transaction that can't go out this run holds the rest of its chain** (gate or
-      donor problems, or node RPC without `txindex` that can't tell whether an unclear send got
-      through) until it can, or until `--all`. Offer the TEST FIRST question in that case too, as
-      for every other state.
 - [ ] **Locked inputs.** Script timelocks (CLTV) break the ECX marker and are unsupported. Make sure
       the tool says so clearly instead of failing obscurely.
 - [ ] **Multisig PSBTs on a non-mainnet network: wallets refuse the global xpubs.** The plan's PSBT

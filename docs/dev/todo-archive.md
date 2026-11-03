@@ -26,6 +26,11 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **A TEST FIRST transaction that can't go out held the rest of its chain (2026-11-03):** it waited
+  for a second run or `--all`. `broadcast` now describes the test's state and asks about the rest in
+  the same run (`prepare()` in `cmdBroadcast`, `src/cli/main.ts`); a test already on the network
+  releases the rest at once. Tests in `tests/test_first_yes_test.ts` and
+  `tests/backends_e2e_test.ts`.
 - **`tr(<64 hex>)` in descriptors (2026-11-03):** `parseDescriptor` took a bare 32-byte hex key in
   `tr()` as an x-only public key, so a pasted hex private key wasn't recognised. A bare 32-byte hex
   key is now refused everywhere with a keyless explanation (it can't be told from a private key);

@@ -1966,7 +1966,8 @@ async function cmdBroadcast(
         }
       }
       for (const t of allowed) held.delete(t);
-      for (const t of allowed) {
+      /** Checks one transaction and queues it for sending, or says in `held` why not. */
+      const prepare = async (t: PlannedTx): Promise<void> => {
         const v = progress.txs[t.file].verified!;
         // Re-verify the exact bytes about to be sent.
         const again = verifySigned(t, await ownPsbt(dir, t), { tx: parseTx(v.finalHex) });
@@ -1989,7 +1990,7 @@ async function cmdBroadcast(
                 (error as Error).message
               }. Not sent again`,
             );
-            continue;
+            return;
           }
           if (d.state === "confirmed" || d.state === "mempool") {
             const where = d.state === "confirmed" ? "on chain" : "in the mempool";
@@ -2001,7 +2002,7 @@ async function cmdBroadcast(
               detail: `already ${where}`,
             };
             held.set(t, `already ${where}: an earlier send got through`);
-            continue;
+            return;
           }
           if (d.state === "unknown") {
             held.set(
@@ -2010,7 +2011,7 @@ async function cmdBroadcast(
                 "without txindex can't see a confirmed transaction once its outputs are spent). " +
                 "Not sent again; check with Esplora, Electrum or a node with txindex",
             );
-            continue;
+            return;
           }
           // absent: its inputs are unspent, send it (checked again below). conflict: the input
           // check below works out whose spend it was.
@@ -2039,7 +2040,7 @@ async function cmdBroadcast(
               }`,
             );
             held.set(t, `held back until the coin is spent and deep on BTC and ECX (see above)`);
-            continue;
+            return;
           }
           // Final replay check on the user's own nodes, now that BTC and ECX should reject it.
           const nodes = await ownNodes(config, io);
@@ -2066,7 +2067,7 @@ async function cmdBroadcast(
             held.set(t, `already ${mine.state === "confirmed" ? "on chain" : "in the mempool"}`);
             // An earlier send got through even if its reply was lost: the original is replaced.
             await markReplaced(config, t, plan.id, v.txid);
-            continue;
+            return;
           }
           const original = await confirmationDepth(send, t, t.replaces.txid, tip);
           if (original.state === "confirmed" || original.state === "conflict") {
@@ -2081,10 +2082,10 @@ async function cmdBroadcast(
             };
             io.err(`${t.file}: ${progress.txs[t.file].broadcast!.detail}; not sending`);
             held.set(t, progress.txs[t.file].broadcast!.detail!);
-            continue;
+            return;
           }
           queue.push({ t, hex: v.finalHex, txid: v.txid, send });
-          continue;
+          return;
         }
         // Inputs must still be unspent on this chain (or spent by this very transaction).
         let skip = false;
@@ -2131,29 +2132,45 @@ async function cmdBroadcast(
           }
         }
         if (!skip) queue.push({ t, hex: v.finalHex, txid: v.txid, send });
-      }
+      };
+      for (const t of allowed) await prepare(t);
       if (alone) {
         // Say what actually happens to the TEST FIRST transaction, and so to the rest.
         const test = alone;
         const rest = pending.filter((t) => t !== test);
         const queued = queue.some((q) => q.t === test);
-        const testWhy = held.get(test) ?? "see above";
-        const why = queued
-          ? `waits: the TEST FIRST transaction (${test.file}) goes first, alone, in this run. Run ` +
-            "broadcast again to send the rest (it says where the test is and asks), or pass --all"
-          : /^already (on chain|in the mempool)/u.test(testWhy)
-          ? `waits: the TEST FIRST transaction (${test.file}) is already on the network ` +
-            `(${testWhy}). Run broadcast again to send the rest (it says where the test is and ` +
-            "asks), or pass --all"
-          : `waits for the TEST FIRST transaction (${test.file}), which is not sent in this run ` +
-            `(${testWhy}). Run broadcast again once it can go, or pass --all to send everything ` +
-            "without it";
-        for (const t of rest) held.set(t, why);
-        if (rest.length && queued) {
-          io.out(
-            `${chain.toUpperCase()}: sending only the TEST FIRST transaction this time; the rest ` +
-              "waits for the next broadcast.",
-          );
+        if (queued) {
+          for (const t of rest) {
+            held.set(
+              t,
+              `waits: the TEST FIRST transaction (${test.file}) goes first, alone, in this run. ` +
+                "Run broadcast again to send the rest (it says where the test is and asks), or " +
+                "pass --all",
+            );
+          }
+          if (rest.length) {
+            io.out(
+              `${chain.toUpperCase()}: sending only the TEST FIRST transaction this time; the ` +
+                "rest waits for the next broadcast.",
+            );
+          }
+        } else if (rest.length) {
+          // The TEST FIRST transaction can't go out in this run (a gate or donor problem, a
+          // conflict, an earlier send that can't be checked): ask about the rest like in every
+          // other state, with its status in the question, instead of leaving the chain stuck.
+          const status = await describeTestFirst({
+            dataDir: config.dataDir,
+            plan,
+            progress,
+            chain,
+            backend: send,
+          });
+          if (status) {
+            asks.set(chain, status);
+            for (const t of rest) gated.add(t);
+          }
+          for (const t of rest) held.delete(t);
+          for (const t of rest) await prepare(t);
         }
       }
     }

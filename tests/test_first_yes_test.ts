@@ -101,16 +101,14 @@ Deno.test("--yes with a TEST FIRST superseded by another plan: the rest is not s
   await signAll(p2Dir, JSON.parse(await Deno.readTextFile(join(p2Dir, "plan.json"))));
   assertEquals(await s.run("verify", p2), 0, s.err.join("\n"));
   assertEquals(await s.run("broadcast", p2, "--all", "--yes"), 0, s.err.join("\n"));
-  // First run: the TEST FIRST transaction finds its coin spent by that plan.
+  // First run: the TEST FIRST transaction finds its coin spent by that plan. It can't go out, so
+  // the rest is asked about right away (with --yes: held), not left waiting for a second run.
   s.out.length = 0;
-  assertEquals(await s.run("broadcast", s.id, "--yes"), 0, s.err.join("\n"));
+  assertEquals(await s.run("broadcast", s.id, "--yes"), 1, s.err.join("\n"));
   assertEquals((await progressOf(s.planDir)).txs[test.file].broadcast!.status, "superseded");
-  // Finding 7a: the rest says why it waits, not "goes first, in this run".
   const out = s.out.join("\n");
-  assert(
-    out.includes(`waits for the TEST FIRST transaction (${test.file}), which is not sent`),
-    out,
-  );
+  assert(out.includes("TEST FIRST: the test spend has NOT gone out on ECX"), out);
+  assert(out.includes(`was superseded by plan ${p2}`), out);
   assert(!out.includes("goes first, alone, in this run"), out);
   await expectHeldByYes(s, `was superseded by plan ${p2}`);
 });
