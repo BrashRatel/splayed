@@ -26,6 +26,20 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **Multisig PSBTs on a non-mainnet network: wallets refused the global xpubs (2026-11-03):** found
+  2026-11-02 in the regtest session (Shrike: "provided xpub extended key invalid on configured
+  regtest network"; Sparrow couldn't open the PSBT). Fixed by writing the network's own version
+  bytes (`tpub`, `043587cf`) for regtest/testnet profiles (`xpubVersion` in `AddressNetwork`,
+  `src/core/descriptors.ts`); mainnet unchanged. Research on what others do: BIP174 only says "78
+  byte serialized extended public key as defined by BIP 32" (so the network's own bytes). Sparrow's
+  `ExtendedKey` writes `Network.get().getXpubHeader()` and rejects another network's header when
+  reading (that is Shrike's message); rust-bitcoin's `Xpub` encodes `0488B21E` for
+  `NetworkKind::Main` and `043587CF` for `Test` (testnet, signet and regtest, which BDK follows);
+  Bitcoin Core, embit, HWI and Coldcard keep the version bytes as given and don't check them on
+  read. So `tpub` works everywhere, and mainnet `xpub` only works with the permissive readers. Left
+  out instead? Rejected: signers and coordinators use the global xpubs to match cosigners. Test in
+  `tests/descriptors_test.ts`. Not yet re-run against Sparrow, Shrike or the Docker integration
+  suite (see TODO, signers).
 - **Locked inputs (2026-11-03):** timelocked scripts (CLTV/CSV) were unsupported but nothing said
   so. They can only reach splayed through a descriptor (the scan finds coins by descriptor, and the
   supported forms are standard single-key and multi/sortedmulti scripts), so `import` now refuses

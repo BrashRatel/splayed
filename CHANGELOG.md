@@ -21,6 +21,14 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Fixed
 
+- **Multisig PSBTs on regtest/testnet profiles now carry `tpub` version bytes in
+  `PSBT_GLOBAL_XPUB`** (`043587cf`), not mainnet `xpub` ones. Wallets that check the network
+  (Sparrow and Shrike: "provided xpub extended key invalid on configured regtest network") refused
+  or couldn't open the PSBT. Mainnet is unchanged. Chosen after checking other projects: Sparrow,
+  rust-bitcoin (so BDK) and btcd-based wallets write the network's own version bytes and refuse the
+  other network's; Bitcoin Core, embit, HWI and Coldcard pass the field through without checking, so
+  `tpub` is safe for them too.
+
 - **Timelocked and miniscript descriptors get a clear refusal.** Importing `after()`, `older()` or
   any miniscript fragment (including wrappers like `v:pk()` and names with underscores such as
   `and_v`) used to fail with "Unsupported descriptor function" or an odd parse error. The message

@@ -109,6 +109,24 @@ Deno.test("timelocked and miniscript descriptors are refused with a clear reason
   lock(`combo(${k}/0/*)`, "Unsupported descriptor function combo()");
 });
 
+Deno.test("global xpubs for PSBTs carry the network's own version bytes (xpub, or tpub on regtest)", () => {
+  const a = account("m/48'/0'/0'/2'");
+  const b = account("m/48'/0'/1'/2'");
+  const d = `wsh(sortedmulti(2,${a}/0/*,${b}/0/*))`;
+  const main = parseDescriptor(d, MAIN_NETWORK).xpubs;
+  const reg = parseDescriptor(d, REGTEST_NETWORK).xpubs;
+  const hex = (u: Uint8Array) => Array.from(u, (x) => x.toString(16).padStart(2, "0")).join("");
+  assertEquals(main.length, 2);
+  assertEquals(reg.length, 2);
+  for (let i = 0; i < 2; i++) {
+    assertEquals(hex(main[i].raw.slice(0, 4)), "0488b21e");
+    assertEquals(hex(reg[i].raw.slice(0, 4)), "043587cf");
+    // Only the version differs: depth, fingerprint, child number, chain code and key are the same.
+    assertEquals(hex(reg[i].raw.slice(4)), hex(main[i].raw.slice(4)));
+    assertEquals(reg[i].raw.length, 78);
+  }
+});
+
 Deno.test("zpub is converted to xpub with identical addresses", () => {
   // SLIP-132 zpub for the BIP84 account: same key material, different version bytes.
   const d = parseDescriptor(

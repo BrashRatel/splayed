@@ -6,20 +6,7 @@ delete it here.
 
 ## 1. Bugs and issues
 
-No known high-impact bugs are open. Highest impact first:
-
-### Medium
-
-- [ ] **Multisig PSBTs on a non-mainnet network: wallets refuse the global xpubs.** The plan's PSBT
-      writes each cosigner's `PSBT_GLOBAL_XPUB` with the mainnet `xpub` version bytes (`0488b21e`)
-      even on regtest/testnet (`src/core/planner.ts`, `x.raw`). Shrike refuses the XBT multisig PSBT
-      ("provided xpub extended key invalid on configured regtest network"); Sparrow's paste dialog
-      just closed on the base64 and its file open said it could not recognise the format (very
-      likely the same cause, not confirmed). Single-sig PSBTs have no global xpubs and open fine.
-      Found 2026-11-02. Decide: write the network's own version bytes (`tpub`, `043587cf`), or leave
-      the global xpubs out (the inputs' BIP32 derivations and witness scripts already carry what
-      signers need), then check Sparrow, Shrike, SeedSigner and Bitcoin Core on regtest and mainnet.
-      Mainnet is unaffected (the bytes already match).
+No known high- or medium-impact bugs are open. Highest impact first:
 
 ### Low
 
@@ -49,8 +36,10 @@ No known high-impact bugs are open. Highest impact first:
 - [ ] A real stock hardware wallet signing both the shared and the donor input (XBT donor route).
 - [ ] **Scan signed** and **Scan QR** (wallet import) with a Jade, Keystone and Passport. (A
       SeedSigner works, both ways.)
-- [ ] Multisig and Taproot PSBTs with real signers; 3-of-5 multisig end to end with a SeedSigner and
-      on the regtest chains (tested through the UI API with fake chains only).
+- [ ] Multisig and Taproot PSBTs with real signers (re-check the regtest multisig PSBT, now with
+      `tpub` global xpubs, in Sparrow, Shrike, SeedSigner and Bitcoin Core, and on mainnet); 3-of-5
+      multisig end to end with a SeedSigner and on the regtest chains (tested through the UI API
+      with fake chains only).
 
 ### Backends against real servers
 

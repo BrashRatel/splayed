@@ -135,6 +135,13 @@ export interface AddressNetwork {
   convertible: ReadonlySet<number>;
   /** Extended private key versions, refused with an explanation. */
   privateVersions: readonly number[];
+  /**
+   * The BIP32 version bytes the network's own extended public keys use (xpub on mainnet, tpub on
+   * testnets and regtest). PSBT_GLOBAL_XPUB is written with these: BIP174 says "78 byte serialized
+   * extended public key as defined by BIP 32", and Sparrow, rust-bitcoin (so BDK) and btcd-based
+   * wallets write and expect the network's version, refusing the other network's.
+   */
+  xpubVersion: number;
   keyHint: string;
 }
 
@@ -144,6 +151,7 @@ export const MAIN_NETWORK: AddressNetwork = {
   // ypub, Ypub, zpub, Zpub
   convertible: new Set([0x049d7cb2, 0x0295b43f, 0x04b24746, 0x02aa7ed3]),
   privateVersions: [0x0488ade4, 0x049d7878, 0x04b2430c],
+  xpubVersion: XPUB_VERSION,
   keyHint: "Only mainnet extended public keys (xpub/ypub/zpub) are supported",
 };
 
@@ -153,6 +161,7 @@ export const REGTEST_NETWORK: AddressNetwork = {
   // tpub, upub, vpub, Upub, Vpub
   convertible: new Set([0x043587cf, 0x044a5262, 0x045f1cf6, 0x024289ef, 0x02575483]),
   privateVersions: [0x04358394, 0x044a4e28, 0x045f18bc, 0x0488ade4],
+  xpubVersion: 0x043587cf,
   keyHint:
     "Only regtest extended public keys (tpub/upub/vpub, or the xpub splayed stores) are supported",
 };
@@ -523,7 +532,7 @@ export interface DerivedOutput {
 }
 
 export interface GlobalXpub {
-  /** 78-byte serialized extended public key. */
+  /** 78-byte serialized extended public key, with the network's version bytes (xpub or tpub). */
   raw: Uint8Array;
   fingerprint: Uint8Array;
   path: number[];
@@ -621,8 +630,11 @@ export function parseDescriptor(
   const normalized = exprToStringMulti(expr);
   const xpubs: GlobalXpub[] = keys.filter((k) => k.xpub).map((k) => {
     const root = hdNode(k.xpub!);
+    // Keys are held as xpub internally; the PSBT gets the network's own version bytes.
+    const raw = b58c.decode(k.xpub!);
+    new DataView(raw.buffer, raw.byteOffset).setUint32(0, network.xpubVersion);
     return {
-      raw: b58c.decode(k.xpub!),
+      raw,
       fingerprint: k.originFingerprint ?? fingerprintBytes(root.fingerprint),
       path: k.originPath ?? [],
     };

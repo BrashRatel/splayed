@@ -25,12 +25,12 @@ tried; please send a [tester report](https://github.com/BrashRatel/splayed/issue
 
 **Software**
 
-| Wallet                  | Chain | Tested  | Notes                                                              |
-| ----------------------- | ----- | ------- | ------------------------------------------------------------------ |
-| Sparrow (BLAKE2b build) | XBT   | Regtest | Single-sig. Could not open a multisig PSBT on regtest (see below). |
-| Shrike                  | XBT   | Regtest | Single-sig. Refuses a multisig PSBT on regtest (see below).        |
-| Bitcoin Knots wallet    | XBT   | Not yet |                                                                    |
-| embit                   | XBT   | Not yet |                                                                    |
+| Wallet                  | Chain | Tested  | Notes                                                                               |
+| ----------------------- | ----- | ------- | ----------------------------------------------------------------------------------- |
+| Sparrow (BLAKE2b build) | XBT   | Regtest | Single-sig. Its multisig PSBT on regtest wasn't retested after the global-xpub fix. |
+| Shrike                  | XBT   | Regtest | Single-sig. Its multisig PSBT on regtest wasn't retested after the global-xpub fix. |
+| Bitcoin Knots wallet    | XBT   | Not yet |                                                                                     |
+| embit                   | XBT   | Not yet |                                                                                     |
 
 **Hardware**
 
@@ -42,9 +42,6 @@ tried; please send a [tester report](https://github.com/BrashRatel/splayed/issue
 | Coldcard, Trezor, Ledger                                     | ECX   | Not yet | Need to accept locktime 499,999,998 and keep the sequences. Can't sign XBT (see above). |
 
 [fork]: https://github.com/privkeyio/seedsigner
-
-Multisig PSBTs on a non-mainnet network carry mainnet xpub version bytes in their global xpub
-fields, which some wallets refuse. Mainnet is not affected.
 
 ## Stock hardware wallets and XBT
 
