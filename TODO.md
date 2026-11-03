@@ -58,13 +58,16 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ### Platforms
 
-- [ ] A `buildx` amd64+arm64 build of the Docker image (needs a host with QEMU/binfmt or an arm64
-      builder), and a real scan over the container's Tor on mainnet.
-- [ ] `deno task fetch-tor --all` and smoke-test the macOS and Windows Tor bundles (only Linux
-      x86_64 has been fetched and run), then `compile` and package each platform; managed Tor
-      bootstraps on macOS and Windows.
-- [ ] **StartOS package (`splayed-startos`) leftovers:** an aarch64 build (`make arm`), a real icon,
-      and a first-run view of the package's README/instructions.
+- [ ] A real scan over the Docker container's Tor on mainnet with a real wallet (the multi-arch
+      image builds and the arm64 image starts under emulation; no real arm64 host has run it).
+- [ ] Run the macOS (arm64 and x86_64) and Windows builds from `scripts/package_release.ts` on real
+      machines, with their bundled Tor: the binary starts, managed Tor bootstraps, and a scan works.
+      They are cross-compiled and the Tor bundles are hash-checked, but nothing has been run there.
+- [ ] Pin a Tor bundle for `linux-aarch64` in `vendor/tor-manifest.json` (`update-tor-manifest`);
+      the Linux arm64 archive ships without Tor today and needs one on `PATH`.
+- [ ] **StartOS package (`splayed-startos`) `v0.1.0:4`:** install on a device (x86) and check the
+      new icon and the package's README/instructions on first run; run the aarch64 build on an arm
+      device if one is available.
 
 ### Test suite
 

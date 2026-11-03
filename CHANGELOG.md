@@ -6,6 +6,12 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **A logo** (`docs/images/logo.png`, transparent, and a clean `logo.svg`), and the StartOS package
+  uses it as its icon.
+- **`deno task package`** (`scripts/package_release.ts`): cross-compiles and archives the release
+  for Linux x86_64 and aarch64, macOS arm64 and x86_64, and Windows x86_64, with each platform's Tor
+  bundle and a `SHA256SUMS`.
+
 - **`splayed wipe` and a Burn history button** in the web UI header (next to the theme button, which
   now reads Burn eyes / Go back): forgets the wallet, destinations, scan results and all plans, and
   resets the network confirmation, keeping the network settings and any servers you added. It asks

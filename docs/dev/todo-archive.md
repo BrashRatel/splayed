@@ -26,6 +26,13 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **Platform builds (2026-11-03):** multi-arch Docker image (`buildx`, amd64 and arm64; the arm64
+  image started under QEMU and reports `aarch64`); `fetch-tor --all` (all four pinned bundles,
+  hashes matched, layout matches `src/net/tor.ts`); cross-compiled binaries for Linux
+  x86_64/aarch64, macOS arm64/x86_64 and Windows x86_64 and a one-command packager
+  (`deno task package`); the StartOS package `v0.1.0:4` built for x86_64 and aarch64
+  (`splayed_x86_64.s9pk`, `splayed_aarch64.s9pk`, 63 MB each) with a new icon traced from
+  `docs/images/logo.png`. Not run on the target platforms (see TODO).
 - **Multisig PSBTs on a non-mainnet network: wallets refused the global xpubs (2026-11-03):** found
   2026-11-02 in the regtest session (Shrike: "provided xpub extended key invalid on configured
   regtest network"; Sparrow couldn't open the PSBT). Fixed by writing the network's own version

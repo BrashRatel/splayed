@@ -8,6 +8,7 @@
     "regtest": "deno run --allow-net --allow-read --allow-write --allow-env --allow-sys=hostname,networkInterfaces --allow-run=docker tests/integration/dev_env.ts",
     "test:integration": "deno test --allow-net=127.0.0.1 --allow-read --allow-write --allow-env --allow-run=docker tests/integration/regtest.integration.ts",
     "lint": "deno lint",
+    "package": "deno run --allow-read --allow-write --allow-run=deno,tar,zip,cp scripts/package_release.ts",
     "fetch-tor": "deno run --allow-net=archive.torproject.org --allow-read --allow-write --allow-run=tar scripts/fetch_tor.ts",
     "update-tor-manifest": "deno run --allow-net=archive.torproject.org --allow-read --allow-write --allow-run=gpg scripts/update_tor_manifest.ts",
     "ui": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts ui --open",
