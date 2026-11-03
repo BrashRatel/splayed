@@ -10,8 +10,8 @@ coins on all three chains, tells you which ones are still shared, and walks each
 plan → sign (in your wallet) → verify → broadcast. Your keys never leave your wallet.
 
 > **Status: pre-alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
-> eCash nodes on regtest, and has split one real coin on mainnet (ECX and XBT away from BTC, BTC
-> confirmed untouched). It is **not security-reviewed**: start with one small coin, and read the
+> eCash nodes on regtest, and has split real UTXOs on mainnet (ECX and XBT away from BTC, BTC
+> confirmed untouched). It is **not security-reviewed**: start with one small coin/utxo, and read the
 > [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and [TODO.md](TODO.md) first. Testers
 > wanted: please file a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
@@ -51,7 +51,7 @@ Then open <http://localhost:8080/> and paste the token.
 Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
 [releases page](https://github.com/BrashRatel/splayed/releases), or build it from
 [splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
-StartOS proxy, reaches public servers over the Tor service, and can use your Bitcoin node.
+StartOS proxy, reaches public servers over the Tor service, and detects/uses your Bitcoin node (and chain).
 
 ### Release binary
 
