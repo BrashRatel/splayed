@@ -8,13 +8,13 @@ detail; this file covers the plan, what's left and how the work has been done.
 
 ## The plan and where it stands
 
-| Phase | What                                                                                                                                                                                                                             | Status                                                                                   |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| 1     | UI: progress reporting; in-tab progress and auto-advance; `config scan`; plan archive/delete; QR wallet import with SeedSigner multisig; setup guide                                                                             | Done. Per-coin state on the Coins tab and a donor opt-in screen were skipped by decision |
-| 2     | Follow-ups: new-shared-coins warning; coin picker; real-browser checks; track/broadcast correctness (reorgs, DROPPED, own-spend recognition, soft TEST FIRST gate, `track --ack`, `bump --another`); docs and screenshot refresh | Done                                                                                     |
-| 3     | A1: UI behind another server (`ui --listen --allowed-host --token-file`, sign-in, throttling). A2: `config backend detect`                                                                                                       | Done                                                                                     |
-| 4     | Docker (`docker/`, `docs/user/docker.md`)                                                                                                                                                                                        | Written, **not built yet** (no Docker daemon where it was written)                       |
-| 5     | StartOS package (separate `splayed-startos` repo)                                                                                                                                                                                | First version in `splayed-startos`; not packed or installed yet (below)                  |
+| Phase | What                                                                                                                                                                                                                             | Status                                                                                     |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 1     | UI: progress reporting; in-tab progress and auto-advance; `config scan`; plan archive/delete; QR wallet import with SeedSigner multisig; setup guide                                                                             | Done. Per-coin state on the Coins tab and a donor opt-in screen were skipped by decision   |
+| 2     | Follow-ups: new-shared-coins warning; coin picker; real-browser checks; track/broadcast correctness (reorgs, DROPPED, own-spend recognition, soft TEST FIRST gate, `track --ack`, `bump --another`); docs and screenshot refresh | Done                                                                                       |
+| 3     | A1: UI behind another server (`ui --listen --allowed-host --token-file`, sign-in, throttling). A2: `config backend detect`                                                                                                       | Done                                                                                       |
+| 4     | Docker (`docker/`, `docs/user/docker.md`)                                                                                                                                                                                        | Built and run 2026-11-02 (image, Tor variant, `WITH_TOR=0`); multi-arch `buildx` not tried |
+| 5     | StartOS package (separate `splayed-startos` repo)                                                                                                                                                                                | First version in `splayed-startos`; not packed or installed yet (below)                    |
 
 Decisions made along the way:
 
@@ -39,20 +39,25 @@ Decisions made along the way:
    `config backend detect --add` on each start; allowed hosts from the UI binding; Show/Reset UI
    token actions; both volumes backed up. Type-checked, linted and bundled with ncc here; not yet
    packed (`start-cli` and Docker aren't available here) or installed.
-3. **Checkpoints before merging into `main`:**
-   - **Docker testing:**
-     - build and run the image;
-     - sign in and scan over the container's Tor;
-     - try the Tor-container variant and a `buildx` amd64+arm64 build;
-     - run `deno task test:integration` (regtest with real Core, Knots and eCash nodes; the
-       track/broadcast changes have so far only been tested against fake backends).
-   - **Real devices:** QR import (Scan QR, multisig cosigners, Static text) with a real camera and
-     SeedSigner.
+3. **Checkpoints before merging into `main`** (status 2026-11-02):
+   - **Docker testing:** done except multi-arch.
+     - Image built and run; sign-in, host check and throttle checked; Tor bootstraps in the
+       container; the Tor-container variant and `WITH_TOR=0` work.
+     - `deno task test:integration` passes (135 steps on real Core, Knots and eCash). It first
+       failed on two stale assertions in the real-node scenarios, now fixed.
+     - Still open: a `buildx` amd64+arm64 build (no QEMU on the dev host) and a scan over the
+       container's Tor with a real wallet.
+   - **Real devices:** done in the regtest session with a SeedSigner: QR wallet import (single-sig
+     and multisig), signing, a 2-of-3 sign/verify/broadcast, and the alert window clearing. Found
+     and fixed there: a second cosigner's signed PSBT replaced the first (now merged; 3-of-5
+     tested). Found and not fixed: multisig PSBTs carry mainnet xpub version bytes in
+     `PSBT_GLOBAL_XPUB`, which Shrike refuses on regtest and Sparrow most likely does too (see
+     TODO.md).
    - **StartOS:** `make x86`/`make arm` in `splayed-startos`, then install on a real device. Check
      first: the Web UI answers (no 403 from the Host check behind the StartOS proxy), Show UI token
      and sign-in, a scan over the Tor service, and with Use the Bitcoin node the bitcoind task, then
      the node added to the right chain. Also back up and restore. The icon is a placeholder drawn
-     for the package.
+     for the package. The device is an x86 StartOS 0.4.1 running on mainnet.
    - **One final review of the whole branch**, focusing on track/broadcast and on A1 (the network
      boundary).
 

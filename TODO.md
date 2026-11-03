@@ -158,15 +158,27 @@ Wanted, but this is the work pre-alpha testers help with.
       what a real server answers for `blockchain.block.header` at tip+1, and fall back to the
       header's own BLAKE2b hash or "confirmed, hash unknown" if needed. (Found writing the fake
       Electrum server for package 2g; the fake serves tip+1.)
+- [ ] **Multisig PSBTs on a non-mainnet network: wallets refuse the global xpubs.** The plan's PSBT
+      writes each cosigner's `PSBT_GLOBAL_XPUB` with the mainnet `xpub` version bytes (`0488b21e`)
+      even on regtest/testnet (`src/core/planner.ts`, `x.raw`). Shrike refuses the XBT multisig
+      PSBT: "provided xpub extended key invalid on configured regtest network. use a mainnet
+      configuration to use this extended key"; Sparrow's paste dialog just closed on the base64 and
+      its file open said it could not recognise the format (very likely the same cause, not
+      confirmed). Single-sig PSBTs have no global xpubs and open fine. Found in the regtest session
+      of 2026-11-02. Decide: write the network's own version bytes (`tpub`, `043587cf`), or leave
+      the global xpubs out (the inputs' BIP32 derivations and witness scripts already carry what
+      signers need), then check Sparrow, Shrike, SeedSigner and Bitcoin Core on regtest and mainnet.
+      Mainnet is unaffected (the bytes already match).
 - [ ] The lost-reply, own-spend and conflict paths on node RPC with and without `txindex` against
       the regtest nodes (they are covered against fakes that mimic `gettxout`/`getrawtransaction`
       only).
 
 ### Platforms
 
-- [ ] Build and run the Docker image (`docker/`): `docker compose -f docker/compose.yml up --build`,
-      sign in, scan over the container's Tor; the Tor-container variant; a `buildx` amd64+arm64
-      build. Written without a Docker daemon, so not built yet.
+- [x] Build and run the Docker image (`docker/`): built, run, signed in and Tor bootstrapped inside
+      it; the Tor-container variant and `WITH_TOR=0` built and ran (2026-11-02).
+- [ ] A `buildx` amd64+arm64 build of the Docker image (needs a host with QEMU/binfmt or an arm64
+      builder), and a real scan over the container's Tor on mainnet.
 - [ ] `deno task fetch-tor --all` and smoke-test the macOS and Windows Tor bundles (only Linux
       x86_64 has been fetched and run), then `compile` and package each platform.
 - [ ] Managed Tor bootstraps on macOS and Windows.
