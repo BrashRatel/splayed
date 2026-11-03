@@ -41,6 +41,10 @@ export function overlay(h, title, onClose) {
       h("button", { class: "small secondary", onclick: close }, "Close"),
     ),
   );
+  // A click on the dimmed area around the box closes it too (not one that starts inside the box).
+  wrap.addEventListener("click", (e) => {
+    if (e.target === wrap) close();
+  });
   document.body.append(wrap);
   return { box, close };
 }

@@ -96,3 +96,28 @@ Deno.test("UI QR (browser module): the export view draws frames with the API the
     .find((x) => x instanceof El && x.tag === "button") as El | undefined;
   close?.listeners.click?.[0]();
 });
+
+Deno.test("UI QR windows: a click on the dimmed area closes them, a click inside does not", async () => {
+  const g = globalThis as Record<string, unknown>;
+  g.document = { body: new El("body") };
+  const h = (tag: string, attrs: Record<string, unknown> = {}, ...kids: unknown[]) => {
+    const e = new El(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k.startsWith("on")) e.addEventListener(k.slice(2), v as () => void);
+      else if (k === "class") e.className = String(v);
+    }
+    for (const c of kids.flat()) e.append(c as El);
+    return e;
+  };
+  const { overlay } = await import("../src/ui/static/qr.js");
+  let closed = 0;
+  // deno-lint-ignore no-explicit-any
+  const { box } = (overlay as any)(h, "Show to your signer", () => closed++);
+  const wrap = (g.document as { body: El }).body.children[0] as El;
+  const click = (target: El) =>
+    (wrap.listeners.click?.[0] as unknown as (e: { target: El }) => void)({ target });
+  click(box);
+  assertEquals(closed, 0, "a click on the box itself keeps the window open");
+  click(wrap);
+  assertEquals(closed, 1, "a click on the area around the box closes it");
+});

@@ -656,3 +656,70 @@ Deno.test("CLI multisig: two cosigners' separate signed files for one transactio
     assertEquals(both.exitCode, 0, both.text);
   }, MULTISIG_DESC);
 });
+
+Deno.test("UI multisig 3-of-5: built from five cosigner keys, detected as 3 of 5, signed by cosigners 2, 4 and 5", async () => {
+  const keys = [1, 2, 3, 4, 5].map((n) => HDKey.fromMasterSeed(new Uint8Array(32).fill(n)));
+  const walletKey = (k: HDKey) => ({
+    fingerprint: fp(k),
+    path: "48h/0h/0h/2h",
+    xpub: k.derive("m/48'/0'/0'/2'").publicExtendedKey,
+  });
+  // The wallet builder the QR import uses (threshold and keys), not a pasted descriptor.
+  let built = "";
+  await withUi(async ({ api }) => {
+    const preview = await api("/api/wallet/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "multisig",
+        script: "wsh",
+        threshold: 3,
+        sorted: true,
+        keys: keys.map(walletKey),
+      }),
+    });
+    assertEquals(preview.status, 200, await preview.clone().text());
+    const pv = await preview.json();
+    assert(pv.descriptor.startsWith("wsh(sortedmulti(3,"), pv.descriptor);
+    assertEquals(pv.branches, 2);
+    built = pv.descriptor;
+  });
+  await withUi(async ({ runJob, api }) => {
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", built])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    assertEquals(
+      (await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true])).exitCode,
+      0,
+    );
+    const p = (await (await api("/api/plans")).json()).plans[0];
+    const t = p.transactions[0];
+    const signAndUpload = async (k: HDKey) => {
+      const dl = await api(
+        `/api/plans/${p.id}/download?file=${encodeURIComponent(t.file)}&format=binary`,
+      );
+      const tx = Transaction.fromPSBT(new Uint8Array(await dl.arrayBuffer()));
+      tx.signIdx(k.derive("m/48'/0'/0'/2'/0/0").privateKey!, 0);
+      const r = await api(`/api/plans/${p.id}/upload`, {
+        method: "POST",
+        body: JSON.stringify({ file: t.file, content: base64.encode(tx.toPSBT()) }),
+      });
+      assertEquals(r.status, 200);
+      return (await r.json()).signatures;
+    };
+    // Cosigners 5, 2, then 4: out of script order, and the count never reaches 3 before the third.
+    assertEquals(await signAndUpload(keys[4]), { have: 1, need: 3 });
+    const one = await runJob(["verify", p.id]);
+    assertEquals(one.exitCode, 1, one.text);
+    assert(one.text.includes("1 of 3 required signature"), one.text);
+    assertEquals(await signAndUpload(keys[1]), { have: 2, need: 3 });
+    const two = await runJob(["verify", p.id]);
+    assertEquals(two.exitCode, 1, two.text);
+    assert(two.text.includes("2 of 3 required signature"), two.text);
+    assertEquals(await signAndUpload(keys[3]), { have: 3, need: 3 });
+    const seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
+    assertEquals(seen.signedUpload.signatures, { have: 3, need: 3 });
+    const done = await runJob(["verify", p.id]);
+    assertEquals(done.exitCode, 0, done.text);
+  }, built);
+});
