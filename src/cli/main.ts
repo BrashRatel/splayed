@@ -58,6 +58,7 @@ import {
 } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { defaultDataDir, ensureDir } from "../core/store.ts";
+import { nothingToWipe, previewWipe, wipeAll } from "../core/wipe.ts";
 import {
   importDescriptor,
   importDonorDescriptor,
@@ -187,6 +188,11 @@ Splitting (guided route: forks first, BTC untouched):
   plans unarchive <plan>          Bring an archived plan back
   plans delete <plan> [--yes]     Delete a plan's folder for good. Refused while any of its
                                   transactions was sent and isn't confirmed yet
+  wipe [--yes] [--force]          Start over: forget the wallet, destinations, scan results and all
+                                  plans (with their signed files), and reset the network
+                                  confirmation. Keeps your network settings and servers. Refused
+                                  with --yes while a sent transaction is unconfirmed, unless
+                                  --force. Nothing on any blockchain changes.
   verify <plan> [signed files...] [--no-mempool]
                                   Check signed PSBTs/transactions: same tx as planned, replay
                                   marker (ECX) or 0x21 on every signature (XBT), every signature
@@ -287,6 +293,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         json: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         yes: { type: "boolean", short: "y" },
+        force: { type: "boolean" },
         label: { type: "string" },
         kind: { type: "string" },
         url: { type: "string" },
@@ -391,6 +398,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
         });
       case "plans":
         return await cmdPlans(config, io, args, flags.yes === true);
+      case "wipe":
+        return await cmdWipe(config, io, args, flags.yes === true, flags.force === true);
       case "verify":
         return await cmdVerify(config, io, args, flags["no-mempool"] === true);
       case "broadcast":
@@ -1468,6 +1477,74 @@ async function cmdDonor(
     default:
       throw new UsageError(usage);
   }
+}
+
+async function cmdWipe(
+  config: Config,
+  io: CliIO,
+  args: string[],
+  yes: boolean,
+  force: boolean,
+): Promise<number> {
+  if (args.length) throw new UsageError("wipe [--yes] [--force]");
+  const p = await previewWipe(config);
+  if (nothingToWipe(p)) {
+    io.out("Nothing to wipe: no wallet, scan, plans or network confirmation recorded.");
+    return 0;
+  }
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const items = [
+    p.descriptors || p.donors
+      ? `${plural(p.descriptors, "imported descriptor")}${
+        p.donors ? ` and ${plural(p.donors, "donor descriptor")}` : ""
+      }`
+      : "",
+    p.destinations ? `${plural(p.destinations, "fork destination")}` : "",
+    p.scan || p.donorScan ? "scan results" : "",
+    p.plans ? `${plural(p.plans, "plan")} with their PSBTs, signed files and progress` : "",
+    p.confirmation ? "the network confirmation" : "",
+  ].filter(Boolean);
+  io.out(`Wipe all will remove: ${items.join("; ")}.`);
+  io.out(
+    "It keeps your network settings and any servers you added. Nothing on a blockchain changes.",
+  );
+  if (p.unsettled.length) {
+    io.out(`WARNING: ${plural(p.unsettled.length, "sent transaction")} not confirmed yet:`);
+    for (const line of p.unsettled) io.out(`  ${line}`);
+    io.out("Wiping stops `track` following them. Keep the BTC copies of those coins untouched.");
+    if (yes && !force) {
+      io.err(
+        "Refusing to wipe with sent transactions unconfirmed. Confirm them first, or add --force.",
+      );
+      return 1;
+    }
+  }
+  if (!yes) {
+    const ok = await io.confirm(
+      `Wipe all? This removes your wallet, scan results and ${plural(p.plans, "plan")} for good, ` +
+        "and you will need to start over: confirm the network settings, import your wallet and " +
+        "set destinations again. Your servers and settings stay.",
+      { recommend: "no" },
+    );
+    if (!ok) {
+      io.out("Nothing wiped.");
+      return 1;
+    }
+    if (p.unsettled.length && !force) {
+      const really = await io.confirm(
+        `${plural(p.unsettled.length, "sent transaction")} not confirmed yet will no longer be ` +
+          "tracked. Wipe anyway?",
+        { recommend: "no" },
+      );
+      if (!really) {
+        io.out("Nothing wiped.");
+        return 1;
+      }
+    }
+  }
+  await wipeAll(config.dataDir);
+  io.out("Wiped. Run `splayed init` to confirm the network settings and start over.");
+  return 0;
 }
 
 async function cmdPlans(config: Config, io: CliIO, args: string[], yes: boolean) {

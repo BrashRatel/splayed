@@ -19,7 +19,7 @@ let token = (() => {
 // Theme: dark by default; "light" is remembered in this browser only.
 function applyTheme(light) {
   document.documentElement.classList.toggle("light", light);
-  document.getElementById("theme-toggle").textContent = light ? "Dark mode" : "Light mode";
+  document.getElementById("theme-toggle").textContent = light ? "Go back" : "Burn eyes";
 }
 let lightTheme = false;
 try {
@@ -87,6 +87,8 @@ function setGuide(on) {
   render();
 }
 document.getElementById("guide-toggle").addEventListener("click", () => setGuide(!guideOn));
+// "Get amnesia" is the CLI's `wipe`: it lists what goes, then asks (No is the default button).
+document.getElementById("wipe-all").addEventListener("click", () => run(["wipe"]));
 
 // ---------- helpers ----------
 
@@ -272,6 +274,13 @@ async function pollJob() {
       render();
     }
     autoAdvance(job, before, after);
+    if (job.args[0] === "wipe" && job.exitCode === 0 && before.confirmed && !after.confirmed) {
+      // Started over: back to the first step with the guide showing.
+      state.planSel = null;
+      setGuide(true);
+      selectTab("network");
+      flash("Amnesia complete. Start again: confirm the network settings.");
+    }
     return;
   }
   setTimeout(pollJob, 400);

@@ -723,3 +723,97 @@ Deno.test("UI multisig 3-of-5: built from five cosigner keys, detected as 3 of 5
     assertEquals(done.exitCode, 0, done.text);
   }, built);
 });
+
+Deno.test("wipe: forgets wallet, scan, plans and the confirmation; keeps servers; asks first", async () => {
+  await withUi(async ({ runJob, api, dataDir }) => {
+    // A server the user added themselves must survive.
+    assertEquals(
+      (await runJob([
+        "config",
+        "backend",
+        "add",
+        "btc",
+        "--kind",
+        "esplora",
+        "--url",
+        "https://my-own-server.example/api",
+      ])).exitCode,
+      0,
+    );
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    assertEquals(
+      (await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true])).exitCode,
+      0,
+    );
+    const before = await Deno.readTextFile(`${dataDir}/splayed.toml`);
+    assert(before.includes("my-own-server.example"));
+    // Saying no wipes nothing.
+    const declined = await runJob(["wipe"], [false]);
+    assertEquals(declined.exitCode, 1, declined.text);
+    assert(declined.questions[0].includes("start over"), declined.questions[0]);
+    assertEquals((await (await api("/api/overview")).json()).descriptors.length, 1);
+    // Yes wipes it all.
+    const done = await runJob(["wipe"], [true]);
+    assertEquals(done.exitCode, 0, done.text);
+    assert(done.text.includes("1 plan"), done.text);
+    const overview = await (await api("/api/overview")).json();
+    assertEquals(overview.descriptors.length, 0);
+    assertEquals(overview.confirmed, false);
+    assertEquals((await (await api("/api/plans")).json()).plans.length, 0);
+    for (const f of ["watch-only.json", "scan.json", "network-confirmation.json", "plans"]) {
+      let gone = false;
+      try {
+        await Deno.stat(`${dataDir}/${f}`);
+      } catch {
+        gone = true;
+      }
+      assert(gone, `${f} should be gone`);
+    }
+    // The servers and settings stay exactly as they were.
+    assertEquals(await Deno.readTextFile(`${dataDir}/splayed.toml`), before);
+    // Starting over works, and a second wipe finds nothing.
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["wipe"], [true])).exitCode, 0);
+    assert((await runJob(["wipe"])).text.includes("Nothing to wipe"));
+  });
+});
+
+Deno.test("wipe: with --yes it refuses while a sent transaction is unconfirmed, unless --force", async () => {
+  await withUi(async ({ runJob, dataDir }) => {
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    // A plan with one transaction that was sent and has no confirmations yet.
+    const dir = `${dataDir}/plans/20260101T000000000-aaaaaa`;
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(
+      `${dir}/plan.json`,
+      JSON.stringify({
+        id: "20260101T000000000-aaaaaa",
+        transactions: [{ file: "ecx/001-aa.psbt", chain: "ecx", order: 1, inputs: [] }],
+      }),
+    );
+    await Deno.writeTextFile(
+      `${dir}/progress.json`,
+      JSON.stringify({
+        version: 1,
+        txs: {
+          "ecx/001-aa.psbt": { broadcast: { status: "accepted", at: "2026-01-01T00:00:00Z" } },
+        },
+      }),
+    );
+    const refused = await runJob(["wipe", "--yes"]);
+    assertEquals(refused.exitCode, 1, refused.text);
+    assert(refused.text.includes("not confirmed yet"), refused.text);
+    assert(refused.text.includes("Refusing to wipe"), refused.text);
+    // Without --yes there is a second, separate question about it, and No keeps everything.
+    const asked = await runJob(["wipe"], [true, false]);
+    assertEquals(asked.exitCode, 1, asked.text);
+    assertEquals(asked.questions.length, 2);
+    await Deno.stat(`${dir}/plan.json`);
+    // --force --yes goes ahead.
+    const forced = await runJob(["wipe", "--yes", "--force"]);
+    assertEquals(forced.exitCode, 0, forced.text);
+  });
+});

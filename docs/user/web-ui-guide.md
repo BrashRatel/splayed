@@ -60,13 +60,16 @@ random access token, so open it from that terminal output if it doesn't open aut
 screen, remembered for that browser tab only.)
 
 A **Setup guide** above every tab lists the steps below, ticks off what's done and explains the next
-one; **Guide: on/off** in the tab bar hides it.
+one; **Guide: on/off** in the tab bar hides it. **Get amnesia**, in the header next to the theme
+button, starts over: it forgets your wallet, scan results and plans (after a question that defaults
+to No), resets the network confirmation, and keeps your servers and settings. It warns first if sent
+transactions are still unconfirmed.
 
 ![Setup guide on first launch](../images/web-ui/01-setup-guide.png)
 
 The header always shows two status pills: whether **Tor** is running, and whether your **network
 settings are confirmed**. The **Activity** panel on the right shows what splayed is doing, in plain
-text. Use the **Light mode** button if you prefer a light theme.
+text. Use the **Burn eyes** button if you prefer a light theme (it then reads **Go back**).
 
 ## 2. Network: decide where queries go
 

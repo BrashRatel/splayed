@@ -41,6 +41,7 @@ export const UI_COMMANDS = new Set([
   "track",
   "bump",
   "donor",
+  "wipe",
 ]);
 
 const FORBIDDEN_FLAGS = ["--data-dir", "--tor-socks", "--profile", "--help", "-h"];
