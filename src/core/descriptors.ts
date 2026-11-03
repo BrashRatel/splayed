@@ -186,7 +186,7 @@ class Parser {
         if (name === "wpkh" && context === "wsh") {
           throw new DescriptorError("wpkh() inside wsh() is invalid");
         }
-        const key = this.key(name === "tr");
+        const key = this.key();
         if (name === "tr" && this.peek(",")) {
           throw new DescriptorError("tr() script trees are not supported yet (key-path only)");
         }
@@ -214,7 +214,7 @@ class Parser {
         const keys: KeyExpr[] = [];
         while (this.peek(",")) {
           this.expect(",");
-          keys.push(this.key(false));
+          keys.push(this.key());
         }
         if (!Number.isInteger(k) || k < 1 || k > keys.length || keys.length > 20) {
           throw new DescriptorError("Invalid multisig threshold or key count");
@@ -229,7 +229,7 @@ class Parser {
     return expr;
   }
 
-  key(xonlyAllowed: boolean): KeyExpr {
+  key(): KeyExpr {
     let origin: string | undefined;
     if (this.peek("[")) {
       const start = this.pos;
@@ -256,10 +256,17 @@ class Parser {
     }
     if (/^[0-9a-fA-F]+$/u.test(token)) {
       const bytes = hex.decode(token.toLowerCase());
-      if (!(bytes.length === 33 || (xonlyAllowed && bytes.length === 32))) {
+      if (bytes.length === 32) {
+        // A bare 32-byte hex string is a valid x-only key but also what a raw private key looks
+        // like, and the two can't be told apart. splayed is keyless, so refuse it rather than
+        // quietly treat a pasted secret as a public key.
         throw new DescriptorError(
-          "Fixed public keys must be 33-byte compressed (or 32-byte in tr)",
+          "A bare 32-byte hex key could be a PRIVATE key. splayed is keyless: give it an xpub " +
+            "or a 33-byte compressed public key, and sign in your own wallet",
         );
+      }
+      if (bytes.length !== 33) {
+        throw new DescriptorError("Fixed public keys must be 33-byte compressed");
       }
       key.pubkey = bytes;
       if (this.peek("/")) throw new DescriptorError("A fixed public key cannot be derived");

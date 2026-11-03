@@ -26,6 +26,10 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **`tr(<64 hex>)` in descriptors (2026-11-03):** `parseDescriptor` took a bare 32-byte hex key in
+  `tr()` as an x-only public key, so a pasted hex private key wasn't recognised. A bare 32-byte hex
+  key is now refused everywhere with a keyless explanation (it can't be told from a private key);
+  33-byte compressed keys still work. Test in `tests/descriptors_test.ts`.
 - **StartOS package `v0.1.0:3` on a device (2026-11-03, verified by the project owner):** x86
   StartOS 0.4.1 server. Node on by default at first install and the retry loop (no restart after the
   RPC-login task), the **Burn history** action, Show/Reset UI token, a scan over the Tor service,

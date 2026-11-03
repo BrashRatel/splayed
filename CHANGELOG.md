@@ -21,6 +21,10 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Fixed
 
+- **A bare 32-byte hex key in a descriptor is refused** (it was accepted as an x-only key in
+  `tr()`). It looks the same as a raw private key, so a pasted secret wasn't recognised as one. Use
+  an xpub or a 33-byte compressed public key.
+
 - **Multisig signing:** a second cosigner's signed PSBT replaced the first one's instead of adding
   to it, so a 2-of-3 could never reach 2 signatures. Uploads (file or QR) for a transaction that
   already has a signed PSBT are now merged (BIP174 combine), the plans list shows "1 of 2

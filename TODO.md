@@ -10,10 +10,6 @@ No known high-impact bugs are open. Highest impact first:
 
 ### Medium
 
-- [ ] **`tr(<64 hex>)` in descriptors.** `parseDescriptor` accepts a bare 32-byte hex key in `tr()`
-      as an x-only public key, so a hex private key pasted there isn't recognised as one. Refuse
-      bare hex keys in imports (found in the 1c-QR review). This touches the "keyless" promise, so
-      do it before wider testing.
 - [ ] **A TEST FIRST transaction that can't go out this run holds the rest of its chain** (gate or
       donor problems, or node RPC without `txindex` that can't tell whether an unclear send got
       through) until it can, or until `--all`. Offer the TEST FIRST question in that case too, as

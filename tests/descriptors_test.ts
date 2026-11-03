@@ -80,6 +80,21 @@ Deno.test("private keys and hardened public derivation are refused", () => {
   assertThrows(() => parseDescriptor(`wpkh(${account("m/84'/0'/0'")}/0/*')`), DescriptorError);
 });
 
+Deno.test("a bare 32-byte hex key is refused (it may be a private key), in tr() and elsewhere", () => {
+  const hex32 = "c9".repeat(32);
+  assertThrows(() => parseDescriptor(`tr(${hex32})`), DescriptorError, "PRIVATE");
+  assertThrows(
+    () => parseDescriptor(`tr([00000000/86h/0h/0h]${hex32})`),
+    DescriptorError,
+    "PRIVATE",
+  );
+  assertThrows(() => parseDescriptor(`wsh(multi(1,${hex32}))`), DescriptorError, "PRIVATE");
+  // Other lengths keep the old message; a 33-byte compressed key still works in tr().
+  assertThrows(() => parseDescriptor(`wpkh(${"ab".repeat(20)})`), DescriptorError, "33-byte");
+  const pub = master.derive("m/86'/0'/0'/0/0").publicKey!;
+  parseDescriptor(`tr(${Array.from(pub, (b) => b.toString(16).padStart(2, "0")).join("")})`);
+});
+
 Deno.test("zpub is converted to xpub with identical addresses", () => {
   // SLIP-132 zpub for the BIP84 account: same key material, different version bytes.
   const d = parseDescriptor(
