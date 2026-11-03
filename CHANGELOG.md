@@ -27,6 +27,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Fixed
 
+- **A gateway or server error on broadcast is no longer recorded as a rejection.** A 502/503/504 or
+  408 from the server in front of an Esplora node (or a node still starting up, RPC -28) said
+  nothing about the transaction, which may have been relayed, but `broadcast` marked it "rejected",
+  held it, and counted the coin as unsent. Only the server's own refusal (Esplora HTTP 400, a node's
+  RPC error, an Electrum error reply) is "rejected" now; anything else is "unknown", and the next
+  `broadcast` checks the chain before sending again.
+
 - **Multisig PSBTs on regtest/testnet profiles now carry `tpub` version bytes in
   `PSBT_GLOBAL_XPUB`** (`043587cf`), not mainnet `xpub` ones. Wallets that check the network
   (Sparrow and Shrike: "provided xpub extended key invalid on configured regtest network") refused

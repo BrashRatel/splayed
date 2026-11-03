@@ -19,6 +19,8 @@ export interface FakeChain {
   history: Map<string, string[]>;
   requests: string[];
   status429?: boolean;
+  /** A broadcast fails with this HTTP status (Esplora) or RPC error code (node), after the node took the transaction when `relayed` is set. */
+  broadcastFailure?: { status: number; relayed?: boolean };
   /** Mimic the real eCash Esplora bug: /tx/{txid}/status answers confirmed:false (not 404) for
    *  a txid that was never broadcast. */
   statusTrap?: boolean;
@@ -73,6 +75,12 @@ export class FakeEsploraTransport implements Transport {
     }
     const c = this.chain;
     let m: RegExpExecArray | null;
+    if (spec.method === "POST" && path === "/tx" && this.chain.broadcastFailure) {
+      const hex = typeof spec.body === "string" ? spec.body : new TextDecoder().decode(spec.body);
+      const f = this.chain.broadcastFailure;
+      if (f.relayed) fakeSend(this.chain, hex, spec.isolation);
+      return Promise.resolve(response(f.status, "Bad Gateway"));
+    }
     if (spec.method === "POST" && path === "/tx") {
       const hex = typeof spec.body === "string" ? spec.body : new TextDecoder().decode(spec.body);
       const tx = parseTx(hex);
@@ -400,6 +408,10 @@ export class FakeNodeRpcTransport implements Transport {
         });
       }
       case "sendrawtransaction": {
+        if (c.broadcastFailure) {
+          // A node still starting up: the HTTP 5xx carries an RPC error that isn't a refusal.
+          return fail(-28, "Verifying blocks...");
+        }
         const r = fakeSend(c, params[0], spec.isolation);
         return r.txid ? ok(r.txid) : fail(-26, r.reason!);
       }

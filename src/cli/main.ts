@@ -122,7 +122,7 @@ import {
 import { SigCheckError } from "../core/sigcheck.ts";
 import { describeTestFirst, type TestFirstStatus } from "../core/test_first.ts";
 import { parseTx } from "../core/tx.ts";
-import { BackendError } from "../backends/types.ts";
+import { BackendError, isExplicitRejection } from "../backends/types.ts";
 import { observationCell, privacyLevel, sats, shortOutpoint, table } from "./format.ts";
 
 const USAGE =
@@ -2328,8 +2328,7 @@ async function cmdBroadcast(
           await saveProgress(dir, progress);
           continue;
         }
-        const explicit = error instanceof BackendError && error.status !== undefined &&
-          error.status !== 429;
+        const explicit = isExplicitRejection(error);
         entry.broadcast.status = explicit ? "rejected" : "unknown";
         entry.broadcast.detail = (error as Error).message;
         failed++;

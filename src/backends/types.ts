@@ -79,6 +79,29 @@ export class BackendError extends Error {
   }
 }
 
+/** RPC codes that say the node can't answer right now, not that it refused the transaction. */
+const TRANSIENT_RPC_CODES = new Set([-9, -10, -28]); // not connected, initial download, warming up
+
+/**
+ * Whether a failed broadcast is the server refusing these bytes (it will not take them as they
+ * are), as opposed to a failure that says nothing about the transaction: a gateway or server
+ * error, a timeout, rate limiting, a login problem, a node that is still starting. The second
+ * kind may still have relayed the transaction, so it is "unknown" and `broadcast` checks the
+ * chain before ever sending again.
+ *
+ * - node RPC: any JSON-RPC error from the node (its HTTP status is usually 500 whatever the
+ *   reason), except the "not ready" codes;
+ * - Electrum: an error reply (status -1);
+ * - Esplora: HTTP 400, which is how it reports the node's refusal.
+ */
+export function isExplicitRejection(error: unknown): boolean {
+  if (!(error instanceof BackendError) || error.status === undefined) return false;
+  const rpcCode = (error as BackendError & { rpcCode?: number }).rpcCode;
+  if (rpcCode !== undefined) return !TRANSIENT_RPC_CODES.has(rpcCode);
+  if (error.status === -1) return true;
+  return error.status === 400;
+}
+
 export const HEX64 = /^[0-9a-f]{64}$/u;
 
 export function assertTxid(txid: string): void {

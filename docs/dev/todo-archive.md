@@ -26,6 +26,16 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **A 5xx/408 broadcast reply was recorded as an explicit rejection (2026-11-03, found in the
+  pre-merge review):** a gateway error in front of an Esplora node can hide a send that went
+  through, yet `broadcast` held it as "rejected" and the coin counted as unsent.
+  `isExplicitRejection` (`src/backends/types.ts`) now says what counts as the server's own refusal:
+  node RPC errors (HTTP 500 with an RPC code, except warm-up codes -9/-10/-28), Electrum error
+  replies, and Esplora HTTP 400. Anything else is "unknown", which `broadcast` re-checks on the
+  chain before sending again. Tests in `tests/broadcast_failures_test.ts`. Findings dropped as not
+  issues: `wipe` forgetting destination indexes (wiping is meant to forget everything), its warning
+  skipping unreadable plans (the plan is gone after a wipe anyway), and the global wrong-token
+  throttle (StartOS is used on a trusted network).
 - **Platform builds (2026-11-03):** multi-arch Docker image (`buildx`, amd64 and arm64; the arm64
   image started under QEMU and reports `aarch64`); `fetch-tor --all` (all four pinned bundles,
   hashes matched, layout matches `src/net/tor.ts`); cross-compiled binaries for Linux

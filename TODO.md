@@ -24,8 +24,12 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 - [ ] Independent review of `src/core/sigcheck.ts`, `src/core/planner.ts`, `src/core/psbt.ts`,
       `src/net/*` and `src/ui/server.ts`.
-- [ ] One final review of the `ui-deploy` branch before merging, focusing on track/broadcast and the
-      network boundary.
+- [ ] Finish the pre-merge review of the `ui-deploy` branch (first pass done 2026-11-03: the web UI
+      server and jobs, token and host handling, UR/CBOR parsing, wipe, plan archive/delete, the
+      broadcast send loop, depth and spender logic, scan changes, PSBT merge, the Docker and StartOS
+      wiring; its one real finding is fixed and archived). Not read line by line yet: `cmdTrack` and
+      `assessReorg`, `cmdBump`, the wallet-import builders in `ur_wallet.ts`, and the new UI scripts
+      (`app.js`, `wallet_qr.js`).
 
 ### Signers
 
