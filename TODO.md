@@ -196,7 +196,11 @@ Wanted, but this is the work pre-alpha testers help with.
 - [ ] 3-of-5 multisig end to end with a real signer (SeedSigner) and on the regtest chains; it is
       tested through the UI API with fake chains only.
 - [ ] Screenshots in `docs/images/web-ui/` predate the header's **Burn history** / **Burn eyes**
-      buttons; regenerate with `scripts/docs_screenshots.ts` when next touching the UI.
+      buttons. Regenerate them (after the merge, on a machine with Chromium's system libraries:
+      `docs/dev/docs-screenshots.md`), and add a step for the Burn history question: click
+      `#wipe-all`, wait for `#modal:not(.hidden)`, `shot("27-burn-history", false)`, click
+      `#modal-no`, then reference it in the Web UI guide. Not tried yet: this machine lacks the
+      libraries (libnspr4, libnss3 and others) and no sudo was available.
 
 ### Browser checks
 
