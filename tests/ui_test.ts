@@ -35,11 +35,12 @@ async function withUi(
     chains: Record<ChainId, FakeChain>;
     dataDir: string;
   }) => Promise<void>,
+  fundedDescriptor = SRC_DESC,
 ) {
   const btc = fakeChain("btc", 975_000);
   const xbt = fakeChain("xbt", 970_000);
   const ecx = fakeChain("ecx", 974_500);
-  const a = parseDescriptor(SRC_DESC).branches[0].derive(0);
+  const a = parseDescriptor(fundedDescriptor).branches[0].derive(0);
   fund([btc, xbt, ecx], [{ ...a, value: 100_000 }], 900_000, 1);
   const chains = { btc, xbt, ecx };
   const dataDir = await Deno.makeTempDir({ prefix: "splayed-ui-" });
@@ -573,4 +574,85 @@ Deno.test("UI QR: the vendored libraries are the pinned ones and a drawn frame r
     }
   }
   assertEquals(jsQR(rgba, size, size)?.data, frame.toUpperCase());
+});
+
+const THIRD = seed("zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong");
+const cosigner = (k: HDKey) =>
+  `[${fp(k)}/48h/0h/0h/2h]${k.derive("m/48'/0'/0'/2'").publicExtendedKey}/<0;1>/*`;
+const MULTISIG_DESC = `wsh(sortedmulti(2,${cosigner(SOURCE)},${cosigner(OTHER)},${
+  cosigner(THIRD)
+}))`;
+
+Deno.test("UI multisig: each cosigner uploads their own signature; they are merged, then verify", async () => {
+  await withUi(async ({ runJob, api }) => {
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", MULTISIG_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    const plan = await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true]);
+    assertEquals(plan.exitCode, 0, plan.text);
+    const p = (await (await api("/api/plans")).json()).plans[0];
+    const t = p.transactions[0];
+    // Every cosigner signs the SAME unsigned PSBT, separately, and uploads only their own file.
+    const signWith = async (k: HDKey) => {
+      const dl = await api(
+        `/api/plans/${p.id}/download?file=${encodeURIComponent(t.file)}&format=binary`,
+      );
+      const tx = Transaction.fromPSBT(new Uint8Array(await dl.arrayBuffer()));
+      tx.signIdx(k.derive("m/48'/0'/0'/2'/0/0").privateKey!, 0);
+      return base64.encode(tx.toPSBT());
+    };
+    const upload = async (content: string) => {
+      const r = await api(`/api/plans/${p.id}/upload`, {
+        method: "POST",
+        body: JSON.stringify({ file: t.file, content }),
+      });
+      assertEquals(r.status, 200);
+      return await r.json();
+    };
+    const first = await upload(await signWith(SOURCE));
+    assertEquals(first.signatures, { have: 1, need: 2 });
+    // One of two is not enough: verify refuses and says so.
+    const early = await runJob(["verify", p.id]);
+    assertEquals(early.exitCode, 1, early.text);
+    assert(early.text.includes("1 of 2 required signature"), early.text);
+    let seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
+    assertEquals(seen.signedUpload.signatures, { have: 1, need: 2 });
+    // The same cosigner again changes nothing; the second cosigner completes it.
+    assertEquals((await upload(await signWith(SOURCE))).signatures, { have: 1, need: 2 });
+    assertEquals((await upload(await signWith(THIRD))).signatures, { have: 2, need: 2 });
+    seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
+    assertEquals(seen.signedUpload.signatures, { have: 2, need: 2 });
+    const done = await runJob(["verify", p.id]);
+    assertEquals(done.exitCode, 0, done.text);
+  }, MULTISIG_DESC);
+});
+
+Deno.test("CLI multisig: two cosigners' separate signed files for one transaction verify together", async () => {
+  await withUi(async ({ runJob, api, dataDir }) => {
+    assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
+    assertEquals((await runJob(["import", MULTISIG_DESC])).exitCode, 0);
+    assertEquals((await runJob(["scan"])).exitCode, 0);
+    assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
+    assertEquals(
+      (await runJob(["plan", "--chains", "ecx", "--fee-rate", "ecx=2"], [true])).exitCode,
+      0,
+    );
+    const p = (await (await api("/api/plans")).json()).plans[0];
+    const t = p.transactions[0];
+    const unsigned = base64.decode(
+      (await Deno.readTextFile(`${dataDir}/plans/${p.id}/${t.file}`)).trim(),
+    );
+    const signTo = async (name: string, k: HDKey) => {
+      const tx = Transaction.fromPSBT(unsigned);
+      tx.signIdx(k.derive("m/48'/0'/0'/2'/0/0").privateKey!, 0);
+      await Deno.writeFile(`${dataDir}/plans/${p.id}/ecx/${name}.signed.psbt`, tx.toPSBT());
+    };
+    await signTo("cosigner-a", SOURCE);
+    const one = await runJob(["verify", p.id]);
+    assertEquals(one.exitCode, 1, one.text);
+    await signTo("cosigner-b", OTHER);
+    const both = await runJob(["verify", p.id]);
+    assertEquals(both.exitCode, 0, both.text);
+  }, MULTISIG_DESC);
 });

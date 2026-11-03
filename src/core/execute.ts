@@ -11,7 +11,7 @@ import { fromHex, shortBlockHash, toHex } from "./bytes.ts";
 import type { ChainId } from "./profiles.ts";
 import { ECX_MAINNET_REPLAY_LOCKTIME } from "./profiles.ts";
 import type { Plan, PlannedTx } from "./planner.ts";
-import { decodePsbt, type Psbt, PSBT_MAGIC } from "./psbt.ts";
+import { decodePsbt, mergePsbts, type Psbt, PSBT_MAGIC } from "./psbt.ts";
 import {
   extractSignatures,
   finalize,
@@ -358,8 +358,18 @@ export async function matchArtifacts(
     }
     const candidate = signed.tx ?? signed.psbt!.tx;
     const hit = owns.find(({ own }) => sameUnsigned(candidate, own.tx));
-    if (hit) matched.set(hit.t.file, { file, signed });
-    else unmatched.push(file);
+    if (!hit) {
+      unmatched.push(file);
+      continue;
+    }
+    // Cosigners may each have signed the same PSBT into a file of their own: combine them.
+    const earlier = matched.get(hit.t.file);
+    if (earlier?.signed.psbt && signed.psbt) {
+      signed = { psbt: mergePsbts(earlier.signed.psbt, signed.psbt) };
+      matched.set(hit.t.file, { file: `${earlier.file} + ${file}`, signed });
+    } else {
+      matched.set(hit.t.file, { file, signed });
+    }
   }
   return { matched, unmatched };
 }

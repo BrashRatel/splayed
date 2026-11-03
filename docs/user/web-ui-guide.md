@@ -226,6 +226,12 @@ Then bring each **signed** transaction back:
 
 Each uploaded row shows a green **received** note. Do all rows before verifying.
 
+**Multisig:** each cosigner signs the same unsigned file, and you upload (or scan) each one's result
+in turn. The signatures are combined, and the row shows how many it has ("1 of 2 signatures", "needs
+1 more signature"). Verify only passes once enough cosigners have signed. Uploading the same
+cosigner twice changes nothing. On the command line, save each cosigner's file next to the original
+as `<name>.signed.psbt` (any names); `splayed verify` combines the files for the same transaction.
+
 ## 7. Verify
 
 Press **Verify signed files**.

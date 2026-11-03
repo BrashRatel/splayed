@@ -22,8 +22,14 @@ import {
   type WalletKey,
   WalletQrError,
 } from "../core/ur_wallet.ts";
-import { findSignedFiles, loadPlanDir, loadProgress, readSignedArtifact } from "../core/execute.ts";
-import { type Plan, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
+import {
+  findSignedFiles,
+  loadPlanDir,
+  loadProgress,
+  ownPsbt,
+  readSignedArtifact,
+} from "../core/execute.ts";
+import { type Plan, type PlannedTx, PLANS_DIR, XBT_SIGNERS } from "../core/planner.ts";
 import {
   archivedAt,
   plannedOutpoints,
@@ -33,7 +39,9 @@ import {
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
 import { loadDonorScan } from "../core/donors.ts";
 import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
-import { decodePsbt } from "../core/psbt.ts";
+import { decodePsbt, encodePsbt, mergePsbts, type Psbt } from "../core/psbt.ts";
+import { inputContexts, signatureProgress } from "../core/sigcheck.ts";
+import type { Tx } from "../core/tx.ts";
 import { loadScan } from "../core/scan.ts";
 import { classify } from "../core/state.ts";
 import { ensureDir } from "../core/store.ts";
@@ -42,18 +50,45 @@ import { describeRoute } from "../net/transport.ts";
 import { torManager } from "../net/tor.ts";
 import { JobError, JobRunner } from "./jobs.ts";
 
-/** Saves a signed file the user handed over (file picker or QR) next to its plan. */
-async function saveUpload(dir: string, planFile: string, bytes: Uint8Array): Promise<string> {
-  let kind: "psbt" | "hex";
+/** Signatures a signed PSBT carries against what the plan's inputs need; undefined if not a PSBT. */
+async function uploadProgress(dir: string, t: PlannedTx, bytes: Uint8Array) {
   try {
-    kind = readSignedArtifact(bytes).psbt ? "psbt" : "hex";
+    const signed = readSignedArtifact(bytes);
+    const ctxs = inputContexts(await ownPsbt(dir, t), t.inputs.map((i) => i.kind));
+    return signatureProgress(ctxs, signed);
+  } catch {
+    return undefined; // verify says what is wrong with it
+  }
+}
+
+/**
+ * Saves a signed file the user handed over (file picker or QR) next to its plan. A multisig's
+ * cosigners each sign the same PSBT: a PSBT arriving for a transaction that already has one is
+ * merged into it, so the signatures add up instead of the last one replacing the rest.
+ */
+async function saveUpload(
+  dir: string,
+  t: PlannedTx,
+  bytes: Uint8Array,
+): Promise<{ saved: string; signatures?: { have: number; need: number } }> {
+  let signed: { psbt?: Psbt; tx?: Tx };
+  try {
+    signed = readSignedArtifact(bytes);
   } catch {
     throw new JobError("That file isn't a PSBT or a raw transaction");
   }
+  const kind = signed.psbt ? "psbt" : "hex";
   await ensureDir(join(dir, "uploads"));
-  const name = `${planFile.replace("/", "-").replace(/\.psbt$/u, "")}.signed.${kind}`;
-  await Deno.writeFile(join(dir, "uploads", name), bytes, { mode: 0o600 });
-  return `uploads/${name}`;
+  const name = `${t.file.replace("/", "-").replace(/\.psbt$/u, "")}.signed.${kind}`;
+  const target = join(dir, "uploads", name);
+  if (signed.psbt) {
+    try {
+      const earlier = decodePsbt(await Deno.readFile(target));
+      bytes = encodePsbt(mergePsbts(earlier, signed.psbt));
+    } catch { /* nothing saved yet, or for another transaction: this one replaces it */ }
+  }
+  await Deno.writeFile(target, bytes, { mode: 0o600 });
+  return { saved: `uploads/${name}`, signatures: await uploadProgress(dir, t, bytes) };
 }
 
 /** Decoders for scans in progress, keyed by plan and file. Memory only. */
@@ -350,7 +385,14 @@ async function plansView(dataDir: string) {
         for (const kind of ["psbt", "hex"]) {
           try {
             const st = await Deno.stat(join(planDir, "uploads", `${stem}.signed.${kind}`));
-            return { name: `${stem}.signed.${kind}`, at: st.mtime?.toISOString() };
+            const name = `${stem}.signed.${kind}`;
+            const bytes = await Deno.readFile(join(planDir, "uploads", name));
+            const tx = plan.transactions.find((x) => x.file === file)!;
+            return {
+              name,
+              at: st.mtime?.toISOString(),
+              signatures: await uploadProgress(planDir, tx, bytes),
+            };
           } catch { /* not uploaded */ }
         }
         return undefined;
@@ -616,7 +658,7 @@ export function startUi(
         } catch {
           throw new JobError("content must be base64");
         }
-        return json({ ok: true, saved: await saveUpload(dir, t.file, bytes) });
+        return json({ ok: true, ...await saveUpload(dir, t, bytes) });
       }
       // Air-gapped signers: the unsigned PSBT as animated QR frames (UR, crypto-psbt) ...
       if ((m = /^\/api\/plans\/([\w-]+)\/qr$/u.exec(path)) && req.method === "GET") {
@@ -674,7 +716,7 @@ export function startUi(
         } catch (error) {
           throw new JobError(`The scanned data is not a usable PSBT: ${(error as Error).message}`);
         }
-        return json({ complete: true, saved: await saveUpload(dir, t.file, bytes) });
+        return json({ complete: true, ...await saveUpload(dir, t, bytes) });
       }
       // Wallet import by QR: frames in, decoded keys or descriptor out. Nothing is stored.
       if (path === "/api/wallet/qr" && req.method === "POST") {

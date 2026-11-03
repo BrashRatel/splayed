@@ -165,3 +165,42 @@ export function sighashTypeOf(map: KeyValue[]): number | undefined {
   if (entry.value.length !== 4) throw new PsbtError("Bad sighash type field");
   return new DataView(entry.value.buffer, entry.value.byteOffset, 4).getUint32(0, true);
 }
+
+function mergeMaps(base: KeyValue[], other: KeyValue[], otherWins: boolean): KeyValue[] {
+  const byKey = new Map<string, KeyValue>();
+  for (const e of base) byKey.set(toHex(e.key), e);
+  for (const e of other) {
+    const id = toHex(e.key);
+    if (otherWins || !byKey.has(id)) byKey.set(id, e);
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * BIP174 "combiner": one PSBT carrying everything both have. It exists so that each cosigner of a
+ * multisig can sign the same unsigned PSBT separately and the signatures end up together. Both
+ * must be for the same unsigned transaction. An input that either side has already finalized
+ * stays finalized; where both carry the same key (the same cosigner's signature twice), the
+ * newer one (`other`) wins.
+ */
+export function mergePsbts(base: Psbt, other: Psbt): Psbt {
+  if (toHex(serializeStripped(base.tx)) !== toHex(serializeStripped(other.tx))) {
+    throw new PsbtError("These PSBTs are for different transactions");
+  }
+  const isFinal = (map: KeyValue[]) =>
+    map.some((e) =>
+      e.key.length === 1 && (e.key[0] === IN_FINAL_SCRIPTSIG || e.key[0] === IN_FINAL_SCRIPTWITNESS)
+    );
+  return {
+    tx: base.tx,
+    global: mergeMaps(base.global, other.global, false),
+    inputs: base.inputs.map((map, i) =>
+      isFinal(map)
+        ? map
+        : isFinal(other.inputs[i])
+        ? other.inputs[i]
+        : mergeMaps(map, other.inputs[i], true)
+    ),
+    outputs: base.outputs.map((map, i) => mergeMaps(map, other.outputs[i], false)),
+  };
+}

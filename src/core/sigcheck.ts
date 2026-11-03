@@ -292,6 +292,26 @@ export function extractSignatures(
   });
 }
 
+/**
+ * How many signatures a signed file carries against what the plan's inputs need, for the input
+ * that is furthest from done. Counts signatures from the keys the script allows; it does not
+ * check them (`verifyInputs` does).
+ */
+export function signatureProgress(
+  ctxs: InputContext[],
+  signed: { psbt?: Psbt; tx?: Tx },
+): { have: number; need: number } {
+  const found = extractSignatures(ctxs, signed);
+  let worst = { have: 0, need: 1, missing: -1 };
+  ctxs.forEach((ctx, i) => {
+    const keyed = ctx.pubkeys.filter((k) => found.length && found[i].byKey.has(toHex(k))).length;
+    const have = Math.min(ctx.threshold, keyed + found[i].unassigned.length);
+    const missing = ctx.threshold - have;
+    if (missing > worst.missing) worst = { have, need: ctx.threshold, missing };
+  });
+  return { have: worst.have, need: worst.need };
+}
+
 // ---- Verification ----
 
 function scriptCodeFor(ctx: InputContext): { code: Uint8Array; unifiedType: 0 | 1 | 2 } {
@@ -438,7 +458,7 @@ export function verifyInputs(
     }
     if (ordered.length < ctx.threshold) {
       throw new SigCheckError(
-        `Input ${index}: ${ordered.length} of ${ctx.threshold} required signature(s) present`,
+        `Input ${index}: ${ordered.length} of ${ctx.threshold} required signature(s) present; each cosigner signs the same PSBT and their files are combined`,
       );
     }
     return { index, hashTypes, ordered };

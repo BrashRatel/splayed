@@ -1735,6 +1735,12 @@ function viewPlans() {
     picker.footer,
   )];
   const allPlans = state.plans?.plans ?? [];
+  // "1 of 2 signatures": a multisig's cosigners each sign the same PSBT and upload it.
+  const sigText = (sg) => sg ? `${sg.have} of ${sg.need} signature${sg.need === 1 ? "" : "s"}` : "";
+  const sigNext = (sg) =>
+    sg && sg.have < sg.need
+      ? ` Needs ${sg.need - sg.have} more: sign it with another cosigner and upload that too.`
+      : " Press Verify next.";
   for (const p of allPlans.filter((x) => !x.archivedAt)) {
     const rows = p.transactions.map((t) => {
       const fileInput = h("input", { type: "file", class: "mw190" });
@@ -1749,7 +1755,9 @@ function viewPlans() {
           logLine(`Saved signed file as ${r.saved}`);
           await refresh();
           flash(
-            `Signed file received for ${t.chain.toUpperCase()} #${t.order}. Press Verify next.`,
+            `Signed file received for ${t.chain.toUpperCase()} #${t.order} (${
+              sigText(r.signatures)
+            }).${sigNext(r.signatures)}`,
           );
         } catch (e) {
           logLine(`Upload failed: ${e.message}`, "err");
@@ -1823,7 +1831,8 @@ function viewPlans() {
             ? h(
               "div",
               { class: "note" },
-              `✓ received ${t.signedUpload.at ? t.signedUpload.at.slice(11, 19) + " UTC" : ""}`,
+              `✓ received ${t.signedUpload.at ? t.signedUpload.at.slice(11, 19) + " UTC" : ""}` +
+                (t.signedUpload.signatures ? `, ${sigText(t.signedUpload.signatures)}` : ""),
               h("div", { class: "muted mono" }, t.signedUpload.name),
             )
             : null,
@@ -1842,10 +1851,12 @@ function viewPlans() {
                   planId: p.id,
                   file: t.file,
                   label: `${t.chain.toUpperCase()} #${t.order}`,
-                  onSaved: async () => {
+                  onSaved: async (r) => {
                     await refresh();
                     flash(
-                      `Signed PSBT received for ${t.chain.toUpperCase()} #${t.order}. Press Verify next.`,
+                      `Signed PSBT received for ${t.chain.toUpperCase()} #${t.order} (${
+                        sigText(r?.signatures)
+                      }).${sigNext(r?.signatures)}`,
                     );
                   },
                 }),
@@ -1856,8 +1867,14 @@ function viewPlans() {
         h(
           "td",
           {},
-          pr.verified
-            ? badge("verified", "verified")
+          pr.verified ? badge("verified", "verified") : t.signedUpload?.signatures &&
+              t.signedUpload.signatures.have < t.signedUpload.signatures.need
+            ? badge(
+              `needs ${
+                t.signedUpload.signatures.need - t.signedUpload.signatures.have
+              } more signature(s)`,
+              "pending",
+            )
             : t.signedUpload
             ? badge("signed file uploaded: press Verify", "pending")
             : badge("not verified", ""),

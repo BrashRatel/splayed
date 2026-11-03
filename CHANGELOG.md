@@ -4,6 +4,14 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Fixed
+
+- **Multisig signing:** a second cosigner's signed PSBT replaced the first one's instead of adding
+  to it, so a 2-of-3 could never reach 2 signatures. Uploads (file or QR) for a transaction that
+  already has a signed PSBT are now merged (BIP174 combine), the plans list shows "1 of 2
+  signatures", and `splayed verify` combines several signed files for one transaction. Verify still
+  refuses until enough signatures are present.
+
 ### Docs
 
 - The Web UI guide and its screenshots are regenerated for the current UI (26 screens: setup guide,
