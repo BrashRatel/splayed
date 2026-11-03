@@ -58,7 +58,13 @@ Supported descriptors:
 - `pkh`, `wpkh`, `sh(wpkh)` and `tr` (key path);
 - `sh`, `wsh` and `sh(wsh)` with `multi` or `sortedmulti`.
 
-`ypub` and `zpub` keys are accepted and converted to xpub. Private keys are refused.
+`ypub` and `zpub` keys are accepted and converted to xpub. Private keys, and bare 32-byte hex keys
+(which could be one), are refused.
+
+Not supported: miniscript, `combo()`, Taproot script trees, and any script with a timelock
+(`after()`/`older()`, that is CLTV or CSV). A timelocked input needs its own `nLockTime` or
+sequence, which can't be combined with the ECX replay marker, so splayed can't separate such coins.
+`import` says so instead of failing obscurely.
 
 Each coin gets one status:
 

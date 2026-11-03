@@ -53,6 +53,46 @@ export function descriptorChecksum(desc: string): string {
   return out;
 }
 
+/** Miniscript fragments: all unsupported, and the timelock ones are explained. */
+const TIMELOCKS = ["after", "older"];
+const MINISCRIPT = [
+  "pk",
+  "pk_k",
+  "pk_h",
+  "and_v",
+  "and_b",
+  "and_n",
+  "or_b",
+  "or_c",
+  "or_d",
+  "or_i",
+  "andor",
+  "thresh",
+  "multi_a",
+  "sortedmulti_a",
+  "sha256",
+  "hash256",
+  "ripemd160",
+  "hash160",
+  "just_0",
+  "just_1",
+];
+
+function unsupportedFunction(name: string, wrapper: boolean): string {
+  if (TIMELOCKS.includes(name)) {
+    return `${name}() is a timelock, and scripts with timelocks (CLTV and CSV) are not supported. ` +
+      "A timelocked input needs its own nLockTime or sequence, which cannot be combined with " +
+      "the ECX replay marker (nLockTime 499,999,998 and a non-final sequence). Coins locked " +
+      "this way can't be separated by splayed";
+  }
+  if (wrapper || MINISCRIPT.includes(name)) {
+    return `${name}${wrapper ? ":" : "()"} is miniscript, which is not supported (only single ` +
+      "keys, multi() and sortedmulti() are). If the script has a timelock (after() or older()), " +
+      "it can't be separated by splayed at all: it can't be combined with the ECX replay marker";
+  }
+  return `Unsupported descriptor function ${name}()`;
+}
+
 export class DescriptorError extends Error {
   constructor(message: string) {
     super(message);
@@ -161,7 +201,7 @@ class Parser {
     this.pos += s.length;
   }
   word(): string {
-    const m = /^[a-z]+/u.exec(this.text.slice(this.pos));
+    const m = /^[a-z][a-z0-9_]*/u.exec(this.text.slice(this.pos));
     if (!m) throw new DescriptorError(`Expected a function name at position ${this.pos}`);
     this.pos += m[0].length;
     return m[0];
@@ -176,6 +216,8 @@ class Parser {
 
   script(context: "top" | "sh" | "wsh"): ScriptExpr {
     const name = this.word();
+    // A miniscript wrapper such as v:pk(...) or a:older(...).
+    if (this.text[this.pos] === ":") throw new DescriptorError(unsupportedFunction(name, true));
     this.expect("(");
     let expr: ScriptExpr;
     switch (name) {
@@ -223,7 +265,7 @@ class Parser {
         break;
       }
       default:
-        throw new DescriptorError(`Unsupported descriptor function ${name}()`);
+        throw new DescriptorError(unsupportedFunction(name, false));
     }
     this.expect(")");
     return expr;

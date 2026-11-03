@@ -26,6 +26,12 @@ TODO.
   Coins; scan a QR descriptor into the wallet/destination fields; a waiting indicator on Coins while
   `scan` runs; edit scan gap limit and jitter; archive or delete plans; coin picker (**Plan these
   coins** from the new-shared-coins banner).
+- **Locked inputs (2026-11-03):** timelocked scripts (CLTV/CSV) were unsupported but nothing said
+  so. They can only reach splayed through a descriptor (the scan finds coins by descriptor, and the
+  supported forms are standard single-key and multi/sortedmulti scripts), so `import` now refuses
+  `after()`, `older()` and every miniscript fragment or wrapper with a plain explanation. The
+  descriptor parser also now reads function names with underscores (`and_v`) properly. Tests in
+  `tests/descriptors_test.ts`; documented in `docs/user/guide.md`.
 - **A TEST FIRST transaction that can't go out held the rest of its chain (2026-11-03):** it waited
   for a second run or `--all`. `broadcast` now describes the test's state and asks about the rest in
   the same run (`prepare()` in `cmdBroadcast`, `src/cli/main.ts`); a test already on the network

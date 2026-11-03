@@ -21,6 +21,12 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Fixed
 
+- **Timelocked and miniscript descriptors get a clear refusal.** Importing `after()`, `older()` or
+  any miniscript fragment (including wrappers like `v:pk()` and names with underscores such as
+  `and_v`) used to fail with "Unsupported descriptor function" or an odd parse error. The message
+  now says what it is, that timelocks can't be combined with the ECX replay marker, and that splayed
+  can't separate such coins.
+
 - **A TEST FIRST transaction that can't go out in this run no longer leaves the rest of its chain
   waiting.** When it is held back (a conflict, an earlier send that can't be checked, a gate or
   donor problem), `broadcast` now says where it is and asks about the rest straight away, like in

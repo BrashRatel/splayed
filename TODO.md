@@ -10,8 +10,6 @@ No known high-impact bugs are open. Highest impact first:
 
 ### Medium
 
-- [ ] **Locked inputs.** Script timelocks (CLTV) break the ECX marker and are unsupported. Make sure
-      the tool says so clearly instead of failing obscurely.
 - [ ] **Multisig PSBTs on a non-mainnet network: wallets refuse the global xpubs.** The plan's PSBT
       writes each cosigner's `PSBT_GLOBAL_XPUB` with the mainnet `xpub` version bytes (`0488b21e`)
       even on regtest/testnet (`src/core/planner.ts`, `x.raw`). Shrike refuses the XBT multisig PSBT

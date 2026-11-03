@@ -95,6 +95,20 @@ Deno.test("a bare 32-byte hex key is refused (it may be a private key), in tr() 
   parseDescriptor(`tr(${Array.from(pub, (b) => b.toString(16).padStart(2, "0")).join("")})`);
 });
 
+Deno.test("timelocked and miniscript descriptors are refused with a clear reason", () => {
+  const k = account("m/84'/0'/0'");
+  const lock = (d: string, ...parts: string[]) => {
+    const e = assertThrows(() => parseDescriptor(d), DescriptorError);
+    for (const part of parts) assert(e.message.includes(part), `${d}: ${e.message}`);
+  };
+  lock(`wsh(and_v(v:pk(${k}/0/*),after(800000)))`, "miniscript", "timelock");
+  lock(`wsh(older(144))`, "older() is a timelock", "ECX replay marker");
+  lock(`wsh(after(800000))`, "after() is a timelock", "CLTV");
+  lock(`wsh(v:pk(${k}/0/*))`, "v: is miniscript");
+  lock(`wsh(thresh(2,pk(${k}/0/*)))`, "thresh() is miniscript");
+  lock(`combo(${k}/0/*)`, "Unsupported descriptor function combo()");
+});
+
 Deno.test("zpub is converted to xpub with identical addresses", () => {
   // SLIP-132 zpub for the BIP84 account: same key material, different version bytes.
   const d = parseDescriptor(
