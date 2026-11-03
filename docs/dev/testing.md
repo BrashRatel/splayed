@@ -7,6 +7,7 @@ deno task test:integration  # regtest: real Core, Knots (BLAKE2b) and eCash node
 deno task check             # type-check
 deno task lint
 deno task demo-ui           # UI filled with in-memory test chains
+DEMO_LAN=1 deno task demo-ui  # the same, on the LAN (random token) to try from another machine
 ```
 
 ## Unit and end-to-end tests

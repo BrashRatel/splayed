@@ -46,6 +46,16 @@ The UI answers only to the host names in `SPLAYED_UI_ALLOWED_HOSTS`, exactly as 
 them (`name` or `name:port`). For example, add `splayed.home.lan` if a reverse proxy serves it
 there. Any other name gets `403 Forbidden`. Change the variable and restart the container.
 
+## Your data, and starting over
+
+Everything is in the `splayed-data` volume, so it survives restarts, rebuilds and image updates.
+Only removing the volume (`docker compose down -v`) erases it. To forget your wallet, scans and
+plans but keep your servers and settings (the web UI's **Burn history** button does the same):
+
+```sh
+docker compose -f docker/compose.yml exec splayed splayed wipe
+```
+
 ## A new access token
 
 ```sh

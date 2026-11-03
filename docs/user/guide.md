@@ -118,6 +118,11 @@ Sign each PSBT in your wallet and save the result next to the original as `<name
 Finalized PSBTs, partially signed PSBTs, and raw transaction hex (`.hex`/`.txn`) are all accepted.
 For air-gapped signers, see [Signers](signers.md#air-gapped-signers-animated-qr).
 
+**Multisig:** each cosigner signs the same unsigned PSBT, on their own. Save each result as its own
+file next to the original (`cosigner-a.signed.psbt`, `cosigner-b.signed.psbt`, any names): `verify`
+combines the signatures for the same transaction, and refuses until enough are present ("1 of 2
+required signature(s)"). In the web UI each upload is merged into the one before it.
+
 ```sh
 deno task cli verify <plan-id>          # or: verify <plan-id> path/to/signed files...
 deno task cli broadcast <plan-id>
@@ -147,6 +152,16 @@ acknowledged with `track <plan> --ack`; it is then shown muted. When the splits 
 `scan`: the BTC copies then show as separated and can be spent normally. Keep scanning now and then
 before you spend: a coin that turns up later is flagged as
 [new and shared](#coins-that-turn-up-later).
+
+## Starting over
+
+`splayed wipe` forgets everything recorded about your coins: imported and donor descriptors, fork
+destinations, scan results and every plan (PSBTs, signed files, progress). It resets the network
+confirmation, so you run `splayed init` again, and keeps your network settings and any servers you
+added. It lists what goes and asks first. If a transaction you sent isn't confirmed yet it warns and
+asks again, because `track` stops following it; with `--yes` it refuses in that case unless you add
+`--force`. Nothing on any blockchain changes, and no keys are involved. In the web UI this is the
+**Burn history** button.
 
 ## When something goes wrong
 

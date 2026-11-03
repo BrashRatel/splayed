@@ -33,14 +33,15 @@ appear as dialogs in the browser.
    plan exists, a **N new shared coins** pill in the header (and a line in the setup guide) points
    back to them from every tab. See [Coins that turn up later](guide.md#coins-that-turn-up-later).
 4. **Plans & signing:** create a plan, download the unsigned PSBTs (binary or base64), upload signed
-   files, then verify, broadcast and track. The **Coins** list in the New plan form shows every coin
-   that is still shared per the last scan, the forks it is split from, and whether a plan (not
-   archived) already spends it and was broadcast. Coins not in a plan yet start ticked; **Select
-   all**, **Select none**, **Only new shared coins** and **Only coins not in a plan** change the
-   pick, and a running total shows its value. The pick is passed as `plan --coin txid:vout` per coin
-   (left out when it is every coin and none was planned before), and **Create plan** stays disabled,
-   with the reason, while nothing is picked. Each transaction has **QR** and **Scan signed** buttons
-   for [air-gapped signers](signers.md#air-gapped-signers-animated-qr).
+   files (for a multisig, one per cosigner: they are merged and the row shows "1 of 2 signatures"),
+   then verify, broadcast and track. The **Coins** list in the New plan form shows every coin that
+   is still shared per the last scan, the forks it is split from, and whether a plan (not archived)
+   already spends it and was broadcast. Coins not in a plan yet start ticked; **Select all**,
+   **Select none**, **Only new shared coins** and **Only coins not in a plan** change the pick, and
+   a running total shows its value. The pick is passed as `plan --coin txid:vout` per coin (left out
+   when it is every coin and none was planned before), and **Create plan** stays disabled, with the
+   reason, while nothing is picked. Each transaction has **QR** and **Scan signed** buttons for
+   [air-gapped signers](signers.md#air-gapped-signers-animated-qr).
 
 Reorg alerts appear above a plan's table, and each broadcast split has a "Fee bump…" button (plus
 one for the whole plan). See [Recovery](recovery.md).
@@ -53,6 +54,14 @@ Switch on **Advanced** in the tab bar to get a **Donors** tab for the
 
 The UI is dark by default. The header button switches to light mode, and the choice is remembered in
 that browser.
+
+## Burn history and the theme button
+
+The header has **Burn history** and a theme button (**Burn eyes** switches to the light theme, **Go
+back** returns to dark). Burn history runs `splayed wipe`: it lists what goes in the Activity log,
+then asks (the dialog defaults to No). It forgets the wallet, destinations, scan results and all
+plans, resets the network confirmation and keeps your servers and settings; the page returns to the
+Network step. If sent transactions are still unconfirmed it warns and asks a second time.
 
 ## Security
 

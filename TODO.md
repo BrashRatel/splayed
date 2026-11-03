@@ -9,6 +9,10 @@ and Shrike signing our PSBTs on the regtest playground; a SeedSigner scanning th
 default servers probed through Tor. **One real coin has been split on mainnet** (2026-11-01): ECX
 and XBT away from BTC, BTC confirmed untouched. Still only one coin, still early days.
 
+2026-11-02 (the `ui-deploy` branch): the Docker image built and run (sign-in, throttling, Tor inside
+it); the whole flow on regtest in the web UI with a SeedSigner (QR wallet import, single-sig and
+2-of-3 multisig signing, verify, broadcast); the StartOS package on an x86 StartOS 0.4.1 server.
+
 ## 1. Pre-alpha release gates
 
 ### Identity and endpoints (wrong here means wrong chain)
@@ -182,6 +186,17 @@ Wanted, but this is the work pre-alpha testers help with.
 - [ ] `deno task fetch-tor --all` and smoke-test the macOS and Windows Tor bundles (only Linux
       x86_64 has been fetched and run), then `compile` and package each platform.
 - [ ] Managed Tor bootstraps on macOS and Windows.
+
+- [ ] **StartOS package `v0.1.0:3` on a device** (`splayed-startos`): node on by default at first
+      install and the retry loop (no restart after the RPC-login task), the **Burn history** action,
+      Show/Reset UI token, a scan over the Tor service, backup and restore. `:0` ran on an x86
+      StartOS 0.4.1 server (Tor and the local node worked, the node on the second try: the cause was
+      the one-shot check running before bitcoind restarted). Also an aarch64 build (`make arm`), a
+      real icon, and a first-run view of the package's README/instructions.
+- [ ] 3-of-5 multisig end to end with a real signer (SeedSigner) and on the regtest chains; it is
+      tested through the UI API with fake chains only.
+- [ ] Screenshots in `docs/images/web-ui/` predate the header's **Burn history** / **Burn eyes**
+      buttons; regenerate with `scripts/docs_screenshots.ts` when next touching the UI.
 
 ### Browser checks
 

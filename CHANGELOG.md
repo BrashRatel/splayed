@@ -12,6 +12,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   first (No is the default), warns about sent transactions that aren't confirmed yet, and with
   `--yes` refuses in that case unless `--force`.
 
+### Changed
+
+- The header's theme button now reads **Burn eyes** (switch to light) and **Go back** (switch to
+  dark). The new **Burn history** button next to it looks the same.
+- `deno task regtest` runs with `--allow-sys=hostname,networkInterfaces`; without it `regtest ui`
+  (LAN mode) crashed on `Deno.hostname()`.
+
 ### Fixed
 
 - **Multisig signing:** a second cosigner's signed PSBT replaced the first one's instead of adding
@@ -20,12 +27,33 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   signatures", and `splayed verify` combines several signed files for one transaction. Verify still
   refuses until enough signatures are present.
 
+- **Real-node regtest scenarios** (`deno task test:integration`): two assertions had gone stale
+  against the reworded conflict text and the quiet recovery of a dropped split. All 135 steps pass
+  on real Core, Knots and eCash nodes.
+- A 3-of-5 multisig (built from five cosigner keys like the QR import does, signed by cosigners 5, 2
+  and 4) is tested end to end through the UI API: the count goes 1, 2, 3 of 3 and verify passes only
+  at 3.
+- QR windows (show PSBT, scan signed PSBT, wallet import) close on a click outside the box.
+
 ### Docs
 
+- Docker, StartOS and `wipe`: see [docs/user/docker.md](docs/user/docker.md), the
+  [CLI reference](docs/reference/cli.md) and the Web UI guide. `DEMO_LAN=1 deno task demo-ui` serves
+  the fake-chain demo on the LAN (random token, allowed hosts), for trying the UI from another
+  machine.
 - The Web UI guide and its screenshots are regenerated for the current UI (26 screens: setup guide,
   scan settings, progress boxes, QR multisig import, new shared coins, coin picker, TEST FIRST
   question, DROPPED alert, archived plans). `scripts/docs_screenshots.ts` pins Playwright and takes
   `SPLAYED_SHOTS_CHROMIUM` for an existing browser.
+
+### StartOS package (separate repo)
+
+[`BrashRatel/splayed-startos`](https://github.com/BrashRatel/splayed-startos) packs this branch for
+StartOS (SDK 3.1.1, x86_64 and aarch64). It is at `v0.1.0:3`: the Bitcoin node is switched on at
+first install when one is already installed, and its check retries every 20 s until the node answers
+(no restart after the RPC-login task); a **Burn history** action runs `splayed wipe`. Run on an x86
+StartOS 0.4.1 device (Tor, local node and the first steps worked); the `:3` build is waiting for a
+device test.
 
 ### Added (Phase 4)
 

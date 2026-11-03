@@ -86,6 +86,8 @@ See [docs/](docs/README.md) for everything below.
 | Know which wallet can sign what                        | [Signers](docs/user/signers.md)                                          |
 | Use my own nodes or tune Tor and privacy               | [Network and privacy](docs/user/network-and-privacy.md)                  |
 | Use the browser UI or an air-gapped signer             | [Web UI](docs/user/web-ui.md)                                            |
+| Run it in Docker                                       | [Docker](docs/user/docker.md)                                            |
+| Run it on StartOS                                      | [splayed-startos](https://github.com/BrashRatel/splayed-startos)         |
 | Fix a stuck transaction or handle a reorg              | [Recovery](docs/user/recovery.md)                                        |
 | Use a stock hardware wallet for XBT, or move BTC first | [Advanced donor routes](docs/user/advanced-donor-routes.md)              |
 | Understand the transactions and what is verified       | [Transaction model](docs/reference/transaction-model.md)                 |
