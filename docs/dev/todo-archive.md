@@ -4,6 +4,36 @@ Finished items moved out of [TODO.md](../../TODO.md), newest first. When you tic
 TODO, move it here (keep the evidence: what was checked, when, against what) and delete it from the
 TODO.
 
+## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
+
+- **Windows x86_64 binary on mainnet (2026-11-04, tester report, issue #1):** the pre-alpha release
+  binary with its bundled Tor, default public servers, web UI. A full ECX + XBT split of a wpkh
+  wallet: ECX signed on a Coldcard (latest firmware, air-gapped `.psbt`; it accepted locktime
+  499,999,998 and kept the sequences), XBT on a SeedSigner with the unified-sighash firmware
+  (animated QR). Verify passed for both, broadcast, tracked to confirmation, rescanned: the BTC copy
+  showed separated. No errors. (Also covers the TODO's "run the Windows build on a real machine" and
+  "Coldcard signs the ECX locktime".) Left open: macOS, and an easier launcher for the Windows zip,
+  which the tester asked for.
+- **StartOS x86_64 package on mainnet (2026-11-04, tester report, issue #2):** BTC from the local
+  Bitcoin Core node on StartOS (identity check passed), XBT and ECX from the default servers over
+  the StartOS Tor service. A full ECX + XBT split of a wpkh single-sig wallet: ECX signed in Sparrow
+  and XBT in Shrike (both `.psbt` files, the first mainnet use of Shrike for XBT), verified,
+  broadcast, tracked, rescanned: the BTC copy showed separated. No errors. The package was
+  `v0.1.0:5`, the latest; the aarch64 build has still not run on an arm device.
+- **Checkpoint hashes against real nodes (2026-11-05):** an eCash node built from the pinned commit
+  `c8474e0` (tag `ecash-v1.2.0-core32.1`, reports `/eCash Satoshi:1.2.0(Bitcoin Core 32.1.0)/`) and
+  a bitcoinpr node, both fully synced, both pruned, no `txindex`. `config backend detect` matched
+  ECX at 973,728 and 974,017 and BTC at 961,640 and 973,728, and rejected each node on the other
+  chains. (XBT has no node of its own here, so its checkpoints are still confirmed on explorers
+  only.)
+- **Node RPC against real pruned nodes (2026-11-05):** `getblockcount`, `getblockhash`, `gettxout`
+  (279 of 376 outputs of the tip block unspent, values matching the block), `scantxoutset` (79 to
+  111 s, over a ranged descriptor and an address), `testmempoolaccept` and `estimatesmartfee` all
+  answer; `getrawtransaction` of a confirmed transaction fails with -5 without `txindex`, as the
+  docs say. The ECX node had no fee estimate right after syncing (`--fee-rate` covers it). bitcoinpr
+  accepts only JSON-RPC 2.0, so splayed now sends `"2.0"` (CHANGELOG, tests in `tests/rpc_test.ts`).
+  Not run: `sendrawtransaction` on a real split through either node.
+
 ## Completed after the pre-alpha tag (the `ui-deploy` branch)
 
 - **Docker image** (`docker/`): built, run, signed in and Tor bootstrapped inside it; the
