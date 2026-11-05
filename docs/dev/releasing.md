@@ -74,25 +74,31 @@ Tools: `deno`, `docker` with the buildx builder above, `zip`, `tar`, `gpg` with 
 3. **Tag** `main`: `git tag vX && git push origin vX`. Don't create the GitHub release yet; the tag
    is the pin for the package. (If something is found later, delete the tag and re-cut it before
    anyone has downloaded anything; after that, make a new version.)
-4. **Build the StartOS package** (in `../splayed-startos`, which has its own `AGENTS.md`):
-   ```sh
-   cd ../splayed-startos && git checkout master && git pull
-   git submodule update --init
-   git -C upstream-project fetch --tags origin && git -C upstream-project checkout vX
-   ```
-   Edit `startos/versions/current.ts`: version `<splayed version without the pre-release part>:<n>`
-   (`0.1.0:6` for pre-alpha.2; the revision counts up per release) with release notes in all five
-   locales. Check upstream's CHANGELOG for changes to the env variables, `ui` flags or the
-   backend-detect command that `startos/main.ts` relies on (see its `UPDATING.md`). Then:
-   ```sh
-   npm ci && npx tsc --noEmit
-   make x86 arm        # splayed_x86_64.s9pk and splayed_aarch64.s9pk; about 4 GB of Docker storage
-   ```
-   Install `splayed_x86_64.s9pk` on a StartOS server (System > Sideload) and run the Web UI, token,
-   node and a scan before going on. The aarch64 package is only installed when an arm device is at
-   hand; say so in the release notes if it wasn't. Commit the submodule pin and `current.ts` on a
-   branch of `splayed-startos`, open a PR to `master` (its Build workflow packs the package), merge
-   it, and push.
+4. **Build the StartOS package.** `start-cli s9pk pack` only runs inside a packaging workspace (a
+   folder made by `start-cli s9pk init-workspace` that holds the package repo), so a plain clone
+   like `../splayed-startos` can edit and push but not build. Build in the workspace's clone,
+   `../start9-workspace/splayed-startos`, once the package change is merged:
+   - In `../splayed-startos` (`master`): `git submodule update --init`, then
+     `git -C upstream-project fetch --tags origin && git -C upstream-project checkout vX`.
+   - Edit `startos/versions/current.ts`: version
+     `<splayed version without the pre-release part>:<n>` (`0.1.0:7` is the revision after
+     `0.1.0:6`; it counts up per package change) with release notes in all five locales. Check
+     upstream's CHANGELOG for changes to the env variables, `ui` flags or the backend-detect command
+     that `startos/main.ts` relies on (see its `UPDATING.md`).
+   - Commit on a branch, open a PR to `master` (its Build workflow packs both architectures), merge
+     it, then in the workspace clone: `git pull && git submodule update --init`.
+   - Build from that clean checkout, so the package's git hash has no `-modified` suffix:
+     ```sh
+     cd ../start9-workspace/splayed-startos
+     npm ci --ignore-scripts && npx tsc --noEmit
+     make x86 arm        # splayed_x86_64.s9pk and splayed_aarch64.s9pk; about 4 GB of Docker storage
+     start-cli s9pk inspect splayed_x86_64.s9pk manifest | grep '"version"'
+     ```
+   - Install `splayed_x86_64.s9pk` on a StartOS server (System > Sideload) over the previous
+     version, because updates are where package bugs show (the RPC login task once came back on
+     every update). Check the Web UI, the token, node detection and a Tor scan. Install the aarch64
+     one when an arm device is at hand and say so in the release notes if it wasn't. A same-version
+     sideload may be refused: bump the revision for every rebuild you install.
 5. **Build the release files** (back in this repo, on the tag):
    ```sh
    deno task fetch-tor --all
