@@ -13,9 +13,15 @@ import { join } from "node:path";
 import { HDKey } from "@scure/bip32";
 import { entropyToMnemonic, mnemonicToSeedSync } from "@scure/bip39";
 import { wordlist as english } from "@scure/bip39/wordlists/english.js";
-import { assert, assertEquals } from "../assert.ts";
+import { assert, assertEquals, assertThrows } from "../assert.ts";
 import { type CliIO, main } from "../../src/cli/main.ts";
 import { parseDescriptor } from "../../src/core/descriptors.ts";
+import {
+  decodePsbt,
+  encodePsbtBase64,
+  IN_NON_WITNESS_UTXO,
+  IN_WITNESS_UTXO,
+} from "../../src/core/psbt.ts";
 import type { ChainId } from "../../src/core/profiles.ts";
 import {
   makeRegtestProfile,
@@ -24,7 +30,7 @@ import {
 } from "./regtest_profile.ts";
 import { makeCli } from "./cli_harness.ts";
 import { CHAINS, copyBlocks, docker, publishedPort, waitReady } from "./cluster.ts";
-import { RegtestRpcTransport, Rpc } from "./rpc.ts";
+import { RegtestRpcTransport, Rpc, xprvToTprv, xpubToTpub } from "./rpc.ts";
 import {
   btcFirstScenario,
   bumpExtrasScenario,
@@ -35,7 +41,18 @@ import {
   rbfScenario,
   reorgScenario,
 } from "./scenarios.ts";
-import { ignoresUnifiedSign, keyMap, stockSign, unifiedSign } from "./signers.ts";
+import { rpcPathsScenario } from "./rpc_paths.ts";
+import {
+  type Device,
+  DeviceRefusal,
+  type DeviceRules,
+  hardwareStyleSign,
+  ignoresUnifiedSign,
+  keyMap,
+  nodeWalletSign,
+  stockSign,
+  unifiedSign,
+} from "./signers.ts";
 
 const seed = (words: string) => HDKey.fromMasterSeed(mnemonicToSeedSync(words));
 const OTHER = seed("legal winner thank year wave sausage worth useful legal winner thank yellow");
@@ -50,10 +67,23 @@ const BTC_DEST = `wpkh([${fp(OTHER)}/84h/0h/2h]${
   OTHER.derive("m/84'/0'/2'").publicExtendedKey
 }/0/*)`;
 
+/** What a person holding a hardware signer would accept on its screen: the ECX destination. */
+const HARDWARE_RULES: DeviceRules = {
+  allowedOutputs: new Set(
+    Array.from(
+      { length: 20 },
+      (_, i) => parseDescriptor(ECX_DEST).branches[0].derive(i).scriptPubKey,
+    ),
+  ),
+  maxFeeFraction: 0.005,
+};
+
 /** Deterministic, valid mnemonics so each wallet group gets its own coins. */
 const words = (n: number) => entropyToMnemonic(new Uint8Array(16).fill(n), english);
 const DEFAULT_SINGLE = words(1);
 const DEFAULT_COSIGNERS = [words(2), words(3), words(4)];
+const cosignerSet = (from: number, count: number) =>
+  Array.from({ length: count }, (_, i) => words(from + i));
 
 const COIN_VALUES = [1, 0.5]; // BTC per coin; every descriptor gets one coin of each
 
@@ -64,6 +94,8 @@ interface WalletSpec {
   descriptors: string[];
   /** Enough keys to satisfy every descriptor. */
   keys: Map<string, Uint8Array>;
+  /** The same keys as separate hardware signers, one per master key, for the hardware-style flow. */
+  devices: Device[];
   /** Too few keys for at least one multisig input: verify must refuse the result. */
   belowThreshold?: Map<string, Uint8Array>;
   /** `plan --batch` value; "all" puts every coin of a fork in one transaction. */
@@ -73,6 +105,7 @@ interface WalletSpec {
 interface Part {
   descriptor: string;
   keys: Map<string, Uint8Array>;
+  devices: Device[];
   belowThreshold?: Map<string, Uint8Array>;
 }
 
@@ -86,22 +119,53 @@ function singleSigPart(
   return {
     descriptor: wrap(`[${fp(root)}/${purpose}h/0h/0h]${account.publicExtendedKey}/<0;1>/*`),
     keys: keyMap(account),
+    devices: [{
+      fingerprint: fp(root),
+      keys: keyMap(account),
+      descriptor: wrap(
+        `[${fp(root)}/${purpose}h/0h/0h]${xprvToTprv(account.privateExtendedKey!)}/<0;1>/*`,
+      ),
+    }],
   };
 }
 
-/** 2-of-3 sortedmulti with three independent cosigners. */
-function multiSigPart(wrap: (inner: string) => string, mnemonics = DEFAULT_COSIGNERS): Part {
-  const cosigners = mnemonics.map((m) => {
-    const root = seed(m);
+/** m-of-n sortedmulti with n independent cosigners (2-of-3 unless told otherwise). */
+function multiSigPart(
+  wrap: (inner: string) => string,
+  mnemonics = DEFAULT_COSIGNERS,
+  m = 2,
+): Part {
+  const cosigners = mnemonics.map((mnemonic) => {
+    const root = seed(mnemonic);
     return { root, account: root.derive("m/48'/0'/0'/2'") };
   });
   const parts = cosigners.map((c) =>
     `[${fp(c.root)}/48h/0h/0h/2h]${c.account.publicExtendedKey}/<0;1>/*`
   );
+  // The quorum that signs is the first m-1 cosigners and the last (a 2-of-3 uses the first and the
+  // last); one signature short is m-1 cosigners starting from the second.
+  const signing = [...cosigners.slice(0, m - 1), cosigners[cosigners.length - 1]];
+  const short = cosigners.slice(1, m);
   return {
-    descriptor: wrap(`sortedmulti(2,${parts.join(",")})`),
-    keys: new Map([...keyMap(cosigners[0].account), ...keyMap(cosigners[2].account)]),
-    belowThreshold: keyMap(cosigners[1].account),
+    descriptor: wrap(`sortedmulti(${m},${parts.join(",")})`),
+    keys: new Map(signing.flatMap((c) => [...keyMap(c.account)])),
+    devices: signing.map((own) => ({
+      fingerprint: fp(own.root),
+      keys: keyMap(own.account),
+      // This cosigner's wallet: its own key private, the others public.
+      descriptor: wrap(
+        `sortedmulti(${m},${
+          cosigners.map((c) =>
+            `[${fp(c.root)}/48h/0h/0h/2h]${
+              c === own
+                ? xprvToTprv(c.account.privateExtendedKey!)
+                : xpubToTpub(c.account.publicExtendedKey)
+            }/<0;1>/*`
+          ).join(",")
+        })`,
+      ),
+    })),
+    belowThreshold: new Map(short.flatMap((c) => [...keyMap(c.account)])),
   };
 }
 
@@ -109,6 +173,7 @@ const makeWallet = (name: string, parts: Part[], batch?: string): WalletSpec => 
   name,
   descriptors: parts.map((p) => p.descriptor),
   keys: new Map(parts.flatMap((p) => [...p.keys])),
+  devices: parts.flatMap((p) => p.devices),
   belowThreshold: parts.some((p) => p.belowThreshold)
     // Every single-sig input is fully signed; only the multisig inputs are short of a signature.
     ? new Map(parts.flatMap((p) => [...(p.belowThreshold ?? p.keys)]))
@@ -121,9 +186,9 @@ const PART = {
   wpkh: (m?: string) => singleSigPart(84, (k) => `wpkh(${k})`, m),
   shWpkh: (m?: string) => singleSigPart(49, (k) => `sh(wpkh(${k}))`, m),
   tr: (m?: string) => singleSigPart(86, (k) => `tr(${k})`, m),
-  sh: (m?: string[]) => multiSigPart((k) => `sh(${k})`, m),
-  wsh: (m?: string[]) => multiSigPart((k) => `wsh(${k})`, m),
-  shWsh: (m?: string[]) => multiSigPart((k) => `sh(wsh(${k}))`, m),
+  sh: (cosigners?: string[], m?: number) => multiSigPart((k) => `sh(${k})`, cosigners, m),
+  wsh: (cosigners?: string[], m?: number) => multiSigPart((k) => `wsh(${k})`, cosigners, m),
+  shWsh: (cosigners?: string[], m?: number) => multiSigPart((k) => `sh(wsh(${k}))`, cosigners, m),
 };
 
 // Mixed wallet: every script type, each from its own seeds, so a single transaction per fork
@@ -153,6 +218,14 @@ const DROP_WALLET = makeWallet("drop", [PART.wpkh(words(66))]);
 const CPFP_WALLET = makeWallet("cpfp", [PART.wpkh(words(67))]);
 const DROPPED_WALLET = makeWallet("dropped", [PART.wpkh(words(65))]);
 const BTC_DONOR_WALLET = makeWallet("btc-donor-wallet", [PART.wpkh(words(71))]);
+// Node RPC with and without txindex: a lost reply, the tool's own fee bump, a stranger's spend.
+const rpcPathsWallets = (first: number, label: string) => ({
+  lost: makeWallet(`rpc-${label}-lost`, [PART.wpkh(words(first))]),
+  own: makeWallet(`rpc-${label}-own`, [PART.wpkh(words(first + 1))]),
+  conflict: makeWallet(`rpc-${label}-conflict`, [PART.wpkh(words(first + 2))]),
+});
+const RPC_WITH_TXINDEX = rpcPathsWallets(100, "txindex");
+const RPC_WITHOUT_TXINDEX = rpcPathsWallets(103, "no-txindex");
 
 const WALLETS: WalletSpec[] = [
   makeWallet("pkh", [PART.pkh()]),
@@ -162,6 +235,10 @@ const WALLETS: WalletSpec[] = [
   makeWallet("sh-sortedmulti-2of3", [PART.sh()]),
   makeWallet("wsh-sortedmulti-2of3", [PART.wsh()]),
   makeWallet("sh-wsh-sortedmulti-2of3", [PART.shWsh()]),
+  // Other quorum sizes: bigger scripts, more signatures, and a quorum that needs every cosigner.
+  makeWallet("wsh-sortedmulti-3of5", [PART.wsh(cosignerSet(80, 5), 3)]),
+  makeWallet("sh-wsh-sortedmulti-2of2", [PART.shWsh(cosignerSet(85, 2), 2)]),
+  makeWallet("sh-sortedmulti-3of4", [PART.sh(cosignerSet(87, 4), 3)]),
   MIXED,
 ];
 
@@ -179,6 +256,21 @@ async function startNodes(project: string): Promise<Record<ChainId, Rpc>> {
 /** Regtest address for a script, from the node's own decoder (the app uses mainnet encodings). */
 async function regtestAddress(node: Rpc, scriptPubKey: string): Promise<string> {
   return (await node.call<{ address: string }>("decodescript", scriptPubKey)).address;
+}
+
+/** Deletes every signed file of a plan: they sit beside the PSBTs, in the per-chain folders too. */
+async function removeSignedFiles(planDir: string): Promise<void> {
+  for (const sub of ["btc", "ecx", "xbt", "uploads", "."]) {
+    try {
+      for await (const e of Deno.readDir(join(planDir, sub))) {
+        if (e.isFile && e.name.toLowerCase().includes("signed")) {
+          await Deno.remove(join(planDir, sub, e.name));
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+  }
 }
 
 Deno.test({
@@ -209,6 +301,8 @@ Deno.test({
           DROPPED_WALLET,
           DROP_WALLET,
           CPFP_WALLET,
+          ...Object.values(RPC_WITH_TXINDEX),
+          ...Object.values(RPC_WITHOUT_TXINDEX),
         ]
       ) {
         for (const descriptor of spec.descriptors) {
@@ -246,7 +340,10 @@ Deno.test({
       assertEquals(new Set(Object.values(checkpoints).map((c) => c.hash)).size, 3);
       makeRegtestProfile(checkpoints);
 
-      for (const spec of WALLETS) {
+      // SPLAYED_IT_WALLETS=name,name runs only those wallets, and SPLAYED_IT_WALLETS_ONLY=1 stops
+      // after them (skipping the longer scenarios below): a quick loop while changing the wallets.
+      const only = Deno.env.get("SPLAYED_IT_WALLETS")?.split(",").filter(Boolean);
+      for (const spec of WALLETS.filter((w) => !only || only.includes(w.name))) {
         await t.step({
           name: `wallet: ${spec.name}`,
           sanitizeOps: false,
@@ -297,7 +394,13 @@ Deno.test({
             let planDir = "";
             let planId = "";
             let plan: {
-              transactions: { chain: string; file: string; inputs: { kind: string }[] }[];
+              transactions: {
+                chain: string;
+                file: string;
+                vsize: number;
+                fee: number;
+                inputs: { kind: string }[];
+              }[];
             };
             await t.step(
               "plan: one PSBT per coin per fork (one per fork with --batch all)",
@@ -336,16 +439,73 @@ Deno.test({
               },
             );
 
-            const signAll = async (xbtSigner: (b64: string) => string) => {
+            // verify exits 0 for a transaction it has no signed file for ("verified earlier" or "not
+            // signed yet"), so also require that every transaction was verified by this run.
+            const assertAllVerified = () =>
+              assertEquals(
+                (text().match(/VERIFIED/gu) ?? []).length,
+                plan.transactions.length,
+                text(),
+              );
+
+            // ECX by ordinary wallet software (all keys at once), or, given `ecxDevices`, by one
+            // hardware-style device per master key, each signing the same unsigned PSBT on its own
+            // and saving its own file (the documented multisig flow); XBT by a 0x21 signer.
+            const signAll = async (
+              xbtSigner: (b64: string) => string,
+              ecxDevices?: Device[],
+            ) => {
               for (const tx of plan.transactions) {
                 const b64 = await Deno.readTextFile(join(planDir, tx.file));
+                const base = join(planDir, tx.file.replace(/\.psbt$/u, ""));
+                if (tx.chain === "ecx" && ecxDevices) {
+                  await Deno.remove(`${base}.signed.psbt`).catch(() => {});
+                  for (const [i, device] of ecxDevices.entries()) {
+                    await Deno.writeTextFile(
+                      `${base}.device${i + 1}.signed.psbt`,
+                      hardwareStyleSign(b64, device, HARDWARE_RULES),
+                    );
+                  }
+                  continue;
+                }
                 const signed = tx.chain === "ecx" ? stockSign(b64, keys) : xbtSigner(b64);
-                await Deno.writeTextFile(
-                  join(planDir, tx.file.replace(/\.psbt$/u, ".signed.psbt")),
-                  signed,
-                );
+                await Deno.writeTextFile(`${base}.signed.psbt`, signed);
               }
             };
+
+            await t.step("a hardware-style signer refuses what it cannot vouch for", async () => {
+              const ecxTx = plan.transactions.find((x) => x.chain === "ecx")!;
+              const b64 = await Deno.readTextFile(join(planDir, ecxTx.file));
+              const device = spec.devices[0];
+              // splayed's own PSBT satisfies it, so the refusals below are the checks working.
+              hardwareStyleSign(b64, device, HARDWARE_RULES);
+              const rules = (extra: Partial<DeviceRules>) => ({ ...HARDWARE_RULES, ...extra });
+              assertThrows(
+                () => hardwareStyleSign(b64, device, rules({ allowedOutputs: new Set() })),
+                DeviceRefusal,
+                "not a destination",
+              );
+              assertThrows(
+                () => hardwareStyleSign(b64, device, rules({ maxFeeFraction: 0 })),
+                DeviceRefusal,
+                "fee",
+              );
+              assertThrows(
+                () =>
+                  hardwareStyleSign(b64, { ...device, fingerprint: "deadbeef" }, HARDWARE_RULES),
+                DeviceRefusal,
+                "no input names my fingerprint",
+              );
+              const stripped = decodePsbt(b64);
+              stripped.inputs[0] = stripped.inputs[0].filter((e) =>
+                e.key[0] !== IN_NON_WITNESS_UTXO && e.key[0] !== IN_WITNESS_UTXO
+              );
+              assertThrows(
+                () => hardwareStyleSign(encodePsbtBase64(stripped), device, HARDWARE_RULES),
+                DeviceRefusal,
+                "previous transaction",
+              );
+            });
 
             await t.step("verify refuses XBT signatures that are plain SIGHASH_ALL", async () => {
               await signAll((b64) => ignoresUnifiedSign(b64, keys));
@@ -365,14 +525,69 @@ Deno.test({
             }
 
             await t.step("verify accepts the real signatures; the real nodes agree", async () => {
-              await signAll((b64) => unifiedSign(b64, keys));
+              // ECX is signed by hardware-style devices, each into a file of its own.
+              await signAll((b64) => unifiedSign(b64, keys), spec.devices);
               assertEquals(await run("verify", planId), 0, text());
+              assertAllVerified();
             });
+
+            await t.step(
+              "the nodes' own wallets sign it: Core and eCash for ECX, Knots for XBT",
+              async () => {
+                // Start from nothing signed or verified: only what the node wallets produce counts.
+                await removeSignedFiles(planDir);
+                await Deno.remove(join(planDir, "progress.json"));
+                for (const tx of plan.transactions) {
+                  const b64 = await Deno.readTextFile(join(planDir, tx.file));
+                  const base = join(planDir, tx.file.replace(/\.psbt$/u, ""));
+                  for (const [i, device] of spec.devices.entries()) {
+                    // Each cosigner is a wallet of its own, holding only its key. ECX alternates between
+                    // Bitcoin Core and the eCash node; XBT is Knots, which takes the 0x21 request from
+                    // the PSBT itself, so the default sighash type is all it needs.
+                    const node = tx.chain === "xbt"
+                      ? nodes.xbt
+                      : i % 2 === 0
+                      ? nodes.btc
+                      : nodes.ecx;
+                    const { psbt } = await nodeWalletSign(node, device, b64, "DEFAULT");
+                    await Deno.writeTextFile(`${base}.node${i + 1}.signed.psbt`, psbt);
+                  }
+                }
+                assertEquals(await run("verify", planId), 0, text());
+                assertAllVerified();
+              },
+            );
 
             await t.step("broadcast, confirm, track", async () => {
               assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
               for (const c of CHAINS) await nodes[c].mine(2, await minerAddr(c));
               assertEquals(await run("track", planId), 0, text());
+            });
+
+            await t.step("the planned size and fee match what the nodes mined", async () => {
+              const progress = JSON.parse(await Deno.readTextFile(join(planDir, "progress.json")));
+              const asked: Record<string, number> = { ecx: 2, xbt: 3 }; // --fee-rate above
+              for (const tx of plan.transactions) {
+                const id: string = progress.txs[tx.file].verified.txid;
+                const mined = await nodes[tx.chain as ChainId].call<
+                  { vsize: number; confirmations: number }
+                >("getrawtransaction", id, true);
+                assert(mined.confirmations > 0, `${tx.file} is not mined`);
+                // Never below the real size (the fee would be short), and only a little above it.
+                assert(
+                  tx.vsize >= mined.vsize,
+                  `${tx.file}: planned ${tx.vsize} vbytes, mined ${mined.vsize}`,
+                );
+                assert(
+                  tx.vsize - mined.vsize <= mined.vsize * 0.03 + 8,
+                  `${tx.file}: planned ${tx.vsize} vbytes is far above the mined ${mined.vsize}`,
+                );
+                // So the rate actually paid is at least the rate asked for.
+                assert(
+                  tx.fee / mined.vsize >= asked[tx.chain],
+                  `${tx.file}: paid ${tx.fee / mined.vsize} sat/vB, asked ${asked[tx.chain]}`,
+                );
+              }
             });
 
             await t.step(
@@ -443,6 +658,11 @@ Deno.test({
         });
       }
 
+      if (Deno.env.get("SPLAYED_IT_WALLETS_ONLY")) return;
+      // SPLAYED_IT_SCENARIOS=rpc-paths runs just that scenario after the wallets (set
+      // SPLAYED_IT_WALLETS= to none as well); unset, everything runs.
+      const scenarios = Deno.env.get("SPLAYED_IT_SCENARIOS")?.split(",").filter(Boolean);
+
       const harness = {
         nodes,
         minerAddr,
@@ -452,56 +672,75 @@ Deno.test({
         ecxDestKeys: keyMap(OTHER.derive("m/84'/0'/0'")),
         xbtDestKeys: keyMap(OTHER.derive("m/84'/0'/1'")),
       };
-      await t.step({
-        name: "fee bump (RBF) replaces a stuck split",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => rbfScenario(t, harness, RBF_WALLET),
-      });
-      await t.step({
-        name: "reorg handling: moved, unconfirmed and conflicting splits are reported",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => reorgScenario(t, harness, REORG_WALLET),
-      });
-      await t.step({
-        name: "advanced XBT donor route: stock signatures, protected by an XBT-only donor",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => donorScenario(t, harness, DONOR_SOURCE, DONOR_WALLET),
-      });
-      await t.step({
-        name: "advanced BTC-first route: BTC donor, then ECX, then a plain XBT split",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => btcFirstScenario(t, harness, BTC_SOURCE, BTC_DONOR_WALLET),
-      });
-      await t.step({
-        name:
-          "donors funded elsewhere: a 0x21-funded donor is proven, a plain-funded one is refused",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => foreignFundingScenario(t, harness, FOREIGN_SOURCE, FOREIGN_DONOR),
-      });
-      await t.step({
-        name: "real node RPC: reject reasons are classified the way mempoolChecks expects",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => nodeRpcScenario(t, harness),
-      });
-      await t.step({
-        name:
-          "reorg: a split that left the chain and expired from the mempool is reported and re-sent",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => droppedScenario(t, harness, DROPPED_WALLET),
-      });
-      await t.step({
-        name: "fee bump extras: drop an input from a batch, CPFP a low-fee split",
-        sanitizeOps: false,
-        sanitizeResources: false,
-        fn: (t) => bumpExtrasScenario(t, harness, DROP_WALLET, CPFP_WALLET),
-      });
+      if (!scenarios) {
+        await t.step({
+          name: "fee bump (RBF) replaces a stuck split",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => rbfScenario(t, harness, RBF_WALLET),
+        });
+        await t.step({
+          name: "reorg handling: moved, unconfirmed and conflicting splits are reported",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => reorgScenario(t, harness, REORG_WALLET),
+        });
+        await t.step({
+          name: "advanced XBT donor route: stock signatures, protected by an XBT-only donor",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => donorScenario(t, harness, DONOR_SOURCE, DONOR_WALLET),
+        });
+        await t.step({
+          name: "advanced BTC-first route: BTC donor, then ECX, then a plain XBT split",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => btcFirstScenario(t, harness, BTC_SOURCE, BTC_DONOR_WALLET),
+        });
+        await t.step({
+          name:
+            "donors funded elsewhere: a 0x21-funded donor is proven, a plain-funded one is refused",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => foreignFundingScenario(t, harness, FOREIGN_SOURCE, FOREIGN_DONOR),
+        });
+        await t.step({
+          name: "real node RPC: reject reasons are classified the way mempoolChecks expects",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => nodeRpcScenario(t, harness),
+        });
+        await t.step({
+          name:
+            "reorg: a split that left the chain and expired from the mempool is reported and re-sent",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => droppedScenario(t, harness, DROPPED_WALLET),
+        });
+        await t.step({
+          name: "fee bump extras: drop an input from a batch, CPFP a low-fee split",
+          sanitizeOps: false,
+          sanitizeResources: false,
+          fn: (t) => bumpExtrasScenario(t, harness, DROP_WALLET, CPFP_WALLET),
+        });
+      }
+      if (!scenarios || scenarios.includes("rpc-paths")) {
+        for (
+          const [txindex, wallets] of [[true, RPC_WITH_TXINDEX], [
+            false,
+            RPC_WITHOUT_TXINDEX,
+          ]] as const
+        ) {
+          await t.step({
+            name: `node RPC ${
+              txindex ? "with" : "without"
+            } txindex: lost replies, own spends, strangers`,
+            sanitizeOps: false,
+            sanitizeResources: false,
+            fn: (t) => rpcPathsScenario(t, harness, wallets, txindex),
+          });
+        }
+      }
     } finally {
       await docker(project, ["down", "-v", "--remove-orphans"]).catch(() => {});
     }

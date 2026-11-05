@@ -17,6 +17,12 @@ deno task cli plan --xbt-signer knots
 
 Valid names: `knots`, `sparrow-blake2b`, `shrike`, `embit`, `privkeyio-firmware`.
 
+With the Bitcoin Knots wallet (`knots`), sign each XBT PSBT with its descriptor wallet's
+`walletprocesspsbt`, giving it the PSBT and leaving the sighash type at its default; the PSBT
+already asks for 0x21, and Knots signs that. (`ALL|UNIFIED` is accepted too; plain `UNIFIED` is not
+a valid spelling, and a different explicit type such as `ALL|ANYONECANPAY` is refused as not
+matching the PSBT.) For a multisig, each cosigner's wallet signs the same unsigned PSBT on its own.
+
 ## Wallets tested
 
 "Mainnet" means a real coin was split with it, verified and broadcast. "Regtest" means it signed our
@@ -25,13 +31,15 @@ tried; please send a [tester report](https://github.com/BrashRatel/splayed/issue
 
 **Software**
 
-| Wallet                  | Chain | Tested  | Notes                                                                                 |
-| ----------------------- | ----- | ------- | ------------------------------------------------------------------------------------- |
-| Sparrow                 | ECX   | Mainnet | Single-sig, `.psbt` file.                                                             |
-| Sparrow (BLAKE2b build) | XBT   | Regtest | Single-sig. Its multisig PSBT on regtest wasn't retested after the global-xpub fix.   |
-| Shrike                  | XBT   | Mainnet | Single-sig, `.psbt` file. Its multisig PSBT on regtest wasn't retested after the fix. |
-| Bitcoin Knots wallet    | XBT   | Not yet |                                                                                       |
-| embit                   | XBT   | Not yet |                                                                                       |
+| Wallet                  | Chain | Tested  | Notes                                                                                                                           |
+| ----------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Sparrow                 | ECX   | Mainnet | Single-sig, `.psbt` file.                                                                                                       |
+| Sparrow (BLAKE2b build) | XBT   | Regtest | Single-sig. Its multisig PSBT on regtest wasn't retested after the global-xpub fix.                                             |
+| Shrike                  | XBT   | Mainnet | Single-sig, `.psbt` file. Its multisig PSBT on regtest wasn't retested after the fix.                                           |
+| Bitcoin Knots wallet    | XBT   | Regtest | `walletprocesspsbt` needs no sighash type: it takes the 0x21 request from the PSBT. All script kinds and multisig up to 3-of-5. |
+| Bitcoin Core wallet     | ECX   | Regtest | `walletprocesspsbt` (plain SIGHASH_ALL, or DEFAULT for Taproot). All script kinds and multisig up to 3-of-5.                    |
+| eCash node wallet       | ECX   | Regtest | The same, from the eCash node's own wallet.                                                                                     |
+| embit                   | XBT   | Not yet |                                                                                                                                 |
 
 **Hardware**
 

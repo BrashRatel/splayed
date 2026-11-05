@@ -6,6 +6,53 @@ TODO.
 
 ## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
 
+- **Node RPC paths and real signers on regtest (2026-11-05):**
+  - _Lost reply, own spend, conflict, with and without `txindex`_ (`tests/integration/rpc_paths.ts`,
+    six steps). Without `txindex` is the same real nodes behind a test transport that answers as a
+    node started without it would (`getindexinfo` empty, `getrawtransaction` only for the mempool,
+    with Core's error); a lost reply is the transport passing the send to the node and then failing
+    the answer. Results: a send whose reply was lost is found in the mempool or, once mined, by txid
+    (or, without `txindex`, by its own unspent output) and never sent twice; when the output has
+    been moved on and nothing can be seen, it is held ("this backend can't tell"), not sent, not
+    called a conflict; the tool's own fee bump shows as `REPLACED` in both modes; a stranger's
+    confirmed spend of the coin means nothing is sent and the entry is a conflict, naming the
+    spender only with `txindex`. Making every failure count as a refusal fails the lost-reply steps.
+  - _Real signers:_ the nodes' own wallets (Bitcoin Core, the eCash node, Bitcoin Knots) sign
+    splayed's PSBTs from scratch, one wallet per cosigner holding only its key, for every script
+    kind and every quorum up to 3-of-5; `verify` accepts them and the nodes accept the transactions.
+    Knots signs the XBT PSBTs with 0x21 using `walletprocesspsbt` at its default sighash type (the
+    PSBT carries the request); `ALL|UNIFIED` is accepted, `UNIFIED` alone is not a valid spelling,
+    and `ALL|ANYONECANPAY` is refused as not matching the PSBT. This answers the open question under
+    the XBT signer steps above. Written up in `docs/user/signers.md`.
+  - _Two weak spots found in the new tests themselves, both fixed:_ `verify` exits 0 for a
+    transaction it has no signed file for, so the node-wallet step first looked like it passed with
+    signing switched off; and its cleanup missed the signed files in the `ecx/` and `xbt/` folders.
+    It now deletes every signed file and the progress file, and requires every transaction to be
+    reported VERIFIED (the accept step does too). With signing off it fails: "4 transaction(s)
+    failed verification".
+  - _Result:_ 209 steps pass in about 4 minutes with warm caches.
+  - _Observation, not changed:_ without `txindex`, when the held transaction is not the TEST FIRST
+    one, `broadcast` prints "Nothing to broadcast right now" with the reason and exits 0.
+
+- **Regtest suite built out (2026-11-05):**
+  - _More quorum shapes:_ 3-of-5 `wsh`, 2-of-2 `sh(wsh)` and 3-of-4 `sh` join the three 2-of-3
+    wallets; `multiSigPart` takes `m`.
+  - _Hardware-style signer:_ `hardwareStyleSign` (see `docs/dev/testing.md`) signs ECX, one device
+    per master key, each into its own file. splayed's PSBTs satisfied it on every script kind, and
+    each refusal (unknown destination, high fee, foreign fingerprint, missing previous transaction)
+    is checked to fire.
+  - _Size and fee against real nodes:_ every mined transaction's planned vsize is at least the real
+    one, within 3% + 8 vbytes of it, and the rate paid is at least the rate asked for. New unit test
+    `tests/vsize_estimate_test.ts` does the same offline for every script kind and m-of-n up to
+    11-of-15: the estimator never undershoots, and is at most 16 vbytes over on a 1,398-vbyte spend.
+    Making the planner underestimate signatures fails both.
+  - _CI:_ a `regtest` job in `.github/workflows/ci.yml` runs the suite on pull requests, on `main`
+    and by hand (not run on GitHub yet).
+  - _Result:_ 190 steps pass in about 3 minutes with warm caches (135 steps before); unit suite 287.
+    Reorgs and RBF fee bump were already covered (the old TODO listed them by mistake).
+  - _Dev loop:_ `SPLAYED_IT_WALLETS` and `SPLAYED_IT_WALLETS_ONLY` run a few wallets in about a
+    minute.
+
 - **Docs review (2026-11-05):**
   - _Sensitive information:_ searched every tracked file (186) and the whole git history for
     personal paths, email addresses, private keys (`xprv`/WIF/PEM), secret-looking assignments,

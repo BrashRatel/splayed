@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,3 +21,18 @@ jobs:
       - run: deno lint
       - run: deno task check
       - run: deno task test
+
+  # Real Bitcoin Core, Knots and eCash nodes in Docker: splayed's CLI end to end on regtest. About 10
+  # minutes plus about 5 for the first image build, so it runs on pull requests, on main and by hand
+  # rather than on every push to every branch.
+  regtest:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno install
+      - run: deno task test:integration

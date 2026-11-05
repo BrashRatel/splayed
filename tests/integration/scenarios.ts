@@ -14,7 +14,7 @@ import {
   readProgress,
   signPlan,
 } from "./cli_harness.ts";
-import type { Rpc } from "./rpc.ts";
+import type { RegtestTransportOptions, Rpc } from "./rpc.ts";
 import { mempoolChecks, type MempoolNode } from "../../src/core/execute.ts";
 import type { PlannedTx } from "../../src/core/planner.ts";
 import { parseDescriptor } from "../../src/core/descriptors.ts";
@@ -41,8 +41,13 @@ const mine = async (h: Harness, chain: ChainId, n: number) =>
   await h.nodes[chain].mine(n, await h.minerAddr(chain));
 
 /** import -> scan -> dest -> plan -> sign -> verify -> broadcast everything, no blocks mined. */
-async function broadcastWallet(h: Harness, w: ScenarioWallet, feeRate: string) {
-  const cli = await makeCli(h.nodes);
+export async function broadcastWallet(
+  h: Harness,
+  w: ScenarioWallet,
+  feeRate: string,
+  options: RegtestTransportOptions = {},
+) {
+  const cli = await makeCli(h.nodes, options);
   const { run, text } = cli;
   assertEquals(await run("init", "--yes"), 0, text());
   for (const d of w.descriptors) assertEquals(await run("import", d), 0, text());

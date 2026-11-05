@@ -6,19 +6,10 @@ delete it here.
 
 ## Pre-alpha.2
 
-The next release. Mostly small, low-risk work, plus building out the regtest suite. Already in (see
-the CHANGELOG's Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as
-bitcoinpr works.
+The next release. Small, low-risk work that can ship together. Already in (see the CHANGELOG's
+Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as bitcoinpr
+works.
 
-- [ ] **Build out the regtest suite** (`deno task test:integration`, real Core, Knots and eCash
-      nodes in Docker; 135 steps today). Already covered: every single-key script kind, `mixed`
-      batches, 2-of-3 multisig as `wsh`, `sh(wsh)` and `sh`, the donor routes and fan-out, fee bump
-      (replace, `--drop`, `--cpfp`, bump after a reorg) and reorg handling (moved, unconfirmed,
-      conflicting, expired from the mempool and re-sent). Still missing:
-  - other m-of-n multisig shapes (every multisig run is 2-of-3);
-  - a hardware-wallet-style signer;
-  - a CI job (needs Docker; the run takes about 10 minutes with the images built, plus about 5 for
-    the first build).
 - [ ] **StartOS package:** rebuild the `splayed-startos` s9pk for the release, sign it, and publish
       it to the community registry. Guides:
       [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
@@ -52,17 +43,16 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ### Signers
 
-- [ ] Each remaining XBT signer produces 0x21 from our PSBTs, with steps written down: Bitcoin
-      Knots, Sparrow BLAKE2b build (alone on the Knots node), embit.
+- [ ] Each remaining XBT signer produces 0x21 from our PSBTs, with steps written down: Sparrow
+      BLAKE2b build (alone on the Knots node), embit.
 - [ ] ECX hardware wallets Trezor and Ledger sign locktime 499,999,998 without complaint and keep
       the locktime and sequences. Record which devices warn or refuse. (Coldcard does.)
 - [ ] A real stock hardware wallet signing both the shared and the donor input (XBT donor route).
 - [ ] **Scan signed** and **Scan QR** (wallet import) with a Jade, Keystone and Passport. (A
       SeedSigner works, both ways.)
-- [ ] Multisig and Taproot PSBTs with real signers (re-check the regtest multisig PSBT, now with
-      `tpub` global xpubs, in Sparrow, Shrike, SeedSigner and Bitcoin Core, and on mainnet); 3-of-5
-      multisig end to end with a SeedSigner and on the regtest chains (tested through the UI API
-      with fake chains only).
+- [ ] Multisig and Taproot PSBTs in Sparrow, Shrike and SeedSigner (the regtest multisig PSBT now
+      has `tpub` global xpubs), and on mainnet; 3-of-5 multisig end to end with a SeedSigner.
+      (Bitcoin Core, Knots and the eCash node's wallets already sign them on regtest, up to 3-of-5.)
 
 ### Backends against real servers
 
@@ -74,8 +64,6 @@ No known high- or medium-impact bugs are open. Highest impact first:
       backends answer `{"confirmed":false}` for a txid that was never broadcast, which is fixed in
       `EsploraBackend.txStatus`; see the archive.)
 - [ ] Remote node RPC over an onion address, end to end.
-- [ ] The lost-reply, own-spend and conflict paths on node RPC with and without `txindex` against
-      the regtest nodes (covered against fakes only).
 
 ### Platforms
 
