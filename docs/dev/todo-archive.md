@@ -4,6 +4,25 @@ Finished items moved out of [TODO.md](../../TODO.md), newest first. When you tic
 TODO, move it here (keep the evidence: what was checked, when, against what) and delete it from the
 TODO.
 
+## 0.1.0-pre-alpha.2 release (2026-11-05)
+
+- **Released** as
+  [`v0.1.0-pre-alpha.2`](https://github.com/BrashRatel/splayed/releases/tag/v0.1.0-pre-alpha.2) (PR
+  #3 merged with CI green: unit tests, CodeQL, regtest).
+  - _Sensitive information:_ tree and history since the last tag searched again; only public test
+    vectors, the public security contact and public mempool onion hosts. No screenshot changed.
+  - _StartOS package `0.1.0:7`_ (`splayed-startos` PR #1), built in the workspace clone from the
+    clean merged commit. Installed on a StartOS server: x86_64 as an update over the previous build
+    (service started, data and keys intact), aarch64 on an arm device (no synced node, so Tor and
+    the default servers; network confirmed). Testing found a real bug, fixed in `0.1.0:7`: the
+    "Create RPC Credentials" task came back on every update and failed with "user already exists";
+    the store now remembers the user it was issued for and a migration marks an existing login done.
+  - _Files:_ five platform archives and both `.s9pk`, `SHA256SUMS` signed with the `SECURITY.md` key
+    (card subkey `245E7F8F43A0FBFA`). Re-downloaded from the release: signature good, 7 of 7 sums
+    match.
+  - _Process:_ the ordered checklist is in [releasing.md](releasing.md#release-checklist). Not done:
+    registry publication (still in the TODO).
+
 ## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
 
 - **Node RPC paths and real signers on regtest (2026-11-05):**

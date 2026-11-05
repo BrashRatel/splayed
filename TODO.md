@@ -6,19 +6,10 @@ delete it here.
 
 ## Pre-alpha.2
 
-The next release. Small, low-risk work that can ship together. In (see the CHANGELOG): node RPC
-backends send JSON-RPC 2.0, the Linux aarch64 archive bundles Tor, the Windows and macOS launchers,
-and the wider regtest suite. Done on the branch: the sensitive-information search (clean), version
-bump, release notes and CHANGELOG heading. Follow the
-[release checklist](docs/dev/releasing.md#release-checklist), in this order:
+Released 2026-11-05 (see the [archive](docs/dev/todo-archive.md)). Open:
 
-- [ ] Merge `pre-alpha.2` into `main` (PR so CI runs), tag `v0.1.0-pre-alpha.2`.
-- [ ] **StartOS package:** point `splayed-startos` at the tag, bump to `0.1.0:6`, build both
-      `.s9pk`, install the x86_64 one and test it, merge in `splayed-startos`.
-- [ ] Build the release files, add the `.s9pk` files, rebuild `SHA256SUMS`, sign it, publish the
-      GitHub release and verify from a fresh download.
-- [ ] Later: publish the package to a StartOS registry (community, via Start9's submission process,
-      or a self-hosted one) and document the steps in `releasing.md`. Guides:
+- [ ] Publish the StartOS package to a registry (community, via Start9's submission process, or a
+      self-hosted one) and document the steps in [releasing.md](docs/dev/releasing.md). Guides:
       [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
       and [publishing](https://docs.start9.com/packaging/publishing.html).
 
