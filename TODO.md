@@ -6,21 +6,28 @@ delete it here.
 
 ## Pre-alpha.2
 
-The next release. Small, low-risk work that can ship together. Already in (see the CHANGELOG's
-Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as bitcoinpr
-works.
+The next release. Mostly small, low-risk work, plus building out the regtest suite. Already in (see
+the CHANGELOG's Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as
+bitcoinpr works.
 
-- [ ] A real scan over the Docker container's Tor on mainnet with a real wallet (the multi-arch
-      image builds and the arm64 image starts under emulation; no real arm64 host has run it).
-- [ ] **Docs review:** an accuracy pass over every doc (commands, flags, versions, screenshots and
-      links against the code as it is now), and a search of the repo and docs for sensitive
-      information (keys, tokens, passwords, personal paths, hostnames, addresses, descriptors).
+- [ ] **Build out the regtest suite** (`deno task test:integration`, real Core, Knots and eCash
+      nodes in Docker; 135 steps today). Already covered: every single-key script kind, `mixed`
+      batches, 2-of-3 multisig as `wsh`, `sh(wsh)` and `sh`, the donor routes and fan-out, fee bump
+      (replace, `--drop`, `--cpfp`, bump after a reorg) and reorg handling (moved, unconfirmed,
+      conflicting, expired from the mempool and re-sent). Still missing:
+  - other m-of-n multisig shapes (every multisig run is 2-of-3);
+  - a hardware-wallet-style signer;
+  - a CI job (needs Docker; the run takes about 10 minutes with the images built, plus about 5 for
+    the first build).
 - [ ] **StartOS package:** rebuild the `splayed-startos` s9pk for the release, sign it, and publish
-      it to the community registry. Guide:
-      [host registry administration](https://docs.start9.com/packaging/0.4.0.x/host-registry-administration.html).
-      (The build steps are in [docs/dev/releasing.md](docs/dev/releasing.md).)
-- [ ] Cut the release: version bump, release notes, the CHANGELOG's Unreleased heading, packages and
-      signed `SHA256SUMS` (see [docs/dev/releasing.md](docs/dev/releasing.md)).
+      it to the community registry. Guides:
+      [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
+      and [publishing](https://docs.start9.com/packaging/publishing.html) (the docs moved: the old
+      `0.4.0.x/` path is gone). (The build steps are in
+      [docs/dev/releasing.md](docs/dev/releasing.md).)
+- [ ] Cut the release: re-run the sensitive-information search on the final tree, then version bump,
+      release notes, the CHANGELOG's Unreleased heading, packages and signed `SHA256SUMS` (see
+      [docs/dev/releasing.md](docs/dev/releasing.md)).
 
 ## 1. Bugs and issues
 
@@ -81,11 +88,6 @@ No known high- or medium-impact bugs are open. Highest impact first:
       and a scan works (so far only checked statically: right architecture, libraries beside it).
 - [ ] **StartOS package (`splayed-startos`) `v0.1.0:5`:** run the aarch64 build on an arm device if
       one is available (x86_64 is done).
-
-### Test suite
-
-- [ ] Regtest suite coverage still missing: other m-of-n shapes, reorgs, RBF fee bump, a
-      hardware-wallet-style signer, and a CI job (needs Docker and a ~5 minute first build).
 
 ## 3. Docs hygiene
 

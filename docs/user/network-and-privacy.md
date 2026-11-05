@@ -93,6 +93,11 @@ deno task cli init
 - With node RPC, `txindex=1` lets splayed report how deep a spend is and fetch previous transactions
   for PSBTs. Without it, a spent coin shows as "spent/absent ?" and stays **pending**.
 - Configuring your own node-RPC backends also lets `verify` ask `testmempoolaccept` on every chain.
+- A **pruned** node works. splayed only asks about the UTXO set and the mempool, which a pruned node
+  keeps whole; it can't fetch an old confirmed transaction by id, which is the same limit as having
+  no `txindex` (and `txindex` can't be switched on with pruning). Putting an Esplora backend after
+  your node covers that gap.
+- Node RPC speaks JSON-RPC 2.0, so a node that accepts only 2.0 works too.
 - RPC passwords are never stored, only the name of the environment variable that holds them, or a
   cookie file path.
 

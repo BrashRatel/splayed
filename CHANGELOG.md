@@ -25,11 +25,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 - **Node RPC backends now speak JSON-RPC 2.0.** splayed sent `"jsonrpc": "1.0"`, which Bitcoin Core
   accepts but a node that implements only 2.0 (bitcoinpr) answers with `-32600 Invalid request` to
-  every call, so it could not be used as a backend at all. Requests now say `"2.0"`. Bitcoin Core
-  and eCash nodes answer 2.0 the same way (the one visible difference is an error reply with HTTP
-  200 instead of 500 or 404); splayed already told a refusal from "the node isn't ready" by the RPC
-  error code, never the HTTP status, so broadcast handling is unchanged. Tests cover a 2.0-only node
-  and both kinds of error reply.
+  every call, so it could not be used as a backend at all. Requests now say `"2.0"`. Bitcoin Core,
+  Knots and eCash nodes answer 2.0 the same way (the one visible difference is an error reply with
+  HTTP 200 instead of 500 or 404); splayed already told a refusal from "the node isn't ready" by the
+  RPC error code, never the HTTP status, so broadcast handling is unchanged. Tests cover a 2.0-only
+  node and both kinds of error reply.
 
 ## 0.1.0-pre-alpha.1 (2026-11-03)
 

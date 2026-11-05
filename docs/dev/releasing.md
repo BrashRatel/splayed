@@ -15,8 +15,9 @@ deno task package                      # every platform's archive and SHA256SUMS
 aarch64, macOS arm64 and x86_64 and Windows x86_64 from one Linux machine, adds each platform's
 pinned Tor bundle, and writes `.tar.gz` archives (`.zip` for Windows) plus `SHA256SUMS`. Add the
 StartOS packages (below) to `dist/release/`, rebuild the sums with `sha256sum` over every file
-except `SHA256SUMS`, then sign them yourself: `gpg --detach-sign --armor SHA256SUMS`. Only the Linux
-x86_64 archive has been run from a clean extract; run the others on their platforms first.
+except `SHA256SUMS`, then sign them yourself: `gpg --detach-sign --armor SHA256SUMS`. The Linux
+x86_64 and Windows x86_64 archives have been run from a clean extract; run the macOS and Linux
+aarch64 ones on their platforms first.
 
 The Windows and macOS bundles don't get the generic `README.md`. They get `README.txt` and a
 double-click launcher from `packaging/windows/` and `packaging/macos/` (`{{VERSION}}` is filled in;

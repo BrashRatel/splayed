@@ -59,9 +59,10 @@ chain).
 No Deno install needed; Tor is bundled. Archives are published for Linux x86_64 and aarch64, macOS
 arm64 and x86_64, and Windows x86_64 on the
 [releases page](https://github.com/BrashRatel/splayed/releases) (pre-alpha releases aren't marked
-"latest" on GitHub, so go there directly). Only the Linux x86_64 one has been run from a clean
-extract so far. Download, verify, then run; Linux x86_64 shown, other platforms are the same with
-their archive name:
+"latest" on GitHub, so go there directly). The Linux x86_64 and Windows x86_64 ones have been run
+from a clean extract (Windows through a full mainnet split); the macOS and Linux aarch64 ones have
+not. Download, verify, then run; Linux x86_64 shown, other platforms are the same with their archive
+name:
 
 ```sh
 curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz

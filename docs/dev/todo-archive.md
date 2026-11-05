@@ -6,6 +6,30 @@ TODO.
 
 ## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
 
+- **Docs review (2026-11-05):**
+  - _Sensitive information:_ searched every tracked file (186) and the whole git history for
+    personal paths, email addresses, private keys (`xprv`/WIF/PEM), secret-looking assignments,
+    secret-type file names, xpubs, addresses, onion hosts, IPs and other hosts, and the PNG metadata
+    of all 28 screenshots. Nothing found beyond the public security contact in `SECURITY.md`. Every
+    xpub, address and the one `xprv` in the tests is a public vector (BIP32 test vector 1, the BIP39
+    and BIP84 "abandon ... about" vectors, the Hummingbird UR examples) or comes from the throwaway
+    seeds of `tests/fixtures/seedsigner/generate.py`; nothing from a real wallet. The screenshots
+    come from in-memory fake chains.
+  - _Accuracy:_ all 198 relative links and image references resolve; all 17 CLI commands are in
+    `--help` and `docs/reference/cli.md`, every option in the code is in `cli.md`, and every splayed
+    flag in the docs exists; the checkpoint hashes (short form), fork heights and `--xbt-signer`
+    names in the docs match `profiles.ts` and `planner.ts`; every external URL answered 200 except
+    the Start9 guide, whose path had moved (fixed in the TODO).
+  - _Fixed or added:_ the "only Linux x86_64 has been run" claims (README, `releasing.md`); notes on
+    pruned nodes and JSON-RPC 2.0 (`network-and-privacy.md`) and on reaching a node on the Docker
+    host (`docker.md`), all from what the real nodes did.
+
+- **Real mainnet scan over the Docker container's Tor (2026-11-05, project owner):** the image built
+  from this branch, a fresh data volume, the default public servers reached through the Tor started
+  inside the container. The identity check passed, the scan took about 2 minutes, and the coins
+  matched what was expected and showed as separated. (The arm64 image has still only started under
+  emulation; see the Linux aarch64 item in the TODO.)
+
 - **Unit regression for the P2SH-wrapped txid case (2026-11-05):** `tests/sigcheck_test.ts` now runs
   `verifySigned` on a one-input fixture of each script kind. `sh(wpkh)`, `sh(wsh(multi))` and `pkh`
   spends (which carry a scriptSig, so the txid changes on signing) must verify without the "Final
@@ -64,7 +88,10 @@ TODO.
   answer; `getrawtransaction` of a confirmed transaction fails with -5 without `txindex`, as the
   docs say. The ECX node had no fee estimate right after syncing (`--fee-rate` covers it). bitcoinpr
   accepts only JSON-RPC 2.0, so splayed now sends `"2.0"` (CHANGELOG, tests in `tests/rpc_test.ts`).
-  Not run: `sendrawtransaction` on a real split through either node.
+  Not run: `sendrawtransaction` on a real split through either node. The regtest integration suite
+  (`deno task test:integration`: Core 31.0, Knots 29.4.1.knots20260508 and eCash v1.2.0 in Docker)
+  also passes with the 2.0 change: 135 steps in 10 minutes, covering scan, verify, broadcast, track,
+  rescan, fee bump (drop and CPFP), reorg re-send and reject-reason classification.
 
 ## Completed after the pre-alpha tag (the `ui-deploy` branch)
 
