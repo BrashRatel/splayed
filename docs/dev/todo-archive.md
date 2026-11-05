@@ -6,6 +6,15 @@ TODO.
 
 ## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
 
+- **Unit regression for the P2SH-wrapped txid case (2026-11-05):** `tests/sigcheck_test.ts` now runs
+  `verifySigned` on a one-input fixture of each script kind. `sh(wpkh)`, `sh(wsh(multi))` and `pkh`
+  spends (which carry a scriptSig, so the txid changes on signing) must verify without the "Final
+  txid differs from the plan" error; `wpkh`, `wsh(multi)` and `tr` must keep their planned txid and
+  fail when it differs. The fixture gained an `sh-wsh-ms` kind, which also joined the finalize round
+  trip. Checked by breaking the guard in `execute.ts` both ways: always comparing (the original bug)
+  fails 4 tests, never comparing fails 3; the source was restored afterwards. Test-only, so no
+  CHANGELOG entry.
+
 - **Tor bundle for Linux aarch64 (2026-11-05):** Tor Browser 16.0 publishes
   `tor-expert-bundle-linux-aarch64-16.0.tar.gz`. `update-tor-manifest 16.0` (GPG signature checked
   against the Tor Browser Developers key) pinned it and left the other four hashes unchanged;

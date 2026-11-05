@@ -10,8 +10,6 @@ The next release. Small, low-risk work that can ship together. Already in (see t
 Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as bitcoinpr
 works.
 
-- [ ] Fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its only
-      coverage today).
 - [ ] A real scan over the Docker container's Tor on mainnet with a real wallet (the multi-arch
       image builds and the arm64 image starts under emulation; no real arm64 host has run it).
 - [ ] **Docs review:** an accuracy pass over every doc (commands, flags, versions, screenshots and
