@@ -56,8 +56,8 @@ chain).
 
 ### Release binary
 
-No Deno install needed; Tor is bundled (Linux aarch64: install `tor` yourself). Archives are
-published for Linux x86_64 and aarch64, macOS arm64 and x86_64, and Windows x86_64 on the
+No Deno install needed; Tor is bundled. Archives are published for Linux x86_64 and aarch64, macOS
+arm64 and x86_64, and Windows x86_64 on the
 [releases page](https://github.com/BrashRatel/splayed/releases) (pre-alpha releases aren't marked
 "latest" on GitHub, so go there directly). Only the Linux x86_64 one has been run from a clean
 extract so far. Download, verify, then run; Linux x86_64 shown, other platforms are the same with

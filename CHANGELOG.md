@@ -14,6 +14,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   also takes `--only name,name` to build some platforms. Not yet run on a real Windows or macOS
   machine.
 
+### Changed
+
+- **The Linux aarch64 archive now bundles Tor** (Tor Browser 16.0, tor 0.4.9.15, like the other
+  platforms), so it no longer needs a `tor` on `PATH`. The bundle is pinned in
+  `vendor/tor-manifest.json` (signature-verified by `update-tor-manifest`, hash-checked by
+  `fetch-tor`). Not yet run on an arm64 machine.
+
 ### Fixed
 
 - **Node RPC backends now speak JSON-RPC 2.0.** splayed sent `"jsonrpc": "1.0"`, which Bitcoin Core

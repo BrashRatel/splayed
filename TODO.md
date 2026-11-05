@@ -10,9 +10,6 @@ The next release. Small, low-risk work that can ship together. Already in (see t
 Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as bitcoinpr
 works.
 
-- [ ] Pin a Tor bundle for `linux-aarch64` in `vendor/tor-manifest.json` (`update-tor-manifest`);
-      the Linux arm64 archive ships without Tor today and needs one on `PATH`. Check first that the
-      Tor Browser release publishes one.
 - [ ] Fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its only
       coverage today).
 - [ ] A real scan over the Docker container's Tor on mainnet with a real wallet (the multi-arch
@@ -82,6 +79,8 @@ No known high- or medium-impact bugs are open. Highest impact first:
       cross-compiled and the Tor bundles are hash-checked, but nothing has been run there. Try the
       new `Start splayed.command` and README steps (Gatekeeper) there, and `Start splayed.cmd` on
       Windows.
+- [ ] Run the Linux aarch64 archive on a real arm64 host: its bundled `tor` starts and bootstraps
+      and a scan works (so far only checked statically: right architecture, libraries beside it).
 - [ ] **StartOS package (`splayed-startos`) `v0.1.0:5`:** run the aarch64 build on an arm device if
       one is available (x86_64 is done).
 

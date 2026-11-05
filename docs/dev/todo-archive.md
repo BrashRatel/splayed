@@ -6,6 +6,16 @@ TODO.
 
 ## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
 
+- **Tor bundle for Linux aarch64 (2026-11-05):** Tor Browser 16.0 publishes
+  `tor-expert-bundle-linux-aarch64-16.0.tar.gz`. `update-tor-manifest 16.0` (GPG signature checked
+  against the Tor Browser Developers key) pinned it and left the other four hashes unchanged;
+  `fetch-tor --all` downloaded it and matched the hash; `package_release.ts` now bundles it
+  (`linux-aarch64` added to the three scripts). Checked: the extracted `tor` is an ARM aarch64 ELF
+  with the same needed libraries as the x86_64 one, those libraries sit beside it, and splayed
+  already points `LD_LIBRARY_PATH` at that directory (`src/net/tor.ts`); the packaged archive holds
+  `vendor/tor/linux-aarch64/`. Not run: this machine can't execute arm64 binaries without QEMU's
+  binfmt handlers, and no arm64 host was available (see TODO).
+
 - **Windows and macOS launchers and READMEs (2026-11-05):** `packaging/windows/` and
   `packaging/macos/` hold a double-click launcher (`Start splayed.cmd`, `Start splayed.command`;
   both run `splayed ui --open`) and a `README.txt` per platform, and `scripts/package_release.ts`

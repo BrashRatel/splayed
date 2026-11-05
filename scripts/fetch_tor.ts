@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const PLATFORM_DIRS: Record<string, string> = {
   "linux-x86_64": "linux-x86_64",
+  "linux-aarch64": "linux-aarch64",
   "macos-x86_64": "darwin-x86_64",
   "macos-aarch64": "darwin-aarch64",
   "windows-x86_64": "windows-x86_64",

@@ -9,7 +9,13 @@
  * commit it; fetch-tor then downloads and checks bundles against these pins.
  */
 const TOR_BROWSER_SIGNING_KEY = "EF6E286DDA85EA2A4BA7DE684E2C6E8793298290"; // Tor Browser Developers (signing key)
-const PLATFORMS = ["linux-x86_64", "macos-x86_64", "macos-aarch64", "windows-x86_64"];
+const PLATFORMS = [
+  "linux-x86_64",
+  "linux-aarch64",
+  "macos-x86_64",
+  "macos-aarch64",
+  "windows-x86_64",
+];
 
 const version = Deno.args[0];
 if (!version || !/^\d+\.\d+(\.\d+)?(a\d+)?$/.test(version)) {

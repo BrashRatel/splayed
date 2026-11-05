@@ -33,7 +33,12 @@ const PLATFORMS: Platform[] = [
     torDir: "linux-x86_64",
     exe: "splayed",
   },
-  { name: "linux-aarch64", target: "aarch64-unknown-linux-gnu", exe: "splayed" },
+  {
+    name: "linux-aarch64",
+    target: "aarch64-unknown-linux-gnu",
+    torDir: "linux-aarch64",
+    exe: "splayed",
+  },
   {
     name: "macos-aarch64",
     target: "aarch64-apple-darwin",
