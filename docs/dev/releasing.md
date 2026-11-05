@@ -10,13 +10,19 @@ deno task compile                      # dist/splayed for this machine; ship it 
 deno task package                      # every platform's archive and SHA256SUMS in dist/release/
 ```
 
-`deno task package` (`scripts/package_release.ts`) cross-compiles Linux x86_64 and aarch64, macOS
-arm64 and x86_64 and Windows x86_64 from one Linux machine, adds each platform's pinned Tor bundle
-(Linux aarch64 has none yet and needs `tor` on `PATH`), and writes `.tar.gz` archives (`.zip` for
-Windows) plus `SHA256SUMS`. Add the StartOS packages (below) to `dist/release/`, rebuild the sums
-with `sha256sum` over every file except `SHA256SUMS`, then sign them yourself:
-`gpg --detach-sign --armor SHA256SUMS`. Only the Linux x86_64 archive has been run from a clean
-extract; run the others on their platforms first.
+`deno task package [out-dir] [--only name,name]` (`scripts/package_release.ts`; it needs `zip` and
+`tar` installed, and `--only` builds just the named platforms) cross-compiles Linux x86_64 and
+aarch64, macOS arm64 and x86_64 and Windows x86_64 from one Linux machine, adds each platform's
+pinned Tor bundle (Linux aarch64 has none yet and needs `tor` on `PATH`), and writes `.tar.gz`
+archives (`.zip` for Windows) plus `SHA256SUMS`. Add the StartOS packages (below) to
+`dist/release/`, rebuild the sums with `sha256sum` over every file except `SHA256SUMS`, then sign
+them yourself: `gpg --detach-sign --armor SHA256SUMS`. Only the Linux x86_64 archive has been run
+from a clean extract; run the others on their platforms first.
+
+The Windows and macOS bundles don't get the generic `README.md`. They get `README.txt` and a
+double-click launcher from `packaging/windows/` and `packaging/macos/` (`{{VERSION}}` is filled in;
+the Windows files are written with CRLF line endings, the macOS `.command` file is made executable).
+Edit those files, not the packager, to change the wording.
 
 ## Docker and StartOS images
 

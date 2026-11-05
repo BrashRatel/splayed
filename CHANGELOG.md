@@ -4,6 +4,16 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ## Unreleased
 
+### Added
+
+- **Windows and macOS bundles start without a terminal.** Each now has its own `README.txt` (first
+  start, the SmartScreen / Gatekeeper prompts for unsigned builds, checking the download, keeping
+  the `vendor` folder beside the program, where the data lives) and a launcher: `Start splayed.cmd`
+  on Windows, `Start splayed.command` on macOS. Both run `splayed ui --open`. They replace the
+  generic `README.md` in those archives (`packaging/`, `scripts/package_release.ts`). The packager
+  also takes `--only name,name` to build some platforms. Not yet run on a real Windows or macOS
+  machine.
+
 ### Fixed
 
 - **Node RPC backends now speak JSON-RPC 2.0.** splayed sent `"jsonrpc": "1.0"`, which Bitcoin Core

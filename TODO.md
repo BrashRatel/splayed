@@ -10,12 +10,6 @@ The next release. Small, low-risk work that can ship together. Already in (see t
 Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as bitcoinpr
 works.
 
-- [ ] **Windows and macOS bundles: easier launch and their own README.** Explore options for an auto
-      launcher (a double-click `run.cmd` on Windows, a `.command` file or app wrapper on macOS, or
-      the binary starting the UI when run with no arguments) so users don't need a terminal, and
-      write a release-specific README for each bundle (first-run steps, how to start the UI, where
-      the data lives, any warnings about unsigned binaries). The packager currently copies the
-      generic `README.md` into every platform's folder (`scripts/package_release.ts`).
 - [ ] Pin a Tor bundle for `linux-aarch64` in `vendor/tor-manifest.json` (`update-tor-manifest`);
       the Linux arm64 archive ships without Tor today and needs one on `PATH`. Check first that the
       Tor Browser release publishes one.
@@ -85,7 +79,9 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 - [ ] Run the macOS (arm64 and x86_64) builds from `scripts/package_release.ts` on real machines,
       with their bundled Tor: the binary starts, managed Tor bootstraps, and a scan works. They are
-      cross-compiled and the Tor bundles are hash-checked, but nothing has been run there.
+      cross-compiled and the Tor bundles are hash-checked, but nothing has been run there. Try the
+      new `Start splayed.command` and README steps (Gatekeeper) there, and `Start splayed.cmd` on
+      Windows.
 - [ ] **StartOS package (`splayed-startos`) `v0.1.0:5`:** run the aarch64 build on an arm device if
       one is available (x86_64 is done).
 

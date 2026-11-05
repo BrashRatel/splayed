@@ -76,6 +76,11 @@ cd splayed-0.1.0-pre-alpha.1-linux-x86_64
 Then run the same commands as below, with `./splayed` in place of `deno task cli` (and
 `./splayed ui` in place of `deno task ui`).
 
+The Windows and macOS archives skip the terminal: they hold a `README.txt` for that platform and a
+launcher, `Start splayed.cmd` (Windows) or `Start splayed.command` (macOS, right-click and Open the
+first time), that starts the web UI and opens it in your browser. The README covers the SmartScreen
+and Gatekeeper prompts for these unsigned builds, checking the download, and where your data lives.
+
 ### From source (any platform Deno supports)
 
 Requires [Deno 2.x](https://deno.com).

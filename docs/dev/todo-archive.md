@@ -6,6 +6,19 @@ TODO.
 
 ## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
 
+- **Windows and macOS launchers and READMEs (2026-11-05):** `packaging/windows/` and
+  `packaging/macos/` hold a double-click launcher (`Start splayed.cmd`, `Start splayed.command`;
+  both run `splayed ui --open`) and a `README.txt` per platform, and `scripts/package_release.ts`
+  puts them in those archives instead of the generic README (new `--only` flag to build some
+  platforms). Checked by building both bundles from Linux: files present, version filled in, CRLF
+  throughout the Windows files, `Start splayed.command` still executable after extracting the tar
+  and valid `sh`, the Windows binary a PE executable and the macOS one a Mach-O arm64, each with its
+  pinned Tor. The Windows zip step couldn't run here (no `zip` installed), so the Windows folder was
+  inspected before archiving. Not run on a real Windows or macOS machine (see TODO). Options
+  weighed: starting the UI when the binary runs with no arguments (rejected for now: it changes what
+  plain `splayed` does for CLI users) and a macOS app wrapper (more work, and needs signing to avoid
+  Gatekeeper).
+
 - **Windows x86_64 binary on mainnet (2026-11-04, tester report, issue #1):** the pre-alpha release
   binary with its bundled Tor, default public servers, web UI. A full ECX + XBT split of a wpkh
   wallet: ECX signed on a Coldcard (latest firmware, air-gapped `.psbt`; it accepted locktime
