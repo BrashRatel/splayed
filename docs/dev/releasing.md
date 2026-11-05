@@ -43,5 +43,76 @@ storage.
 Browser 16.0 (tor 0.4.9.15). Re-pin with `update-tor-manifest` after checking the signature
 yourself.
 
-Before tagging a release, check [TODO.md](../../TODO.md) for open bugs (section 1), move finished
-items to the [archive](todo-archive.md), and update [CHANGELOG.md](../../CHANGELOG.md).
+## Release checklist
+
+Order matters: the StartOS package pins a splayed commit, so splayed is merged and tagged first, the
+package is built against that tag, and the packages are added to the release last. `X` below is the
+version, for example `0.1.0-pre-alpha.2`; the tag is `vX`.
+
+Tools: `deno`, `docker` with the buildx builder above, `zip`, `tar`, `gpg` with the key in
+[SECURITY.md](../../SECURITY.md), `gh`, `node`/`npm`, `jq`, and `start-cli` 2.x
+(`start-cli --version`; the 0.3.x one has no `s9pk` commands). The workspace is
+`../start9-workspace` (see above) and the package repo is cloned beside this one as
+`../splayed-startos`.
+
+1. **Prepare on the release branch.**
+   - Check [TODO.md](../../TODO.md) for open bugs (section 1) and move finished items to the
+     [archive](todo-archive.md).
+   - Re-run the sensitive-information search on the tree and on the history since the last tag:
+     personal paths, email addresses, private keys (`xprv`, WIF, PEM), secret-looking assignments,
+     secret-type file names, onion hosts and IPs, and the PNG metadata of the screenshots. The last
+     run (see the archive) lists what to expect: public test vectors, the public security contact,
+     and the public mempool onion hosts.
+   - Bump `version` in `deno.json` and `package.json`, change the version in the README download
+     commands and the tester-report template, write `docs/release-notes/X.md`, and give the
+     CHANGELOG's Unreleased heading the version and date.
+   - `deno task check`, `deno task lint`, `deno fmt --check` and `deno task test`; the regtest suite
+     (`deno task test:integration`) when anything near the signing or backend code changed.
+2. **Merge.** Open a PR from the release branch to `main` so the CI jobs run (`gh pr create`), wait
+   for green, then merge it (`gh pr merge --merge`, not squash: the tag should sit on the commits
+   that were tested). Then `git checkout main && git pull`.
+3. **Tag** `main`: `git tag vX && git push origin vX`. Don't create the GitHub release yet; the tag
+   is the pin for the package. (If something is found later, delete the tag and re-cut it before
+   anyone has downloaded anything; after that, make a new version.)
+4. **Build the StartOS package** (in `../splayed-startos`, which has its own `AGENTS.md`):
+   ```sh
+   cd ../splayed-startos && git checkout master && git pull
+   git submodule update --init
+   git -C upstream-project fetch --tags origin && git -C upstream-project checkout vX
+   ```
+   Edit `startos/versions/current.ts`: version `<splayed version without the pre-release part>:<n>`
+   (`0.1.0:6` for pre-alpha.2; the revision counts up per release) with release notes in all five
+   locales. Check upstream's CHANGELOG for changes to the env variables, `ui` flags or the
+   backend-detect command that `startos/main.ts` relies on (see its `UPDATING.md`). Then:
+   ```sh
+   npm ci && npx tsc --noEmit
+   make x86 arm        # splayed_x86_64.s9pk and splayed_aarch64.s9pk; about 4 GB of Docker storage
+   ```
+   Install `splayed_x86_64.s9pk` on a StartOS server (System > Sideload) and run the Web UI, token,
+   node and a scan before going on. The aarch64 package is only installed when an arm device is at
+   hand; say so in the release notes if it wasn't. Commit the submodule pin and `current.ts` on a
+   branch of `splayed-startos`, open a PR to `master` (its Build workflow packs the package), merge
+   it, and push.
+5. **Build the release files** (back in this repo, on the tag):
+   ```sh
+   deno task fetch-tor --all
+   deno task package                       # dist/release/ with the five platform archives
+   cp ../splayed-startos/splayed_x86_64.s9pk  dist/release/splayed-X-startos-x86_64.s9pk
+   cp ../splayed-startos/splayed_aarch64.s9pk dist/release/splayed-X-startos-aarch64.s9pk
+   cd dist/release && rm SHA256SUMS
+   sha256sum $(ls | grep -v -E '^SHA256SUMS') > SHA256SUMS
+   gpg --detach-sign --armor SHA256SUMS    # you sign; writes SHA256SUMS.asc
+   gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS
+   ```
+   The release page lists exactly these files: the five archives, the two `.s9pk` files,
+   `SHA256SUMS` and `SHA256SUMS.asc`.
+6. **Publish.**
+   ```sh
+   gh release create vX --prerelease --title "splayed X" --notes-file docs/release-notes/X.md \
+     dist/release/*
+   ```
+   Then download the files again from the release and verify the signature and sums from the
+   download, not the local build. (A publish to a StartOS registry is not part of this checklist
+   yet.)
+7. **After:** note the release and what was checked in the [archive](todo-archive.md), and remove
+   the finished items from [TODO.md](../../TODO.md).

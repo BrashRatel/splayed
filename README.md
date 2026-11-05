@@ -12,7 +12,7 @@ plan → sign (in your wallet) → verify → broadcast. Your keys never leave y
 > **Status: pre-alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
 > eCash nodes on regtest, and has split real UTXOs on mainnet (ECX and XBT away from BTC, BTC
 > confirmed untouched). It is **not security-reviewed**: start with one small coin/utxo, and read
-> the [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and [TODO.md](TODO.md) first. Testers
+> the [release notes](docs/release-notes/0.1.0-pre-alpha.2.md) and [TODO.md](TODO.md) first. Testers
 > wanted: please file a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
 ## How it works
@@ -65,13 +65,13 @@ not. Download, verify, then run; Linux x86_64 shown, other platforms are the sam
 name:
 
 ```sh
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS.asc
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/splayed-0.1.0-pre-alpha.2-linux-x86_64.tar.gz
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/SHA256SUMS
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/SHA256SUMS.asc
 sha256sum -c --ignore-missing SHA256SUMS   # check the download
 gpg --verify SHA256SUMS.asc SHA256SUMS  # check it against the key in SECURITY.md
-tar xzf splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
-cd splayed-0.1.0-pre-alpha.1-linux-x86_64
+tar xzf splayed-0.1.0-pre-alpha.2-linux-x86_64.tar.gz
+cd splayed-0.1.0-pre-alpha.2-linux-x86_64
 ```
 
 Then run the same commands as below, with `./splayed` in place of `deno task cli` (and

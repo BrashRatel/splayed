@@ -6,19 +6,21 @@ delete it here.
 
 ## Pre-alpha.2
 
-The next release. Small, low-risk work that can ship together. Already in (see the CHANGELOG's
-Unreleased section): node RPC backends send JSON-RPC 2.0, so a 2.0-only node such as bitcoinpr
-works.
+The next release. Small, low-risk work that can ship together. In (see the CHANGELOG): node RPC
+backends send JSON-RPC 2.0, the Linux aarch64 archive bundles Tor, the Windows and macOS launchers,
+and the wider regtest suite. Done on the branch: the sensitive-information search (clean), version
+bump, release notes and CHANGELOG heading. Follow the
+[release checklist](docs/dev/releasing.md#release-checklist), in this order:
 
-- [ ] **StartOS package:** rebuild the `splayed-startos` s9pk for the release, sign it, and publish
-      it to the community registry. Guides:
+- [ ] Merge `pre-alpha.2` into `main` (PR so CI runs), tag `v0.1.0-pre-alpha.2`.
+- [ ] **StartOS package:** point `splayed-startos` at the tag, bump to `0.1.0:6`, build both
+      `.s9pk`, install the x86_64 one and test it, merge in `splayed-startos`.
+- [ ] Build the release files, add the `.s9pk` files, rebuild `SHA256SUMS`, sign it, publish the
+      GitHub release and verify from a fresh download.
+- [ ] Later: publish the package to a StartOS registry (community, via Start9's submission process,
+      or a self-hosted one) and document the steps in `releasing.md`. Guides:
       [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
-      and [publishing](https://docs.start9.com/packaging/publishing.html) (the docs moved: the old
-      `0.4.0.x/` path is gone). (The build steps are in
-      [docs/dev/releasing.md](docs/dev/releasing.md).)
-- [ ] Cut the release: re-run the sensitive-information search on the final tree, then version bump,
-      release notes, the CHANGELOG's Unreleased heading, packages and signed `SHA256SUMS` (see
-      [docs/dev/releasing.md](docs/dev/releasing.md)).
+      and [publishing](https://docs.start9.com/packaging/publishing.html).
 
 ## 1. Bugs and issues
 
