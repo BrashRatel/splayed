@@ -26,6 +26,8 @@ import {
   SigCheckError,
   verifyInputs,
 } from "../src/core/sigcheck.ts";
+import { verifySigned } from "../src/core/execute.ts";
+import type { PlannedTx } from "../src/core/planner.ts";
 import { parseTx, serializeStripped, serializeTx, type Tx, txid } from "../src/core/tx.ts";
 import { unifiedSignatureHash } from "../src/core/unified_sighash.ts";
 
@@ -63,6 +65,10 @@ function fixture(kind: OutputKind, lockTime: number, unified: boolean): Fixture 
       break;
     case "wsh-ms":
       out = p2wsh(p2ms(2, pubs), NETWORK);
+      privs = [k[0].privateKey!, k[2].privateKey!];
+      break;
+    case "sh-wsh-ms":
+      out = p2sh(p2wsh(p2ms(2, pubs), NETWORK), NETWORK);
       privs = [k[0].privateKey!, k[2].privateKey!];
       break;
     default:
@@ -108,7 +114,7 @@ function fixture(kind: OutputKind, lockTime: number, unified: boolean): Fixture 
   if (out.redeemScript) map.push(kv(IN_REDEEM_SCRIPT, new Uint8Array(), out.redeemScript));
   if (out.witnessScript) map.push(kv(IN_WITNESS_SCRIPT, new Uint8Array(), out.witnessScript));
   if (kind !== "tr") {
-    for (const p of kind === "wsh-ms" ? pubs : [pubs[0]]) {
+    for (const p of kind === "wsh-ms" || kind === "sh-wsh-ms" ? pubs : [pubs[0]]) {
       map.push(kv(IN_BIP32_DERIVATION, p, concatBytes(fromHex("73c5da0a"), u32le(0))));
     }
   }
@@ -187,7 +193,7 @@ function unifiedSign(f: Fixture, hashType = 0x21): Psbt {
   return signed;
 }
 
-for (const kind of ["wpkh", "pkh", "sh-wpkh", "tr", "wsh-ms"] as OutputKind[]) {
+for (const kind of ["wpkh", "pkh", "sh-wpkh", "tr", "wsh-ms", "sh-wsh-ms"] as OutputKind[]) {
   Deno.test(`standard (ECX) ${kind}: stock signatures verify; finalize matches the signer's own`, () => {
     const f = fixture(kind, 499_999_998, false);
     const ctxs = inputContexts(f.own, f.kinds);
@@ -213,7 +219,7 @@ for (const kind of ["wpkh", "pkh", "sh-wpkh", "tr", "wsh-ms"] as OutputKind[]) {
     assertEquals(toHex(serializeTx(finalize(f.own.tx, ctxs, v2))), toHex(done.raw!));
     assertEquals(toHex(serializeTx(finalize(f.own.tx, ctxs, v3))), toHex(done.raw!));
     // ECDSA is deterministic (RFC 6979), so separate signing sessions match byte for byte.
-    if (kind !== "wsh-ms" && kind !== "tr") {
+    if (kind !== "wsh-ms" && kind !== "sh-wsh-ms" && kind !== "tr") {
       assertEquals(toHex(serializeTx(final1)), toHex(done.raw!));
     }
     assertEquals(final1.lockTime, 499_999_998);
@@ -278,4 +284,60 @@ Deno.test("a signature over a different transaction does not verify", () => {
     SigCheckError,
     "does not verify",
   );
+});
+
+/** The plan entry `verifySigned` checks a signed ECX transaction against, for a one-input fixture. */
+function plannedFor(f: Fixture, unsignedTxid: string): PlannedTx {
+  return {
+    chain: "ecx",
+    order: 0,
+    testFirst: false,
+    file: "ecx-1.psbt",
+    unsignedTxid,
+    inputs: [{ txid: f.own.tx.inputs[0].txid, vout: 0, value: 150_000, kind: f.kinds[0] }],
+    output: { address: "unused", value: 149_000, destinationIndex: 0 },
+    fee: 1_000,
+    feeRate: 1,
+    vsize: 150,
+    lockTime: 499_999_998,
+    sequence: 0xfffffffd,
+    psbt: "",
+  };
+}
+
+// Inputs with a scriptSig (P2PKH, and the redeem script of P2SH-wrapped segwit) change the txid when
+// they are signed, so verify must not hold them to the unsigned txid. It once did, and rejected
+// every correctly signed sh(wpkh) and sh(wsh(...)) spend with "Final txid differs from the plan".
+for (const kind of ["sh-wpkh", "sh-wsh-ms", "pkh"] as OutputKind[]) {
+  Deno.test(`verify ${kind}: a correctly signed spend passes although its txid changes on signing`, () => {
+    const f = fixture(kind, 499_999_998, false);
+    const unsigned = txid(f.own.tx);
+    const v = verifySigned(plannedFor(f, unsigned), f.own, { psbt: stockSign(f, false).psbt });
+    assert(v.txid !== unsigned, "a scriptSig must have changed the txid");
+    assertEquals(v.txid, txid(parseTx(v.finalHex)));
+    assert(v.checks.includes("transaction matches the plan"));
+  });
+}
+
+// Native segwit and Taproot inputs have no scriptSig, so the final txid must be the unsigned one,
+// and a different one is a problem.
+for (const kind of ["wpkh", "wsh-ms", "tr"] as OutputKind[]) {
+  Deno.test(`verify ${kind}: the final txid must equal the planned one`, () => {
+    const f = fixture(kind, 499_999_998, false);
+    const unsigned = txid(f.own.tx);
+    const signed = { psbt: stockSign(f, false).psbt };
+    assertEquals(verifySigned(plannedFor(f, unsigned), f.own, signed).txid, unsigned);
+    assertThrows(
+      () => verifySigned(plannedFor(f, "ab".repeat(32)), f.own, signed),
+      SigCheckError,
+      "Final txid differs from the plan",
+    );
+  });
+}
+
+Deno.test("verify sh-wpkh: the planned txid is not compared, since it can never match", () => {
+  // The plan's unsigned txid is wrong on purpose: for sh(wpkh) nothing compares against it.
+  const f = fixture("sh-wpkh", 499_999_998, false);
+  const v = verifySigned(plannedFor(f, "ab".repeat(32)), f.own, { psbt: stockSign(f, false).psbt });
+  assertEquals(v.txid, txid(parseTx(v.finalHex)));
 });

@@ -6,7 +6,7 @@ import type { ChainId } from "../../src/core/profiles.ts";
 import { decodePsbt, encodePsbtBase64 } from "../../src/core/psbt.ts";
 import { CHAINS } from "./cluster.ts";
 import { REGTEST_PROFILE_ID } from "./regtest_profile.ts";
-import { RegtestRpcTransport, type Rpc } from "./rpc.ts";
+import { RegtestRpcTransport, type RegtestTransportOptions, type Rpc } from "./rpc.ts";
 import { stockSign, unifiedSign } from "./signers.ts";
 
 /** splayed's real CLI, in a fresh data dir, with the three regtest nodes as its only backends. */
@@ -20,7 +20,14 @@ export interface Cli {
   stdout: () => string;
 }
 
-export async function makeCli(nodes: Record<ChainId, Rpc>): Promise<Cli> {
+/**
+ * `options` is shared with every transport the CLI makes, so a scenario can change it between
+ * commands (see RegtestTransportOptions).
+ */
+export async function makeCli(
+  nodes: Record<ChainId, Rpc>,
+  options: RegtestTransportOptions = {},
+): Promise<Cli> {
   const dir = await Deno.makeTempDir({ prefix: "splayed-it-" });
   const toml = ["[scan]", "jitter_min_ms = 0", "jitter_max_ms = 0", ""];
   for (const c of CHAINS) {
@@ -44,7 +51,7 @@ export async function makeCli(nodes: Record<ChainId, Rpc>): Promise<Cli> {
     confirm: () => true,
     env: { SPLAYED_RPC_PW: "regtest" },
     tor: () => Promise.reject(new Error("regtest must never start or use Tor")),
-    transportFactory: (_config, chain) => new RegtestRpcTransport(nodes[chain]),
+    transportFactory: (_config, chain) => new RegtestRpcTransport(nodes[chain], options, chain),
   };
   return {
     dir,

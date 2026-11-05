@@ -40,6 +40,17 @@ docker compose -f docker/compose.yml run --rm splayed config backend detect --ki
 Files you want splayed to read (a node's cookie file, a CA certificate) must be inside the
 container. Copy them into the volume, or add a read-only bind mount in an override file.
 
+## A node on the Docker host
+
+Inside the container, `127.0.0.1` is the container itself, so a node that listens only on the host's
+loopback (the usual `rpcbind=127.0.0.1`) can't be reached from the default bridge network. Either
+make the node listen on an address the container can reach (and allow that address with
+`rpcallowip`), or run the container with `network_mode: host` in an override file. With host
+networking the container shares the host's ports, so set `SPLAYED_UI_LISTEN: "127.0.0.1:8080"` to
+keep the UI on loopback, and give the node as `http://127.0.0.1:PORT`. Pass an RPC password as an
+environment variable (`--user NAME --password-env VAR`, with the variable set in the override file's
+`environment` or an `env_file`); a cookie file must be copied into the volume.
+
 ## Host names
 
 The UI answers only to the host names in `SPLAYED_UI_ALLOWED_HOSTS`, exactly as your browser sends

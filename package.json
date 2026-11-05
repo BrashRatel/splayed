@@ -1,7 +1,7 @@
 {
   "name": "splayed",
   "private": true,
-  "version": "0.1.0-pre-alpha.1",
+  "version": "0.1.0-pre-alpha.2",
   "type": "module",
   "dependencies": {
     "@noble/curves": "2.4.0",

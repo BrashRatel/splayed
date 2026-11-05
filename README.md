@@ -12,7 +12,7 @@ plan → sign (in your wallet) → verify → broadcast. Your keys never leave y
 > **Status: pre-alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
 > eCash nodes on regtest, and has split real UTXOs on mainnet (ECX and XBT away from BTC, BTC
 > confirmed untouched). It is **not security-reviewed**: start with one small coin/utxo, and read
-> the [release notes](docs/release-notes/0.1.0-pre-alpha.1.md) and [TODO.md](TODO.md) first. Testers
+> the [release notes](docs/release-notes/0.1.0-pre-alpha.2.md) and [TODO.md](TODO.md) first. Testers
 > wanted: please file a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
 ## How it works
@@ -56,25 +56,31 @@ chain).
 
 ### Release binary
 
-No Deno install needed; Tor is bundled (Linux aarch64: install `tor` yourself). Archives are
-published for Linux x86_64 and aarch64, macOS arm64 and x86_64, and Windows x86_64 on the
+No Deno install needed; Tor is bundled. Archives are published for Linux x86_64 and aarch64, macOS
+arm64 and x86_64, and Windows x86_64 on the
 [releases page](https://github.com/BrashRatel/splayed/releases) (pre-alpha releases aren't marked
-"latest" on GitHub, so go there directly). Only the Linux x86_64 one has been run from a clean
-extract so far. Download, verify, then run; Linux x86_64 shown, other platforms are the same with
-their archive name:
+"latest" on GitHub, so go there directly). The Linux x86_64 and Windows x86_64 ones have been run
+from a clean extract (Windows through a full mainnet split); the macOS and Linux aarch64 ones have
+not. Download, verify, then run; Linux x86_64 shown, other platforms are the same with their archive
+name:
 
 ```sh
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.1/SHA256SUMS.asc
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/splayed-0.1.0-pre-alpha.2-linux-x86_64.tar.gz
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/SHA256SUMS
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/SHA256SUMS.asc
 sha256sum -c --ignore-missing SHA256SUMS   # check the download
 gpg --verify SHA256SUMS.asc SHA256SUMS  # check it against the key in SECURITY.md
-tar xzf splayed-0.1.0-pre-alpha.1-linux-x86_64.tar.gz
-cd splayed-0.1.0-pre-alpha.1-linux-x86_64
+tar xzf splayed-0.1.0-pre-alpha.2-linux-x86_64.tar.gz
+cd splayed-0.1.0-pre-alpha.2-linux-x86_64
 ```
 
 Then run the same commands as below, with `./splayed` in place of `deno task cli` (and
 `./splayed ui` in place of `deno task ui`).
+
+The Windows and macOS archives skip the terminal: they hold a `README.txt` for that platform and a
+launcher, `Start splayed.cmd` (Windows) or `Start splayed.command` (macOS, right-click and Open the
+first time), that starts the web UI and opens it in your browser. The README covers the SmartScreen
+and Gatekeeper prompts for these unsigned builds, checking the download, and where your data lives.
 
 ### From source (any platform Deno supports)
 

@@ -2,6 +2,35 @@
 
 All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
+## 0.1.0-pre-alpha.2 (2026-11-05)
+
+### Added
+
+- **Windows and macOS bundles start without a terminal.** Each now has its own `README.txt` (first
+  start, the SmartScreen / Gatekeeper prompts for unsigned builds, checking the download, keeping
+  the `vendor` folder beside the program, where the data lives) and a launcher: `Start splayed.cmd`
+  on Windows, `Start splayed.command` on macOS. Both run `splayed ui --open`. They replace the
+  generic `README.md` in those archives (`packaging/`, `scripts/package_release.ts`). The packager
+  also takes `--only name,name` to build some platforms. Not yet run on a real Windows or macOS
+  machine.
+
+### Changed
+
+- **The Linux aarch64 archive now bundles Tor** (Tor Browser 16.0, tor 0.4.9.15, like the other
+  platforms), so it no longer needs a `tor` on `PATH`. The bundle is pinned in
+  `vendor/tor-manifest.json` (signature-verified by `update-tor-manifest`, hash-checked by
+  `fetch-tor`). Not yet run on an arm64 machine.
+
+### Fixed
+
+- **Node RPC backends now speak JSON-RPC 2.0.** splayed sent `"jsonrpc": "1.0"`, which Bitcoin Core
+  accepts but a node that implements only 2.0 (bitcoinpr) answers with `-32600 Invalid request` to
+  every call, so it could not be used as a backend at all. Requests now say `"2.0"`. Bitcoin Core,
+  Knots and eCash nodes answer 2.0 the same way (the one visible difference is an error reply with
+  HTTP 200 instead of 500 or 404); splayed already told a refusal from "the node isn't ready" by the
+  RPC error code, never the HTTP status, so broadcast handling is unchanged. Tests cover a 2.0-only
+  node and both kinds of error reply.
+
 ## 0.1.0-pre-alpha.1 (2026-11-03)
 
 The tag was re-cut on 2026-11-03 with everything below. The first cut (2026-11-01, listed after this

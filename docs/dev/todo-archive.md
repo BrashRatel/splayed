@@ -4,6 +4,142 @@ Finished items moved out of [TODO.md](../../TODO.md), newest first. When you tic
 TODO, move it here (keep the evidence: what was checked, when, against what) and delete it from the
 TODO.
 
+## Completed after the pre-alpha tag (2026-11-04 to 2026-11-05)
+
+- **Node RPC paths and real signers on regtest (2026-11-05):**
+  - _Lost reply, own spend, conflict, with and without `txindex`_ (`tests/integration/rpc_paths.ts`,
+    six steps). Without `txindex` is the same real nodes behind a test transport that answers as a
+    node started without it would (`getindexinfo` empty, `getrawtransaction` only for the mempool,
+    with Core's error); a lost reply is the transport passing the send to the node and then failing
+    the answer. Results: a send whose reply was lost is found in the mempool or, once mined, by txid
+    (or, without `txindex`, by its own unspent output) and never sent twice; when the output has
+    been moved on and nothing can be seen, it is held ("this backend can't tell"), not sent, not
+    called a conflict; the tool's own fee bump shows as `REPLACED` in both modes; a stranger's
+    confirmed spend of the coin means nothing is sent and the entry is a conflict, naming the
+    spender only with `txindex`. Making every failure count as a refusal fails the lost-reply steps.
+  - _Real signers:_ the nodes' own wallets (Bitcoin Core, the eCash node, Bitcoin Knots) sign
+    splayed's PSBTs from scratch, one wallet per cosigner holding only its key, for every script
+    kind and every quorum up to 3-of-5; `verify` accepts them and the nodes accept the transactions.
+    Knots signs the XBT PSBTs with 0x21 using `walletprocesspsbt` at its default sighash type (the
+    PSBT carries the request); `ALL|UNIFIED` is accepted, `UNIFIED` alone is not a valid spelling,
+    and `ALL|ANYONECANPAY` is refused as not matching the PSBT. This answers the open question under
+    the XBT signer steps above. Written up in `docs/user/signers.md`.
+  - _Two weak spots found in the new tests themselves, both fixed:_ `verify` exits 0 for a
+    transaction it has no signed file for, so the node-wallet step first looked like it passed with
+    signing switched off; and its cleanup missed the signed files in the `ecx/` and `xbt/` folders.
+    It now deletes every signed file and the progress file, and requires every transaction to be
+    reported VERIFIED (the accept step does too). With signing off it fails: "4 transaction(s)
+    failed verification".
+  - _Result:_ 209 steps pass in about 4 minutes with warm caches.
+  - _Observation, not changed:_ without `txindex`, when the held transaction is not the TEST FIRST
+    one, `broadcast` prints "Nothing to broadcast right now" with the reason and exits 0.
+
+- **Regtest suite built out (2026-11-05):**
+  - _More quorum shapes:_ 3-of-5 `wsh`, 2-of-2 `sh(wsh)` and 3-of-4 `sh` join the three 2-of-3
+    wallets; `multiSigPart` takes `m`.
+  - _Hardware-style signer:_ `hardwareStyleSign` (see `docs/dev/testing.md`) signs ECX, one device
+    per master key, each into its own file. splayed's PSBTs satisfied it on every script kind, and
+    each refusal (unknown destination, high fee, foreign fingerprint, missing previous transaction)
+    is checked to fire.
+  - _Size and fee against real nodes:_ every mined transaction's planned vsize is at least the real
+    one, within 3% + 8 vbytes of it, and the rate paid is at least the rate asked for. New unit test
+    `tests/vsize_estimate_test.ts` does the same offline for every script kind and m-of-n up to
+    11-of-15: the estimator never undershoots, and is at most 16 vbytes over on a 1,398-vbyte spend.
+    Making the planner underestimate signatures fails both.
+  - _CI:_ a `regtest` job in `.github/workflows/ci.yml` runs the suite on pull requests, on `main`
+    and by hand (not run on GitHub yet).
+  - _Result:_ 190 steps pass in about 3 minutes with warm caches (135 steps before); unit suite 287.
+    Reorgs and RBF fee bump were already covered (the old TODO listed them by mistake).
+  - _Dev loop:_ `SPLAYED_IT_WALLETS` and `SPLAYED_IT_WALLETS_ONLY` run a few wallets in about a
+    minute.
+
+- **Docs review (2026-11-05):**
+  - _Sensitive information:_ searched every tracked file (186) and the whole git history for
+    personal paths, email addresses, private keys (`xprv`/WIF/PEM), secret-looking assignments,
+    secret-type file names, xpubs, addresses, onion hosts, IPs and other hosts, and the PNG metadata
+    of all 28 screenshots. Nothing found beyond the public security contact in `SECURITY.md`. Every
+    xpub, address and the one `xprv` in the tests is a public vector (BIP32 test vector 1, the BIP39
+    and BIP84 "abandon ... about" vectors, the Hummingbird UR examples) or comes from the throwaway
+    seeds of `tests/fixtures/seedsigner/generate.py`; nothing from a real wallet. The screenshots
+    come from in-memory fake chains.
+  - _Accuracy:_ all 198 relative links and image references resolve; all 17 CLI commands are in
+    `--help` and `docs/reference/cli.md`, every option in the code is in `cli.md`, and every splayed
+    flag in the docs exists; the checkpoint hashes (short form), fork heights and `--xbt-signer`
+    names in the docs match `profiles.ts` and `planner.ts`; every external URL answered 200 except
+    the Start9 guide, whose path had moved (fixed in the TODO).
+  - _Fixed or added:_ the "only Linux x86_64 has been run" claims (README, `releasing.md`); notes on
+    pruned nodes and JSON-RPC 2.0 (`network-and-privacy.md`) and on reaching a node on the Docker
+    host (`docker.md`), all from what the real nodes did.
+
+- **Real mainnet scan over the Docker container's Tor (2026-11-05, project owner):** the image built
+  from this branch, a fresh data volume, the default public servers reached through the Tor started
+  inside the container. The identity check passed, the scan took about 2 minutes, and the coins
+  matched what was expected and showed as separated. (The arm64 image has still only started under
+  emulation; see the Linux aarch64 item in the TODO.)
+
+- **Unit regression for the P2SH-wrapped txid case (2026-11-05):** `tests/sigcheck_test.ts` now runs
+  `verifySigned` on a one-input fixture of each script kind. `sh(wpkh)`, `sh(wsh(multi))` and `pkh`
+  spends (which carry a scriptSig, so the txid changes on signing) must verify without the "Final
+  txid differs from the plan" error; `wpkh`, `wsh(multi)` and `tr` must keep their planned txid and
+  fail when it differs. The fixture gained an `sh-wsh-ms` kind, which also joined the finalize round
+  trip. Checked by breaking the guard in `execute.ts` both ways: always comparing (the original bug)
+  fails 4 tests, never comparing fails 3; the source was restored afterwards. Test-only, so no
+  CHANGELOG entry.
+
+- **Tor bundle for Linux aarch64 (2026-11-05):** Tor Browser 16.0 publishes
+  `tor-expert-bundle-linux-aarch64-16.0.tar.gz`. `update-tor-manifest 16.0` (GPG signature checked
+  against the Tor Browser Developers key) pinned it and left the other four hashes unchanged;
+  `fetch-tor --all` downloaded it and matched the hash; `package_release.ts` now bundles it
+  (`linux-aarch64` added to the three scripts). Checked: the extracted `tor` is an ARM aarch64 ELF
+  with the same needed libraries as the x86_64 one, those libraries sit beside it, and splayed
+  already points `LD_LIBRARY_PATH` at that directory (`src/net/tor.ts`); the packaged archive holds
+  `vendor/tor/linux-aarch64/`. Not run: this machine can't execute arm64 binaries without QEMU's
+  binfmt handlers, and no arm64 host was available (see TODO).
+
+- **Windows and macOS launchers and READMEs (2026-11-05):** `packaging/windows/` and
+  `packaging/macos/` hold a double-click launcher (`Start splayed.cmd`, `Start splayed.command`;
+  both run `splayed ui --open`) and a `README.txt` per platform, and `scripts/package_release.ts`
+  puts them in those archives instead of the generic README (new `--only` flag to build some
+  platforms). Checked by building both bundles from Linux: files present, version filled in, CRLF
+  throughout the Windows files, `Start splayed.command` still executable after extracting the tar
+  and valid `sh`, the Windows binary a PE executable and the macOS one a Mach-O arm64, each with its
+  pinned Tor. The Windows zip step couldn't run here (no `zip` installed), so the Windows folder was
+  inspected before archiving. Not run on a real Windows or macOS machine (see TODO). Options
+  weighed: starting the UI when the binary runs with no arguments (rejected for now: it changes what
+  plain `splayed` does for CLI users) and a macOS app wrapper (more work, and needs signing to avoid
+  Gatekeeper).
+
+- **Windows x86_64 binary on mainnet (2026-11-04, tester report, issue #1):** the pre-alpha release
+  binary with its bundled Tor, default public servers, web UI. A full ECX + XBT split of a wpkh
+  wallet: ECX signed on a Coldcard (latest firmware, air-gapped `.psbt`; it accepted locktime
+  499,999,998 and kept the sequences), XBT on a SeedSigner with the unified-sighash firmware
+  (animated QR). Verify passed for both, broadcast, tracked to confirmation, rescanned: the BTC copy
+  showed separated. No errors. (Also covers the TODO's "run the Windows build on a real machine" and
+  "Coldcard signs the ECX locktime".) Left open: macOS, and an easier launcher for the Windows zip,
+  which the tester asked for.
+- **StartOS x86_64 package on mainnet (2026-11-04, tester report, issue #2):** BTC from the local
+  Bitcoin Core node on StartOS (identity check passed), XBT and ECX from the default servers over
+  the StartOS Tor service. A full ECX + XBT split of a wpkh single-sig wallet: ECX signed in Sparrow
+  and XBT in Shrike (both `.psbt` files, the first mainnet use of Shrike for XBT), verified,
+  broadcast, tracked, rescanned: the BTC copy showed separated. No errors. The package was
+  `v0.1.0:5`, the latest; the aarch64 build has still not run on an arm device.
+- **Checkpoint hashes against real nodes (2026-11-05):** an eCash node built from the pinned commit
+  `c8474e0` (tag `ecash-v1.2.0-core32.1`, reports `/eCash Satoshi:1.2.0(Bitcoin Core 32.1.0)/`) and
+  a bitcoinpr node, both fully synced, both pruned, no `txindex`. `config backend detect` matched
+  ECX at 973,728 and 974,017 and BTC at 961,640 and 973,728, and rejected each node on the other
+  chains. (XBT has no node of its own here, so its checkpoints are still confirmed on explorers
+  only.)
+- **Node RPC against real pruned nodes (2026-11-05):** `getblockcount`, `getblockhash`, `gettxout`
+  (279 of 376 outputs of the tip block unspent, values matching the block), `scantxoutset` (79 to
+  111 s, over a ranged descriptor and an address), `testmempoolaccept` and `estimatesmartfee` all
+  answer; `getrawtransaction` of a confirmed transaction fails with -5 without `txindex`, as the
+  docs say. The ECX node had no fee estimate right after syncing (`--fee-rate` covers it). bitcoinpr
+  accepts only JSON-RPC 2.0, so splayed now sends `"2.0"` (CHANGELOG, tests in `tests/rpc_test.ts`).
+  Not run: `sendrawtransaction` on a real split through either node. The regtest integration suite
+  (`deno task test:integration`: Core 31.0, Knots 29.4.1.knots20260508 and eCash v1.2.0 in Docker)
+  also passes with the 2.0 change: 135 steps in 10 minutes, covering scan, verify, broadcast, track,
+  rescan, fee bump (drop and CPFP), reorg re-send and reject-reason classification.
+
 ## Completed after the pre-alpha tag (the `ui-deploy` branch)
 
 - **Docker image** (`docker/`): built, run, signed in and Tor bootstrapped inside it; the

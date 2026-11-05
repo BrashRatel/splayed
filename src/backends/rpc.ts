@@ -62,7 +62,10 @@ export class RpcBackend implements ChainBackend {
       url: this.config.url,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: this.authorization },
-      body: JSON.stringify({ jsonrpc: "1.0", id, method, params }),
+      // "2.0": Bitcoin Core (28+) and the pruned-node alternatives accept it, and bitcoinpr
+      // rejects anything else. A 2.0 reply may omit "error" on success and answers errors with
+      // HTTP 200, so callers go by the payload's error code, never the HTTP status.
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       isolation,
       timeoutMs,
     });

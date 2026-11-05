@@ -3,7 +3,7 @@ import { rpcAuthorization, RpcBackend } from "../src/backends/rpc.ts";
 import { verifyIdentity } from "../src/core/identity.ts";
 import { MAINNET } from "../src/core/profiles.ts";
 import { resolveRoute, RoutedTransport } from "../src/net/transport.ts";
-import { BackendError } from "../src/backends/types.ts";
+import { BackendError, isExplicitRejection } from "../src/backends/types.ts";
 
 type Handler = (method: string, params: unknown[]) => unknown;
 
@@ -176,5 +176,86 @@ Deno.test("scan: node RPC discovery (no addresses revealed) + Esplora cross-chec
     assertEquals(coin.observations.btc.state, "unspent");
     assertEquals(coin.observations.xbt.state, "unspent");
     assertEquals(coin.observations.ecx.state, "spent");
+  });
+});
+
+/**
+ * A node that speaks only JSON-RPC 2.0, like bitcoinpr: any other "jsonrpc" value (or none) gets
+ * -32600, success replies carry no "error" member, and every RPC error is HTTP 200.
+ */
+async function withStrictJsonRpc2Node(
+  handler: Handler,
+  fn: (url: string, bodies: Record<string, unknown>[]) => Promise<void>,
+) {
+  const bodies: Record<string, unknown>[] = [];
+  const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, async (req) => {
+    const body = await req.json();
+    bodies.push(body);
+    const { id, method, params } = body;
+    if (body.jsonrpc !== "2.0") {
+      return Response.json({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32600, message: "Invalid request" },
+      });
+    }
+    try {
+      return Response.json({ jsonrpc: "2.0", id, result: handler(method, params) });
+    } catch (e) {
+      const err = e as { code?: number; message: string };
+      return Response.json({
+        jsonrpc: "2.0",
+        id,
+        error: { code: err.code ?? -1, message: err.message },
+      });
+    }
+  });
+  try {
+    await fn(`http://127.0.0.1:${(server.addr as Deno.NetAddr).port}`, bodies);
+  } finally {
+    await server.shutdown();
+  }
+}
+
+Deno.test("RPC: requests are JSON-RPC 2.0, which bitcoinpr-style nodes require", async () => {
+  await withStrictJsonRpc2Node((method, params) => {
+    if (method === "getblockcount") return 974_676;
+    if (method === "getblockhash") return "ab".repeat(32);
+    if (method === "gettxout") {
+      return params[0] === "11".repeat(32) ? { confirmations: 3, value: 0.001 } : null;
+    }
+    throw new Error(`unexpected ${method}`);
+  }, async (url, bodies) => {
+    const b = backend(url);
+    assertEquals(await b.tipHeight(), 974_676);
+    assertEquals(await b.blockHash(1), "ab".repeat(32));
+    assertEquals(await b.observeOutput("11".repeat(32), 0), {
+      state: "unspent",
+      value: 100_000,
+      createdHeight: 974_674,
+    });
+    // A reply without an "error" member, and a null result, are both ordinary answers.
+    assertEquals((await b.observeOutput("22".repeat(32), 0)).state, "gone");
+    assertEquals(bodies.length > 0 && bodies.every((x) => x.jsonrpc === "2.0"), true);
+  });
+});
+
+Deno.test("RPC: a 2.0 error reply (HTTP 200) still tells refusal from 'not ready' by its code", async () => {
+  await withStrictJsonRpc2Node((method) => {
+    if (method === "sendrawtransaction") {
+      throw Object.assign(new Error("bad-txns-inputs-missingorspent"), { code: -25 });
+    }
+    if (method === "testmempoolaccept") {
+      throw Object.assign(new Error("Verifying blocks..."), { code: -28 });
+    }
+    throw new Error(`unexpected ${method}`);
+  }, async (url) => {
+    const b = backend(url);
+    const refused = await b.broadcast("00", "xbt:test").catch((e) => e);
+    assertEquals(refused instanceof BackendError, true);
+    assertEquals(isExplicitRejection(refused), true);
+    const notReady = await b.testMempoolAccept("00").catch((e) => e);
+    assertEquals(notReady instanceof BackendError, true);
+    assertEquals(isExplicitRejection(notReady), false);
   });
 });

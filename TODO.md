@@ -4,6 +4,24 @@ Open work only, grouped by kind and ordered by impact within each group. When an
 it to [docs/dev/todo-archive.md](docs/dev/todo-archive.md) (with what was checked and when) and
 delete it here.
 
+## Pre-alpha.2
+
+The next release. Small, low-risk work that can ship together. In (see the CHANGELOG): node RPC
+backends send JSON-RPC 2.0, the Linux aarch64 archive bundles Tor, the Windows and macOS launchers,
+and the wider regtest suite. Done on the branch: the sensitive-information search (clean), version
+bump, release notes and CHANGELOG heading. Follow the
+[release checklist](docs/dev/releasing.md#release-checklist), in this order:
+
+- [ ] Merge `pre-alpha.2` into `main` (PR so CI runs), tag `v0.1.0-pre-alpha.2`.
+- [ ] **StartOS package:** point `splayed-startos` at the tag, bump to `0.1.0:6`, build both
+      `.s9pk`, install the x86_64 one and test it, merge in `splayed-startos`.
+- [ ] Build the release files, add the `.s9pk` files, rebuild `SHA256SUMS`, sign it, publish the
+      GitHub release and verify from a fresh download.
+- [ ] Later: publish the package to a StartOS registry (community, via Start9's submission process,
+      or a self-hosted one) and document the steps in `releasing.md`. Guides:
+      [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
+      and [publishing](https://docs.start9.com/packaging/publishing.html).
+
 ## 1. Bugs and issues
 
 No known high- or medium-impact bugs are open. Highest impact first:
@@ -27,17 +45,16 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ### Signers
 
-- [ ] Each remaining XBT signer produces 0x21 from our PSBTs, with steps written down: Bitcoin
-      Knots, Sparrow BLAKE2b build (alone on the Knots node), Shrike, embit.
-- [ ] ECX hardware wallets (Coldcard, Trezor, Ledger) sign locktime 499,999,998 without complaint
-      and keep the locktime and sequences. Record which devices warn or refuse.
+- [ ] Each remaining XBT signer produces 0x21 from our PSBTs, with steps written down: Sparrow
+      BLAKE2b build (alone on the Knots node), embit.
+- [ ] ECX hardware wallets Trezor and Ledger sign locktime 499,999,998 without complaint and keep
+      the locktime and sequences. Record which devices warn or refuse. (Coldcard does.)
 - [ ] A real stock hardware wallet signing both the shared and the donor input (XBT donor route).
 - [ ] **Scan signed** and **Scan QR** (wallet import) with a Jade, Keystone and Passport. (A
       SeedSigner works, both ways.)
-- [ ] Multisig and Taproot PSBTs with real signers (re-check the regtest multisig PSBT, now with
-      `tpub` global xpubs, in Sparrow, Shrike, SeedSigner and Bitcoin Core, and on mainnet); 3-of-5
-      multisig end to end with a SeedSigner and on the regtest chains (tested through the UI API
-      with fake chains only).
+- [ ] Multisig and Taproot PSBTs in Sparrow, Shrike and SeedSigner (the regtest multisig PSBT now
+      has `tpub` global xpubs), and on mainnet; 3-of-5 multisig end to end with a SeedSigner.
+      (Bitcoin Core, Knots and the eCash node's wallets already sign them on regtest, up to 3-of-5.)
 
 ### Backends against real servers
 
@@ -49,35 +66,21 @@ No known high- or medium-impact bugs are open. Highest impact first:
       backends answer `{"confirmed":false}` for a txid that was never broadcast, which is fixed in
       `EsploraBackend.txStatus`; see the archive.)
 - [ ] Remote node RPC over an onion address, end to end.
-- [ ] The lost-reply, own-spend and conflict paths on node RPC with and without `txindex` against
-      the regtest nodes (covered against fakes only).
-- [ ] Confirm the ECX checkpoint hashes against an eCash node (v1.2.0 is what the pinned commit
-      reports), since explorers can share a backend.
 
 ### Platforms
 
-- [ ] A real scan over the Docker container's Tor on mainnet with a real wallet (the multi-arch
-      image builds and the arm64 image starts under emulation; no real arm64 host has run it).
-- [ ] Run the macOS (arm64 and x86_64) and Windows builds from `scripts/package_release.ts` on real
-      machines, with their bundled Tor: the binary starts, managed Tor bootstraps, and a scan works.
-      They are cross-compiled and the Tor bundles are hash-checked, but nothing has been run there.
-- [ ] Pin a Tor bundle for `linux-aarch64` in `vendor/tor-manifest.json` (`update-tor-manifest`);
-      the Linux arm64 archive ships without Tor today and needs one on `PATH`.
-- [ ] **StartOS package (`splayed-startos`) `v0.1.0:4`:** install on a device (x86) and check the
-      new icon and the package's README/instructions on first run; run the aarch64 build on an arm
-      device if one is available.
-
-### Test suite
-
-- [ ] Fast unit-level regression for the P2SH-wrapped txid case (the regtest suite is its only
-      coverage today).
-- [ ] Regtest suite coverage still missing: other m-of-n shapes, reorgs, RBF fee bump, a
-      hardware-wallet-style signer, and a CI job (needs Docker and a ~5 minute first build).
+- [ ] Run the macOS (arm64 and x86_64) builds from `scripts/package_release.ts` on real machines,
+      with their bundled Tor: the binary starts, managed Tor bootstraps, and a scan works. They are
+      cross-compiled and the Tor bundles are hash-checked, but nothing has been run there. Try the
+      new `Start splayed.command` and README steps (Gatekeeper) there, and `Start splayed.cmd` on
+      Windows.
+- [ ] Run the Linux aarch64 archive on a real arm64 host: its bundled `tor` starts and bootstraps
+      and a scan works (so far only checked statically: right architecture, libraries beside it).
+- [ ] **StartOS package (`splayed-startos`) `v0.1.0:5`:** run the aarch64 build on an arm device if
+      one is available (x86_64 is done).
 
 ## 3. Docs hygiene
 
-- [ ] Contributor docs: how to add a chain profile (the `src/` layout is in
-      `docs/dev/architecture.md`).
 - [ ] Keep `docs/images/web-ui/` current when the UI changes.
 
 ## 4. Features
@@ -88,7 +91,6 @@ No known high- or medium-impact bugs are open. Highest impact first:
 - [ ] UI: an opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just
       by address.
-- [ ] `status --json` and `plan --json` output for scripting.
 - [ ] Fee bump for BTC transactions, fan-out transactions, and CPFP of donor or multi-output
       transactions.
 - [ ] Air-gapped QR: BBQr (Coldcard Q) and plain base64 QR codes (the `ur:psbt` type is read but not
