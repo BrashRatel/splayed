@@ -36,13 +36,13 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 
 ## Coins
 
-| Command                           | Purpose                                                                                 |
-| --------------------------------- | --------------------------------------------------------------------------------------- |
-| `import <descriptor> [--label L]` | Add a watch-only output descriptor (xpub-based).                                        |
-| `descriptors`                     | List imported descriptors.                                                              |
-| `forget <number>`                 | Remove an imported descriptor (number from `descriptors`).                              |
-| `scan [--rpc-range N]`            | Find your coins on all three chains and cross-check them. `--rpc-range` is 1 to 100000. |
-| `status [--json]`                 | Show per-coin state from the last scan (no network).                                    |
+| Command                           | Purpose                                                                                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import <descriptor> [--label L]` | Add a watch-only output descriptor (xpub-based). Says what kind of wallet it is ("Multisig 2-of-3 · native (wsh) · sorted keys") and its first addresses. |
+| `descriptors`                     | List imported descriptors, each with its wallet type.                                                                                                     |
+| `forget <number>`                 | Remove an imported descriptor (number from `descriptors`).                                                                                                |
+| `scan [--rpc-range N]`            | Find your coins on all three chains and cross-check them. `--rpc-range` is 1 to 100000.                                                                   |
+| `status [--json]`                 | Show the imported wallets (with their type) and per-coin state from the last scan (no network). `--json` adds a `wallets` list.                           |
 
 ## Splitting
 

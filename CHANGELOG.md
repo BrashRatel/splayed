@@ -37,11 +37,12 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   `donor scan` uses the same proof for a donor's provenance. Lookups are bounded and paced like the
   rest of the scan. See
   [explicitly chain-specific coins](docs/reference/transaction-model.md#explicitly-chain-specific-coins).
-- **The Wallet tab says what kind of wallet each descriptor is**, for example "Multisig 2-of-3 ·
-  native (wsh) · sorted keys" or "Single key · Taproot (tr)". It shows in the imported-wallets table
-  and in the Scan QR preview of a whole pasted or scanned descriptor. Until now a multisig
-  descriptor pasted whole was imported and scanned correctly, but nothing on screen said it was
-  multisig or gave its threshold.
+- **splayed says what kind of wallet each descriptor is**, for example "Multisig 2-of-3 · native
+  (wsh) · sorted keys" or "Single key · Taproot (tr)". In the web UI it shows in the
+  imported-wallets table and in the Scan QR preview of a whole pasted or scanned descriptor; on the
+  command line in `import`, `descriptors`, `scan` and `status` (`status --json` has a `wallets`
+  list). Until now a multisig descriptor pasted whole was imported and scanned correctly, but
+  nothing on screen said it was multisig or gave its threshold.
 
 ### Fixed
 

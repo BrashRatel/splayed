@@ -883,6 +883,7 @@ async function cmdImport(config: Config, args: string[], label: string | undefin
     networkForProfile(config.profile),
   );
   io.out(added ? "Imported (watch-only):" : "Already imported:");
+  io.out(`  ${parsed.summary}`);
   io.out(`  ${parsed.normalized}`);
   if (!parsed.hadChecksum) io.out("  (no checksum was given; one has been added)");
   if (/\b[tuvyzTUVYZ]pub/u.test(args[0])) {
@@ -901,10 +902,34 @@ async function cmdDescriptors(config: Config, io: CliIO) {
     io.out("No descriptors imported yet.");
     return 0;
   }
-  wallet.descriptors.forEach((d, i) =>
-    io.out(`${i + 1}. ${d.label ? `[${d.label}] ` : ""}${d.descriptor}`)
-  );
+  for (const w of walletSummaries(config, wallet)) {
+    io.out(`${w.number}. ${w.label ? `[${w.label}] ` : ""}${w.summary}\n   ${w.descriptor}`);
+  }
   return 0;
+}
+
+/** Each imported descriptor with what kind of wallet it is (see ParsedDescriptor.summary). */
+function walletSummaries(config: Config, wallet: Awaited<ReturnType<typeof loadWallet>>) {
+  const network = networkForProfile(config.profile);
+  return wallet.descriptors.map((d, i) => {
+    let summary: string;
+    try {
+      summary = parseDescriptor(d.descriptor, network).summary;
+    } catch (error) {
+      summary = `can't be read (${(error as Error).message})`;
+    }
+    return { number: i + 1, label: d.label, descriptor: d.descriptor, summary };
+  });
+}
+
+/** The "Wallets:" lines above the status table. */
+async function printWallets(config: Config, io: CliIO) {
+  const wallets = walletSummaries(config, await loadWallet(config.dataDir));
+  if (!wallets.length) return;
+  io.out("Wallets:");
+  for (const w of wallets) {
+    io.out(`  ${w.number}. ${w.label ? `[${w.label}] ` : ""}${w.summary}`);
+  }
 }
 
 async function cmdForget(config: Config, args: string[], io: CliIO) {
@@ -975,6 +1000,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
   await saveScan(config.dataDir, result);
   for (const w of result.warnings) io.err(`Warning: ${w}`);
   io.out("");
+  await printWallets(config, io);
   printStatus(config, result, io);
   printNewShared(result, io);
   // New shared coins aren't a scan failure (exit 1 stays for warnings): they are listed in
@@ -1036,6 +1062,7 @@ async function cmdStatus(config: Config, io: CliIO, json: boolean) {
     io.out(JSON.stringify(
       {
         ...result,
+        wallets: walletSummaries(config, await loadWallet(config.dataDir)),
         coins: result.coins.map((coin) => ({ ...coin, classification: classify(coin, ctx) })),
       },
       null,
@@ -1043,6 +1070,7 @@ async function cmdStatus(config: Config, io: CliIO, json: boolean) {
     ));
     return 0;
   }
+  await printWallets(config, io);
   printStatus(config, result, io);
   printNewShared(result, io);
   return 0;

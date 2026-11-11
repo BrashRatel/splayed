@@ -51,7 +51,9 @@ deno task cli scan
 deno task cli status        # or: status --json
 ```
 
-`import` prints the first address of each branch. Check they match your wallet.
+`import` says what kind of wallet it read (for example `Single key · native SegWit (wpkh)` or
+`Multisig 2-of-3 · native (wsh) · sorted keys`) and prints the first address of each branch. Check
+both match your wallet. `descriptors`, `scan` and `status` list the wallets with their type too.
 
 Supported descriptors:
 

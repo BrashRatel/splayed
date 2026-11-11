@@ -105,6 +105,17 @@ Deno.test("end to end: import, scan and status classify every coin", async () =>
   assertEquals(await main(["--data-dir", dir, "init", "--yes"], h.io), 0);
   assertEquals(await main(["--data-dir", dir, "import", DESC, "--label", "test"], h.io), 0);
   assert(h.text().includes("bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"));
+  // import says what kind of wallet it read, and so does `descriptors`.
+  assert(
+    h.text().includes("Imported (watch-only):\n  Single key · native SegWit (wpkh)"),
+    h.text(),
+  );
+  const list = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "descriptors"], list.io), 0);
+  assert(
+    list.text().startsWith("1. [test] Single key · native SegWit (wpkh)\n   wpkh("),
+    list.text(),
+  );
   // Fast test: no jitter.
   const cfg = `[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n`;
   await Deno.writeTextFile(`${dir}/splayed.toml`, cfg);
@@ -133,6 +144,12 @@ Deno.test("end to end: import, scan and status classify every coin", async () =>
   assertEquals(byTx[txid(4)].unspentOn, ["xbt"]);
   assertEquals(byTx[txid(5)].status, "separated");
   assertEquals(result.coins.length, 5);
+  assertEquals(result.wallets, [{
+    number: 1,
+    label: "test",
+    descriptor: result.wallets[0].descriptor,
+    summary: "Single key · native SegWit (wpkh)",
+  }]);
   // Every outpoint check asked for the transaction before its outspend (Esplora trap).
   for (const c of [chains.btc, chains.xbt, chains.ecx]) {
     c.requests.forEach((p, i) => {
@@ -143,6 +160,10 @@ Deno.test("end to end: import, scan and status classify every coin", async () =>
   const table = harness(chains);
   await main(["--data-dir", dir, "status"], table.io);
   assert(table.text().includes("SHARED (BTC+XBT+ECX)"));
+  assert(
+    table.text().startsWith("Wallets:\n  1. [test] Single key · native SegWit (wpkh)\nScan from "),
+    table.text(),
+  );
   assert(table.text().includes("Split on XBT: SIGHASH_ALL|UNIFIED (0x21)"));
 });
 
@@ -324,4 +345,22 @@ Deno.test("a rescan warns about shared coins that turned up since the last scan"
   assertEquals(await main(["--data-dir", dir, "scan"], fourth.io), 0);
   assert(!fourth.errors().includes("NEW SHARED"));
   assertEquals((await readScan()).newShared, []);
+});
+
+Deno.test("import and status name a multisig wallet's threshold and key order", async () => {
+  const keys = [1, 2, 3].map((n) =>
+    HDKey.fromMasterSeed(new Uint8Array(32).fill(n)).derive("m/48'/0'/0'/2'")
+  );
+  const ms = `wsh(multi(2,${keys.map((k) => `${k.publicExtendedKey}/<0;1>/*`).join(",")}))`;
+  const chains = scenario();
+  const dir = await freshDir();
+  const h = harness(chains);
+  assertEquals(await main(["--data-dir", dir, "init", "--yes"], h.io), 0);
+  assertEquals(await main(["--data-dir", dir, "import", ms], h.io), 0);
+  assert(h.text().includes("Multisig 2-of-3 · native (wsh) · keys in the order given"), h.text());
+  await Deno.writeTextFile(`${dir}/splayed.toml`, `[scan]\njitter_min_ms = 0\njitter_max_ms = 0\n`);
+  assertEquals(await main(["--data-dir", dir, "init", "--yes"], h.io), 0);
+  const scan = harness(chains);
+  await main(["--data-dir", dir, "scan"], scan.io);
+  assert(scan.text().includes("Wallets:\n  1. Multisig 2-of-3 · native (wsh)"), scan.text());
 });
