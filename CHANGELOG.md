@@ -50,6 +50,9 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   or ECX transaction: the gate checked the original txid, saw the coin spent by "another
   transaction" (the replacement) and never released the XBT split. It now follows the fee bumps (and
   bumps of bumps) to the transaction that confirmed.
+- **`track --ack` could refuse to acknowledge an alert raised by the previous run** when the two
+  runs started within the same millisecond (seen in CI, not possible by hand): "raised by this run"
+  was decided by comparing timestamps. It now means "not on record when this run started".
 
 ## 0.1.0-pre-alpha.2 (2026-11-05)
 

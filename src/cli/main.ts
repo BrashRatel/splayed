@@ -2495,10 +2495,19 @@ async function cmdTrack(
 ) {
   await requireNetworkConfirmed(config);
   if (!id) throw new UsageError("track <plan> [--ack]");
-  /** Alerts first raised in this run haven't been seen yet: --ack never mutes those. */
-  const runStart = new Date().toISOString();
   const { dir, plan } = await loadPlanDir(config.dataDir, id);
   const progress = await loadProgress(dir);
+  /**
+   * Alerts first raised in this run haven't been seen yet: --ack never mutes those. Earlier ones
+   * are the records already on file when the run started (by content, not by clock: two runs can
+   * start within the same millisecond).
+   */
+  const alertKey = (file: string, r: ReorgRecord) => `${file}\n${r.at}\n${r.kind}\n${r.detail}`;
+  const onRecord = new Set(
+    Object.entries(progress.txs).flatMap(([file, p]) =>
+      (p.reorgs ?? []).map((r) => alertKey(file, r))
+    ),
+  );
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
   /** Loud alerts, with the record each belongs to (unrecorded ones can't be acknowledged). */
   const alerts: { text: string; rec?: ReorgRecord }[] = [];
@@ -2871,7 +2880,7 @@ async function cmdTrack(
     const all = plan.transactions.flatMap((t) =>
       (progress.txs[t.file]?.reorgs ?? []).filter(isOpenAlert).map((r) => ({ t, r }))
     );
-    const open = all.filter(({ r }) => r.at < runStart);
+    const open = all.filter(({ t, r }) => onRecord.has(alertKey(t.file, r)));
     const fresh = all.length - open.length;
     if (fresh) {
       io.out(
