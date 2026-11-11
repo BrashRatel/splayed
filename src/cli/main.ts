@@ -214,11 +214,13 @@ Splitting (guided route: forks first, BTC untouched):
                                   input is spent by a transaction that isn't one of your plans;
                                   and while any such alert is open. --ack acknowledges the open
                                   alerts (after asking): kept on record, shown muted, exit 0.
-  bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--another] [--yes]
+  bump <plan> [--chains btc,ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--another] [--yes]
                                   Stuck split? Write a new plan that spends the same inputs at a
                                   higher fee (RBF, BIP125). Sign, verify and broadcast it like any
-                                  plan; nodes replace the original with it. Refused while a bump
-                                  of the same transaction is written and not sent (--another: anyway).
+                                  plan; nodes replace the original with it. Also BTC (BTC-first
+                                  route) and donor fan-outs (the last output pays). Refused while a
+                                  bump of the same transaction is written and not sent (--another:
+                                  anyway).
   bump <plan> --tx N --drop txid:vout [--drop ...]
                                   Replace one transaction of a batch without some of its coins; the
                                   dropped coins stay unspent and can go in a later plan.
@@ -2041,7 +2043,14 @@ async function cmdBroadcast(
             opened.push(gb);
             chains[gc] = { backend: gb, confirmations: config.chains[gc].confirmations };
           }
-          const problems = await gateProblems({ planTx: t, planDir: dir, plan, progress, chains });
+          const problems = await gateProblems({
+            planTx: t,
+            planDir: dir,
+            plan,
+            progress,
+            chains,
+            dataDir: config.dataDir,
+          });
           if (problems.length) {
             io.err(
               `${t.file}: held back until the coin is spent and deep on BTC and ECX:\n  ${
@@ -2914,7 +2923,9 @@ async function cmdBump(
   },
 ) {
   await requireNetworkConfirmed(config);
-  if (!id) throw new UsageError("bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5]");
+  if (!id) {
+    throw new UsageError("bump <plan> [--chains btc,ecx,xbt] [--tx N ...] [--fee-rate ecx=5]");
+  }
   if (opts.another && opts.cpfp) throw new UsageError("--another is for RBF bumps, not --cpfp");
   if (opts.cpfp && opts.drop?.length) throw new UsageError("--cpfp and --drop don't combine");
   if (opts.drop?.length && opts.tx?.length !== 1) {
@@ -2925,8 +2936,8 @@ async function cmdBump(
   const progress = await loadProgress(dir);
   const rates = parseFeeRates(opts.feeRate);
   const chainFilter = opts.chains?.split(",").map((c) => c.trim());
-  if (chainFilter && !chainFilter.every((c) => c === "ecx" || c === "xbt")) {
-    throw new UsageError("--chains takes ecx, xbt or ecx,xbt");
+  if (chainFilter && !chainFilter.every((c) => c === "btc" || c === "ecx" || c === "xbt")) {
+    throw new UsageError("--chains takes btc, ecx and xbt, comma-separated");
   }
   const pendingBumps = await unsentReplacements(config.dataDir, plan.id);
   const replacements: PlannedTx[] = [];
@@ -2934,7 +2945,8 @@ async function cmdBump(
   let refused = 0;
   const opened: ChainBackend[] = [];
   try {
-    for (const chain of ["ecx", "xbt"] as const) {
+    // BTC only has transactions on the BTC-first route; a fan-out has them on its donors' chain.
+    for (const chain of ["btc", "ecx", "xbt"] as const) {
       if (chainFilter && !chainFilter.includes(chain)) continue;
       const txs = plan.transactions.filter((t) =>
         t.chain === chain && progress.txs[t.file]?.broadcast &&

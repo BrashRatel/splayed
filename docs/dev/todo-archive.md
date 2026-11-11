@@ -6,6 +6,19 @@ TODO.
 
 ## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
 
+- **RBF fee bumps for BTC and fan-out transactions (2026-11-11):** `bump` now visits BTC (the
+  BTC-first route; the replacement keeps its BTC donor) and replaces multi-output fan-outs, taking
+  the extra fee from the last output only. Found and fixed on the way: the BTC-first XBT gate
+  checked the plan's own BTC/ECX sibling by its original txid, so after a fee bump of that sibling
+  (ECX bumps were already possible) the coin looked "spent by another transaction" and the XBT split
+  was held back for good. `gateProblems` now follows `replacedBy` links (bumps of bumps, up to 20)
+  to the transaction that stands. The UI offers **Fee bump…** for BTC transactions too. _Checked:_
+  `tests/bump_test.ts` (fan-out values, donor can't be dropped, dust), `tests/gate_test.ts` (bump,
+  bump of a bump, shallow, a stranger's spend; the first two fail without the fix), and regtest
+  steps: a fan-out bumped and replaced in the XBT mempool with its outputs then usable donors, and a
+  BTC-first BTC transaction bumped, verified (XBT and ECX reject it) and broadcast, after which the
+  gated XBT split is released. CPFP of donor, BTC and multi-output transactions stays open.
+
 - **`--batch linked` (2026-11-11):** batches only coins already linked on chain
   (`src/core/linkage.ts`): the same address, or creating transactions funded entirely from the
   source wallet that spent from a common address of it (union-find, so chains of own spends join;

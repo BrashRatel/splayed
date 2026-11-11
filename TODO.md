@@ -76,8 +76,8 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ## 4. Features
 
-- [ ] Fee bump for BTC transactions, fan-out transactions, and CPFP of donor or multi-output
-      transactions.
+- [ ] CPFP of donor, BTC and multi-output (fan-out) transactions. (RBF bumps of BTC and fan-out
+      transactions are done; see the archive.)
 - [ ] Air-gapped QR: BBQr (Coldcard Q) and plain base64 QR codes (the `ur:psbt` type is read but not
       written).
 - [ ] PSBT v2 (BIP370) input, for signers that only emit v2.

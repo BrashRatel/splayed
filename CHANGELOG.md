@@ -6,6 +6,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Fee bumps (RBF) for BTC and fan-out transactions.** `bump` now replaces the BTC transactions of
+  the BTC-first route (`--chains btc`; the replacement keeps its BTC donor, so XBT and ECX still
+  reject it) and donor fan-outs (the extra fee comes out of the last output; every other new donor
+  keeps its value). The web UI offers **Fee bump…** for BTC transactions too. CPFP for these is not
+  available yet.
 - **`--batch linked`** combines only coins that are already linked on chain, to save fees without
   linking anything new: coins on the same address, and coins created by transactions your wallet
   funded entirely that spent from a common address of yours (directly or through a chain of them). A
@@ -37,6 +42,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   and in the Scan QR preview of a whole pasted or scanned descriptor. Until now a multisig
   descriptor pasted whole was imported and scanned correctly, but nothing on screen said it was
   multisig or gave its threshold.
+
+### Fixed
+
+- **The BTC-first route's XBT split was held back for good after a fee bump** of the plan's own BTC
+  or ECX transaction: the gate checked the original txid, saw the coin spent by "another
+  transaction" (the replacement) and never released the XBT split. It now follows the fee bumps (and
+  bumps of bumps) to the transaction that confirmed.
 
 ## 0.1.0-pre-alpha.2 (2026-11-05)
 

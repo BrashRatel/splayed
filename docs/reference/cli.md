@@ -74,12 +74,12 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 
 ## Recovery
 
-| Command                                                                        | Purpose                                           |
-| ------------------------------------------------------------------------------ | ------------------------------------------------- |
-| `bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--yes]` | RBF replacement plan at a higher fee.             |
-| `bump <plan> ... --another`                                                    | Write one even though a bump is unsent.           |
-| `bump <plan> --tx N --drop txid:vout [--drop ...]`                             | Replace one batch transaction without some coins. |
-| `bump <plan> --cpfp [--chains ...] [--tx N ...] --fee-rate ecx=20`             | Child-pays-for-parent; the rate is for the pair.  |
+| Command                                                                            | Purpose                                                                                                    |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `bump <plan> [--chains btc,ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--yes]` | RBF replacement plan at a higher fee (splits, BTC-first BTC transactions, fan-outs: the last output pays). |
+| `bump <plan> ... --another`                                                        | Write one even though a bump is unsent.                                                                    |
+| `bump <plan> --tx N --drop txid:vout [--drop ...]`                                 | Replace one batch transaction without some coins.                                                          |
+| `bump <plan> --cpfp [--chains ...] [--tx N ...] --fee-rate ecx=20`                 | Child-pays-for-parent; the rate is for the pair.                                                           |
 
 See [Recovery](../user/recovery.md).
 

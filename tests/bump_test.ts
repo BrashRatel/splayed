@@ -111,3 +111,81 @@ Deno.test("a bump that would leave dust or burn over 10% of the coin is refused"
   assertThrows(() => buildReplacement(options(f, 20_000)), BumpError); // 2.2M sat fee > value
   assertThrows(() => buildReplacement(options(f, 1_000)), BumpError); // 110k fee > 10%
 });
+
+/** A donor fan-out: three new donors of 100,000 sats and the change, from one 1,000,000 donor. */
+function fanoutFixture(): { old: PlannedTx; own: Psbt } {
+  const values = [100_000, 100_000, 100_000, 699_500];
+  const own: Psbt = {
+    tx: {
+      version: 2,
+      inputs: [{
+        txid: "cc".repeat(32),
+        vout: 1,
+        scriptSig: new Uint8Array(),
+        sequence: 0xffff_fffd,
+        witness: [],
+      }],
+      outputs: values.map((v) => ({ value: BigInt(v), script: SCRIPT })),
+      lockTime: 0,
+    },
+    global: [],
+    inputs: [[]],
+    outputs: values.map(() => []),
+  };
+  const outputs = values.map((value, i) => ({
+    address: `bc1qdonor${i}`,
+    value,
+    destinationIndex: 10 + i,
+  }));
+  const old = {
+    chain: "xbt",
+    order: 1,
+    testFirst: false,
+    file: "xbt/001-fan.psbt",
+    unsignedTxid: txid(own.tx),
+    inputs: [{ txid: "cc".repeat(32), vout: 1, value: INPUT_VALUE, kind: "wpkh" }],
+    output: outputs[0],
+    outputs,
+    fee: 500,
+    feeRate: 2,
+    vsize: 250,
+    lockTime: 0,
+    sequence: 0xffff_fffd,
+    psbt: encodePsbtBase64(own),
+    donor: { txid: "cc".repeat(32), vout: 1, value: INPUT_VALUE, provenance: "coinbase" },
+  } as PlannedTx;
+  return { old, own };
+}
+
+Deno.test("a fan-out replacement takes the extra fee from its last output only", () => {
+  const f = fanoutFixture();
+  const r = buildReplacement({ ...options(f, 5) });
+  assertEquals(r.fee, 1250);
+  assertEquals(r.outputs!.map((o) => o.value), [100_000, 100_000, 100_000, 699_500 - 750]);
+  assertEquals(r.outputs!.map((o) => o.address), f.old.outputs!.map((o) => o.address));
+  assertEquals(r.output, r.outputs![0]);
+  assertEquals(r.donor, f.old.donor);
+  const psbt = decodePsbt(r.psbt);
+  assertEquals(psbt.tx.outputs.map((o) => Number(o.value)), r.outputs!.map((o) => o.value));
+  assertEquals(psbt.tx.inputs.map((i) => [i.txid, i.vout]), [["cc".repeat(32), 1]]);
+  assertEquals(txid(psbt.tx), r.unsignedTxid);
+  // The donor input is the protection: it can't be dropped.
+  assertThrows(
+    () => buildReplacement({ ...options(f, 5), drop: [`${"cc".repeat(32)}:1`] }),
+    BumpError,
+  );
+});
+
+Deno.test("a fan-out bump that would leave its last output as dust is refused", () => {
+  const f = fanoutFixture();
+  // Make the change small: 600 sats left over.
+  f.own.tx.outputs[3].value = 600n;
+  f.old.outputs![3].value = 600;
+  f.old.fee = INPUT_VALUE - 300_600;
+  f.old.inputs[0].value = INPUT_VALUE;
+  const e = assertThrows(
+    () => buildReplacement({ ...options(f, 2_800), maxFeeFraction: 1 }),
+    BumpError,
+  );
+  assert(e.message.includes("last output"), e.message);
+});

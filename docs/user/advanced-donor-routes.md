@@ -105,7 +105,10 @@ The plan has three groups:
   own BTC and ECX transactions, or the backend's spend details) and your own nodes reject it. Send
   BTC and ECX, wait for them, run `broadcast` again.
 
-Fee bumps are not supported for BTC transactions yet.
+Stuck BTC transactions can be fee-bumped like any split (`bump <plan> --chains btc`; see
+[recovery](recovery.md#stuck-transactions-fee-bump-rbf)): the replacement keeps its donor, and the
+held-back XBT split waits for whichever of them confirms. Fan-outs can be bumped too; the extra fee
+comes out of their last output.
 
 ## Trying it by hand
 

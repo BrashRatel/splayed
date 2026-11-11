@@ -179,7 +179,15 @@ replay-protected exactly like the original. Sign it in your wallet and `verify` 
   plan … (not sent yet)" instead of the **Fee bump…** button.
 - Bumping the TEST FIRST transaction is fine: **Broadcast verified** on the original plan says where
   the replacement is (following bumps of bumps) and asks before sending the rest.
-- Fee bumps are not supported for BTC transactions yet.
+- BTC transactions of the [BTC-first route](advanced-donor-routes.md#the-btc-first-route) are bumped
+  the same way (`--chains btc`, `--fee-rate btc=N`). The replacement keeps its BTC donor input, so
+  XBT and ECX still reject it. The held-back XBT split follows the bump: it is released once the
+  replacement (or a bump of it) is confirmed deep enough, not only the original.
+- A [donor fan-out](advanced-donor-routes.md#fan-out) is bumped like a split, but it has several
+  outputs: the extra fee comes out of the **last** one (the change, when `--value` left some;
+  otherwise the last new donor), and every other new donor keeps its value. Sign it with the donor
+  wallet again. Once the replacement is broadcast, its outputs are the protected donors, not the
+  original's.
 
 ### Dropping a coin from a batch
 
@@ -208,3 +216,6 @@ parent and child together pay about that rate. Sign it with the **destination** 
 the split's output), then `verify` and `broadcast` the new `-cpfp` plan. The child can only exist on
 its parent's chain, so it needs no replay protection of its own: an XBT child is signed with plain
 `SIGHASH_ALL`.
+
+CPFP works for ordinary one-output splits on ECX and XBT. It is not available yet for BTC
+transactions, donor transactions or fan-outs (replace those with RBF instead).

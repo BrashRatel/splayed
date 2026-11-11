@@ -1177,7 +1177,7 @@ function bump(planId, scope, txs) {
   const args = ["bump", planId, ...scope];
   if (rate.trim()) {
     if (!/^\d+(\.\d+)?$/u.test(rate.trim())) return logLine("Fee rate must be a number", "err");
-    const chains = scope[0] === "--chains" ? [scope[1]] : ["ecx", "xbt"];
+    const chains = scope[0] === "--chains" ? [scope[1]] : [...new Set(txs.map((t) => t.chain))];
     args.push("--fee-rate", chains.map((c) => `${c}=${rate.trim()}`).join(","));
   }
   run(args);
@@ -2058,7 +2058,7 @@ function viewPlans() {
                 : `${pr.reorgs.length} alert(s), resolved or acknowledged`,
             )
             : null,
-          t.chain !== "btc" && bumpable(pr)
+          bumpable(pr)
             ? h("button", {
               class: "small secondary nowrap",
               onclick: () => bump(p.id, ["--chains", t.chain, "--tx", String(t.order)], [t]),
@@ -2136,7 +2136,7 @@ function viewPlans() {
           },
           "Track confirmations",
         ),
-        p.transactions.some((t) => t.chain !== "btc" && bumpable(t.progress))
+        p.transactions.some((t) => bumpable(t.progress))
           ? h(
             "button",
             {
@@ -2145,7 +2145,7 @@ function viewPlans() {
                 bump(
                   p.id,
                   [],
-                  p.transactions.filter((t) => t.chain !== "btc" && bumpable(t.progress)),
+                  p.transactions.filter((t) => bumpable(t.progress)),
                 ),
             },
             "Fee bump all unconfirmed…",

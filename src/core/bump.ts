@@ -6,9 +6,13 @@
  *   - the replacement pays at least the absolute fee of what it replaces, and
  *   - at least the incremental relay feerate more, for its own size.
  *
- * Nothing but the output value changes: inputs, sequences, locktime (the ECX marker) and the
+ * Nothing but an output value changes: inputs, sequences, locktime (the ECX marker) and the
  * 0x21 sighash request are copied from the original's own unsigned PSBT, so the replacement is
- * replay-protected exactly as the original was and is verified the same way.
+ * replay-protected exactly as the original was and is verified the same way. A split has one
+ * output, which pays the higher fee. A donor fan-out has several: the extra fee comes out of its
+ * LAST output (the change when it has one, otherwise the new donor that already took the rounding),
+ * so every other new donor keeps its value. BTC transactions (the BTC-first route) are replaced the
+ * same way: their BTC donor input stays, so the replacement is as replay-protected as the original.
  */
 import { parseTx, txid as computeTxid } from "./tx.ts";
 import {
@@ -119,17 +123,28 @@ export function buildReplacement(o: ReplacementOptions): PlannedTx {
     );
   }
   const inputValue = old.inputs.reduce((s, i) => s + i.value, 0);
-  const value = inputValue - fee;
   if (o.drop?.length && fee <= o.old.fee) {
     throw new BumpError(
       `${old.file}: with ${o.drop.length} input(s) dropped the new fee ${fee} sats must still ` +
         `exceed the old fee ${o.old.fee}`,
     );
   }
-  const [output] = own.tx.outputs;
-  if (own.tx.outputs.length !== 1) throw new BumpError("Expected a single-output plan transaction");
-  if (value < dustLimit(output.script)) {
-    throw new BumpError(`${old.file}: the new fee ${fee} sats would leave the output as dust`);
+  const outs = own.tx.outputs;
+  const fanout = outs.length > 1;
+  if (fanout && old.outputs?.length !== outs.length) {
+    throw new BumpError(`${old.file}: its outputs don't match the plan; can't replace it`);
+  }
+  if (!outs.length) throw new BumpError(`${old.file}: it has no outputs`);
+  // Every output but the last keeps its value; the last pays for the rest.
+  const kept = outs.slice(0, -1).reduce((s, x) => s + Number(x.value), 0);
+  const last = outs[outs.length - 1];
+  const value = inputValue - fee - kept;
+  if (value < dustLimit(last.script)) {
+    throw new BumpError(
+      `${old.file}: the new fee ${fee} sats would leave ${
+        fanout ? "its last output" : "the output"
+      } as dust`,
+    );
   }
   const limit = inputValue * (o.maxFeeFraction ?? 0.1);
   if (fee > limit) {
@@ -138,8 +153,12 @@ export function buildReplacement(o: ReplacementOptions): PlannedTx {
         `${inputValue} sats being moved`,
     );
   }
-  const tx = { ...own.tx, outputs: [{ ...output, value: BigInt(value) }] };
+  const tx = {
+    ...own.tx,
+    outputs: [...outs.slice(0, -1), { ...last, value: BigInt(value) }],
+  };
   const unsignedTxid = computeTxid(tx);
+  const outputs = old.outputs?.map((x, i, all) => i === all.length - 1 ? { ...x, value } : x);
   return {
     ...old,
     donor: old.donor,
@@ -147,7 +166,8 @@ export function buildReplacement(o: ReplacementOptions): PlannedTx {
     testFirst: false,
     file: `${old.chain}/${String(o.order).padStart(3, "0")}-${unsignedTxid.slice(0, 8)}.psbt`,
     unsignedTxid,
-    output: { ...old.output, value },
+    output: fanout ? outputs![0] : { ...old.output, value },
+    ...(outputs ? { outputs } : {}),
     fee,
     feeRate: o.feeRate,
     psbt: encodePsbtBase64({ ...own, tx }),

@@ -752,6 +752,43 @@ export interface GateCheck {
   progress: Progress;
   /** Backends for the gate chains, with the confirmations each needs. */
   chains: Partial<Record<"btc" | "ecx", { backend: ChainBackend; confirmations: number }>>;
+  /** The data folder, to follow a sibling that a fee bump replaced (defaults from planDir). */
+  dataDir?: string;
+}
+
+/**
+ * The transaction that now stands for `tx` on its chain: `tx` itself, or the fee bump that
+ * replaced it (following bumps of bumps), with its txid. Undefined when a replacement no longer
+ * spends `input` (it was dropped from the batch), or a link can't be followed: then nothing of
+ * this tool's can be said to have spent it.
+ */
+async function standingTransaction(
+  dataDir: string,
+  tx: PlannedTx,
+  progress: Progress,
+  input: { txid: string; vout: number },
+): Promise<{ tx: PlannedTx; txid: string } | undefined> {
+  let current = tx;
+  let p = progress.txs[tx.file];
+  let txid = p?.verified?.txid;
+  for (let hops = 0; p?.replacedBy && hops < 20; hops++) {
+    const link = p.replacedBy;
+    let next: { dir: string; plan: Plan };
+    try {
+      next = await loadPlanDir(dataDir, link.plan);
+    } catch {
+      return undefined;
+    }
+    const replacement = next.plan.transactions.find((t) => t.file === link.file);
+    if (!replacement?.inputs.some((i) => i.txid === input.txid && i.vout === input.vout)) {
+      return undefined;
+    }
+    const nextProgress = await loadProgress(next.dir);
+    current = replacement;
+    p = nextProgress.txs[replacement.file];
+    txid = link.txid ?? p?.verified?.txid;
+  }
+  return txid ? { tx: current, txid } : undefined;
 }
 
 /**
@@ -776,14 +813,21 @@ export async function gateProblems(g: GateCheck): Promise<string[]> {
         problems.push(`${label}: not spent on ${chain.toUpperCase()} yet (${obs.state})`);
         continue;
       }
-      // Prefer this plan's own transaction on that chain.
+      // Prefer this plan's own transaction on that chain, or the fee bump that replaced it.
       const sibling = g.plan.transactions.find((t) =>
         t.chain === chain && t.inputs.some((i) => i.txid === input.txid && i.vout === input.vout)
       );
-      const siblingTxid = sibling && g.progress.txs[sibling.file]?.verified?.txid;
+      const standing = sibling && g.progress.txs[sibling.file]?.verified
+        ? await standingTransaction(
+          g.dataDir ?? join(g.planDir, "..", ".."),
+          sibling,
+          g.progress,
+          input,
+        )
+        : undefined;
       let depth: number | undefined;
-      if (sibling && siblingTxid) {
-        const d = await confirmationDepth(ours.backend, sibling, siblingTxid, tip);
+      if (standing) {
+        const d = await confirmationDepth(ours.backend, standing.tx, standing.txid, tip);
         if (d.state === "confirmed") depth = d.depth;
         else if (d.state === "conflict") {
           problems.push(`${label}: spent by another transaction (${d.by ?? "unknown"})`);

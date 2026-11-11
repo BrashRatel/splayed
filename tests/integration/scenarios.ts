@@ -456,8 +456,33 @@ export async function donorScenario(
     assert(text().includes("ECX node: rejected (good)"), text());
   });
 
-  await t.step("after the fan-out confirms, its outputs are usable donors", async () => {
+  await t.step("a stuck fan-out is fee-bumped: the last output (change) pays", async () => {
     assertEquals(await run("broadcast", fanId, "--yes"), 0, text());
+    const before = await planIds(cli.dir);
+    assertEquals(await run("bump", fanId, "--fee-rate", "xbt=6", "--yes"), 0, text());
+    const bumpId = (await planIds(cli.dir)).find((id) => !before.includes(id))!;
+    const { plan: orig } = await readPlan(cli.dir, fanId);
+    const { dir, plan } = await readPlan(cli.dir, bumpId);
+    assertEquals(plan.route, "donor-fanout");
+    const [old] = orig.transactions;
+    const [r] = plan.transactions;
+    assertEquals(r.inputs, old.inputs);
+    assertEquals(r.outputs!.slice(0, 3), old.outputs!.slice(0, 3)); // the new donors keep their size
+    assertEquals(r.outputs![3].address, old.outputs![3].address);
+    assertEquals(r.outputs![3].value, old.outputs![3].value + old.fee - r.fee);
+    assert(r.fee > old.fee && r.feeRate === 6, `fee ${r.fee}`);
+    const signed = stockSign(await Deno.readTextFile(join(dir, r.file)), donorWallet.keys);
+    await Deno.writeTextFile(join(dir, r.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+    assertEquals(await run("verify", bumpId), 0, text());
+    assertEquals(await run("broadcast", bumpId, "--yes"), 0, text());
+    const pool = await h.nodes.xbt.call<string[]>("getrawmempool");
+    const progress = await readProgress(dir);
+    assert(pool.includes(progress.txs[r.file].verified!.txid), "replacement not in the mempool");
+    const origProgress = await readProgress((await readPlan(cli.dir, fanId)).dir);
+    assert(!pool.includes(origProgress.txs[old.file].verified!.txid), "original still there");
+  });
+
+  await t.step("after the fan-out confirms, its outputs are usable donors", async () => {
     await h.nodes.xbt.mine(2, await h.minerAddr("xbt"));
     assertEquals(await run("donor", "scan", "--rpc-range", "20"), 0, text());
     // All three coinbase donors are spent now; the four new outputs are what is left.
@@ -589,6 +614,32 @@ export async function btcFirstScenario(
     // Unconfirmed is not enough: still held back.
     assertEquals(await run("broadcast", planId, "--all", "--yes"), 0, text());
     assert(text().includes("held back"), text());
+  });
+
+  await t.step("a BTC transaction is fee-bumped; the replacement keeps its BTC donor", async () => {
+    const before = await planIds(cli.dir);
+    assertEquals(
+      await run("bump", planId, "--chains", "btc", "--tx", "1", "--fee-rate", "btc=6", "--yes"),
+      0,
+      text(),
+    );
+    const bumpId = (await planIds(cli.dir)).find((id) => !before.includes(id))!;
+    const { plan: orig } = await readPlan(cli.dir, planId);
+    const { dir, plan } = await readPlan(cli.dir, bumpId);
+    const [r] = plan.transactions;
+    const old = orig.transactions.find((x) => x.file === r.replaces?.file)!;
+    assertEquals(r.chain, "btc");
+    assertEquals(r.inputs, old.inputs);
+    assertEquals(r.donor, old.donor);
+    assert(r.fee > old.fee, `fee ${r.fee}`);
+    const signed = stockSign(await Deno.readTextFile(join(dir, r.file)), allKeys);
+    await Deno.writeTextFile(join(dir, r.file.replace(/\.psbt$/u, ".signed.psbt")), signed);
+    // Still protected by the donor: XBT and ECX reject it.
+    assertEquals(await run("verify", bumpId), 0, text());
+    assert(text().includes("BTC-only donor"), text());
+    assertEquals(await run("broadcast", bumpId, "--yes"), 0, text());
+    const pool = await h.nodes.btc.call<string[]>("getrawmempool");
+    assert(pool.includes((await readProgress(dir)).txs[r.file].verified!.txid), "not in mempool");
   });
 
   await t.step("once BTC and ECX are confirmed, the XBT split is sent", async () => {
