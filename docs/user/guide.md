@@ -176,12 +176,12 @@ before you spend: a coin that turns up later is flagged as
 ## Starting over
 
 `splayed wipe` forgets everything recorded about your coins: imported and donor descriptors, fork
-destinations, scan results and every plan (PSBTs, signed files, progress). It resets the network
-confirmation, so you run `splayed init` again, and keeps your network settings and any servers you
-added. It lists what goes and asks first. If a transaction you sent isn't confirmed yet it warns and
-asks again, because `track` stops following it; with `--yes` it refuses in that case unless you add
-`--force`. Nothing on any blockchain changes, and no keys are involved. In the web UI this is the
-**Burn history** button.
+destinations, scan results, every plan (PSBTs, signed files, progress) and the web UI's donor
+opt-in. It resets the network confirmation, so you run `splayed init` again, and keeps your network
+settings and any servers you added. It lists what goes and asks first. If a transaction you sent
+isn't confirmed yet it warns and asks again, because `track` stops following it; with `--yes` it
+refuses in that case unless you add `--force`. Nothing on any blockchain changes, and no keys are
+involved. In the web UI this is the **Burn history** button.
 
 ## When something goes wrong
 

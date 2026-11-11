@@ -32,7 +32,10 @@ No known high- or medium-impact bugs are open. Highest impact first:
 ### Review
 
 - [ ] Independent review of `src/core/sigcheck.ts`, `src/core/planner.ts`, `src/core/psbt.ts`,
-      `src/net/*` and `src/ui/server.ts`.
+      `src/net/*` and `src/ui/server.ts`, and the post-pre-alpha.2 additions that decide safety or
+      privacy: `src/core/chain_specific.ts` (a proof makes a coin count as separated),
+      `src/core/linkage.ts` (`--batch linked` merges coins) and the gate's fee-bump following in
+      `gateProblems` (`src/core/execute.ts`).
 
 ### Signers
 
@@ -57,6 +60,9 @@ No known high- or medium-impact bugs are open. Highest impact first:
       backends answer `{"confirmed":false}` for a txid that was never broadcast, which is fixed in
       `EsploraBackend.txStatus`; see the archive.)
 - [ ] Remote node RPC over an onion address, end to end.
+- [ ] Chain-specific detection and `--batch linked` on mainnet data: a real `0x21`-funded XBT coin
+      and an ECX-marked coin show as "XBT only"/"ECX only"; the lookup counts and pacing over Tor;
+      `--batch linked` groups on a real wallet's history (so far fake chains only).
 
 ### Platforms
 

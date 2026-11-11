@@ -107,8 +107,10 @@ Open the **Wallet** tab.
 
 ![Wallet imported](../images/web-ui/08-wallet-imported.png)
 
-splayed lists the first addresses of the wallet. **Check that they match what your wallet shows**
-before going on. If they don't, press **Forget** and re-check the descriptor.
+splayed lists the first addresses of the wallet, under a line saying what kind of wallet it is (for
+example "Single key · native SegWit (wpkh)", or "Multisig 2-of-3 · native (wsh) · sorted keys").
+**Check that the addresses match what your wallet shows**, and that the wallet type is the one you
+expect, before going on. If they don't, press **Forget** and re-check the descriptor.
 
 **Set where the split coins go.** Paste the destination descriptor for ECX and for XBT into their
 cards (or use **Scan QR**) and press **Set destination** on each. Once both are set, the UI moves on
@@ -139,9 +141,11 @@ Each coin shows its state on every chain. The **Status** column tells you what t
 | `spent`      | Not unspent anywhere.                                                   |
 | `XBT only`   | Separated by how it was made (also BTC, ECX): it can't exist elsewhere. |
 
-**XBT only** (or BTC, ECX only) means the coin's creating transaction can't be valid on the other
-chains, for example a transaction signed with `0x21` on XBT or carrying the ECX replay marker, so
-the coin can never turn up there. Its **details** say how splayed knows.
+**XBT only** (or **BTC only**, **ECX only**) is a `separated` coin that splayed could also prove can
+never turn up on the other chains: its creating transaction can't be valid there, for example
+because it was signed with `0x21` on XBT, carries the ECX replay marker, or descends from one of
+your own splits. Such a coin counts as separated even if another chain's server couldn't be asked.
+Its **details** say how splayed knows.
 
 Click **details** under a shared coin to see its next steps.
 
@@ -161,8 +165,11 @@ Choose:
 
 - **XBT signer:** the wallet you will use for XBT. This shapes the file for that signer. Pick "no
   XBT signer" to plan ECX only.
-- **Batching:** _one coin per transaction_ keeps your coins unlinked (recommended). The other
-  options combine coins into fewer transactions, which publicly links their addresses.
+- **Batching:** _one coin per transaction_ keeps your coins unlinked (recommended). _Group coins
+  already linked on chain_ combines only coins that are already tied together publicly (the same
+  address, or funded by your own earlier transactions from a common address), so it saves fees
+  without revealing anything new. The other options combine coins into fewer transactions, which
+  publicly links their addresses.
 - **Fees (sat/vB):** leave blank for an automatic estimate, or set your own per chain.
 - **Coins:** the coins that are still shared. Every coin that isn't in a plan yet starts ticked;
   untick the ones to leave for later.
@@ -258,9 +265,10 @@ Press **Track confirmations** now and then.
 
 ![Tracking confirmations](../images/web-ui/23-tracked.png)
 
-Each row shows its depth against the number you chose on the Network tab. When all splits are deeply
-confirmed, go to **Coins** and **Scan now** again. The BTC copies now show as **separated**, and can
-be spent normally from your original wallet.
+Each row shows its depth against the number you chose on the Network tab; the **Split** column on
+**Coins** shows the same per coin. When all splits are deeply confirmed, go to **Coins** and **Scan
+now** again. The BTC copies now show as **separated**, and can be spent normally from your original
+wallet.
 
 **Until then, don't spend the BTC copies.**
 
@@ -271,7 +279,8 @@ be spent normally from your original wallet.
   [Recovery](recovery.md#reorgs); alerts are explained in the
   [Advanced UI guide](advanced-ui-guide.md#alerts).
 - **A transaction is stuck unconfirmed.** Use **Fee bump…** on its row to create a higher-fee
-  replacement. Sign, verify and broadcast the new plan exactly as above. See
+  replacement (this works for every transaction splayed sends, including BTC and donor fan-outs).
+  Sign, verify and broadcast the new plan exactly as above. See
   [Recovery](recovery.md#stuck-transactions-fee-bump-rbf).
 - **A coin stays `pending` or `unverified`.** Wait and scan again; if it persists, the server can't
   report enough detail. Adding a node with `txindex=1` helps (see

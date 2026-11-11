@@ -26,6 +26,11 @@ any network setting closes the gate again.
   `splayed config scan --gap-limit N --jitter MIN-MAX` or on the Network tab (**Scan settings**); a
   larger gap limit reveals more addresses to a public backend.
 - `status` reports how many addresses were revealed to remote servers.
+- Besides addresses, a backend sees the transactions splayed fetches by txid. `scan` fetches the
+  creating transaction (and a few ancestors) of each coin that is on one chain only and was made
+  after the forks, to tell whether it can exist only there (at most 200 per scan); `plan` fetches
+  each coin's previous transaction, and with `--batch linked` the transactions that funded it. These
+  lookups are paced like the rest of the scan; your own node keeps them private.
 - HTTP goes over connections the tool opens itself (no `fetch()`), so `HTTP(S)_PROXY` environment
   variables can't silently reroute traffic.
 

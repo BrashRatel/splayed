@@ -40,7 +40,12 @@ environment variables can't reroute traffic.
 - `broadcast` re-verifies, re-checks identity and unspent state, and persists progress before
   sending. Unknown outcomes are never recorded as failures.
 - Donor spends are only allowed for donors with provable origin (see
-  [Advanced donor routes](../user/advanced-donor-routes.md)).
+  [Advanced donor routes](../user/advanced-donor-routes.md)). The web UI runs donor commands only
+  after the user opted in to donor routes.
+- A coin counts as separated when every other chain reports it deeply spent or absent, or when the
+  scan proved its creating transaction can't be valid on any other chain
+  ([explicitly chain-specific coins](transaction-model.md#explicitly-chain-specific-coins)). A proof
+  is ignored as soon as another chain reports the coin unspent or spent.
 
 ## Files
 
