@@ -90,3 +90,44 @@ Deno.test("donor: coinbase detection", () => {
     "0000000000000000" + "00" + "00000000";
   assertEquals(isCoinbase(ordinary), false);
 });
+
+Deno.test("donor: a coin the scan proved home-only gets its provenance from that proof", async () => {
+  const { evaluateDonors } = await import("../src/core/donors.ts");
+  const scan = {
+    version: 1 as const,
+    scannedAt: "2026-11-11T00:00:00Z",
+    profile: "mainnet",
+    tips: { xbt: 1000 },
+    backends: {},
+    addressesRevealed: {},
+    warnings: [],
+    coins: [
+      {
+        ...coin(),
+        onlyOn: {
+          chain: "xbt" as const,
+          kind: "replay-protected" as const,
+          via: "a 0x21 signature",
+        },
+      },
+      {
+        ...coin(),
+        vout: 1,
+        onlyOn: { chain: "xbt" as const, kind: "coinbase" as const, via: "x" },
+      },
+      // A BTC proof says nothing about an XBT donor.
+      {
+        ...coin(),
+        vout: 2,
+        onlyOn: { chain: "btc" as const, kind: "coinbase" as const, via: "x" },
+      },
+    ],
+  };
+  // No backends: anything not proven by the scan stays unproven.
+  const r = await evaluateDonors(scan, {}, { xbt: 6, btc: 6 }, { xbt: new Set(), btc: new Set() });
+  assertEquals(r.coins[0].provenance, "verified-funding");
+  assertEquals(r.coins[0].funding, "a 0x21 signature");
+  assertEquals(r.coins[0].eligible, true);
+  assertEquals(r.coins[1].provenance, "coinbase");
+  assertEquals(r.coins[2].provenance, "unproven");
+});

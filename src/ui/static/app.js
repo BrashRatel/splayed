@@ -1076,6 +1076,8 @@ function viewCoins() {
             badge(
               c.classification.status === "shared"
                 ? `shared ${c.classification.unspentOn.join("+").toUpperCase()}`
+                : c.classification.chainSpecific
+                ? `${c.classification.chainSpecific.chain.toUpperCase()} only`
                 : c.classification.status,
               c.classification.status,
             ),

@@ -137,6 +137,11 @@ Each coin shows its state on every chain. The **Status** column tells you what t
 | `pending`    | A spend is unconfirmed, shallow, or its depth can't be checked. Wait.   |
 | `unverified` | A chain couldn't be asked. Never treated as safe; scan again.           |
 | `spent`      | Not unspent anywhere.                                                   |
+| `XBT only`   | Separated by how it was made (also BTC, ECX): it can't exist elsewhere. |
+
+**XBT only** (or BTC, ECX only) means the coin's creating transaction can't be valid on the other
+chains, for example a transaction signed with `0x21` on XBT or carrying the ECX replay marker, so
+the coin can never turn up there. Its **details** say how splayed knows.
 
 Click **details** under a shared coin to see its next steps.
 

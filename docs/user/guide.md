@@ -76,6 +76,14 @@ Each coin gets one status:
 | `unverified` | A chain couldn't be asked. Never treated as safe                 |
 | `spent`      | Not unspent anywhere                                             |
 
+A coin that exists on one chain only because of **how it was made** shows as `separated (XBT only)`
+(or BTC, ECX), with the reason in the details. Its creating transaction can't be valid on the other
+chains: it carries the XBT `0x21` signature or the ECX replay marker, it is a coinbase after the
+forks, or it descends from such a transaction (one of this tool's splits, for example). Such a coin
+can never turn up on the other chains later, so it counts as separated even when another chain's
+server couldn't be asked. Coins that are merely absent elsewhere keep the ordinary status: their
+creating transaction could still be broadcast there by someone holding it.
+
 ### Coins that turn up later
 
 Coins can arrive after you have split: a deposit to an old address, or a pre-fork coin on an address

@@ -68,7 +68,7 @@ export interface DonorScan {
  * Txids of transactions this tool verified and sent on `home`: their outputs exist on that chain only
  * (the transaction was protected, so it never reached the other chains).
  */
-export async function protectedTxids(dataDir: string, home: DonorHome): Promise<Set<string>> {
+export async function protectedTxids(dataDir: string, home: ChainId): Promise<Set<string>> {
   const out = new Set<string>();
   const root = join(dataDir, PLANS_DIR);
   try {
@@ -97,6 +97,15 @@ export async function protectedTxids(dataDir: string, home: DonorHome): Promise<
 }
 
 export const protectedXbtTxids = (dataDir: string) => protectedTxids(dataDir, "xbt");
+
+/** protectedTxids for every chain, for a scan's chain-specific proofs. */
+export async function protectedByChain(dataDir: string): Promise<Record<ChainId, Set<string>>> {
+  return {
+    btc: await protectedTxids(dataDir, "btc"),
+    xbt: await protectedTxids(dataDir, "xbt"),
+    ecx: await protectedTxids(dataDir, "ecx"),
+  };
+}
 
 export interface DonorContext {
   tips: ScanResult["tips"];
@@ -187,6 +196,12 @@ export async function evaluateDonors(
       const backend = backends[home];
       if (protectedByHome[home].has(coin.txid)) {
         provenance = "protected-spend";
+      } else if (coin.onlyOn?.chain === home) {
+        // The scan already proved its creating transaction can't be valid elsewhere.
+        provenance = coin.onlyOn.kind === "coinbase" ? "coinbase" : "verified-funding";
+        if (provenance === "verified-funding") {
+          fundingNotes.set(`${coin.txid}:${coin.vout}`, coin.onlyOn.via);
+        }
       } else if (backend) {
         try {
           if (isCoinbase(await backend.rawTransaction(coin.txid))) {

@@ -1,4 +1,5 @@
 import type { OutputObservation } from "../backends/types.ts";
+import type { ChainSpecific } from "./chain_specific.ts";
 import { CHAIN_IDS, type ChainId } from "./profiles.ts";
 
 export interface CoinRecord {
@@ -11,6 +12,12 @@ export interface CoinRecord {
   branch?: number;
   derivationIndex?: number;
   observations: Record<ChainId, OutputObservation>;
+  /**
+   * Set by the scan when the coin's creating transaction can't be valid on any other chain
+   * (chain_specific.ts): the coin exists there only, now and later, whatever the other chains'
+   * backends answer. Absent when not proven, or in scans written before this field existed.
+   */
+  onlyOn?: ChainSpecific;
 }
 
 export type SeparationStatus =
@@ -31,6 +38,24 @@ export interface Classification {
   reasons: string[];
   /** Guided route (forks-first + 0x21): what to do next, in order. */
   nextSteps: string[];
+  /** The coin was proven to exist on one chain only (see CoinRecord.onlyOn). */
+  chainSpecific?: ChainSpecific;
+}
+
+/**
+ * Whether a coin's single-chain proof holds against what the chains say now: unspent on its own
+ * chain, and no other chain reporting it unspent or spent (either would mean it does exist there,
+ * and the proof is wrong, so it is ignored and the observations decide).
+ */
+export function provenChainSpecific(coin: CoinRecord): ChainSpecific | undefined {
+  const p = coin.onlyOn;
+  if (!p || coin.observations[p.chain]?.state !== "unspent") return undefined;
+  for (const chain of CHAIN_IDS) {
+    if (chain === p.chain) continue;
+    const s = coin.observations[chain]?.state;
+    if (s === "unspent" || s === "spent") return undefined;
+  }
+  return p;
 }
 
 export interface ClassifyContext {
@@ -65,6 +90,18 @@ export function guidedNextSteps(unspentOn: ChainId[]): string[] {
 }
 
 export function classify(coin: CoinRecord, ctx: ClassifyContext): Classification {
+  const proven = provenChainSpecific(coin);
+  if (proven) {
+    // Its creating transaction can't be valid elsewhere: an unreachable backend or a "spent or
+    // never existed" answer on another chain can only mean "never existed".
+    return {
+      status: "separated",
+      unspentOn: [proven.chain],
+      reasons: [`${LABEL[proven.chain]} only: created by ${proven.via}`],
+      nextSteps: [],
+      chainSpecific: proven,
+    };
+  }
   const reasons: string[] = [];
   const unspentOn: ChainId[] = [];
   let unknown = false;

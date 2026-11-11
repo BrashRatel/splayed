@@ -46,7 +46,10 @@ another chain: it carries a SIGHASH_UNIFIED (0x21) signature (XBT only), or one 
 made by a transaction that cannot be valid elsewhere, followed back (at most 6 levels, 40
 transactions) to a coinbase of that chain or to a split this tool verified. A funding transaction
 signed with plain `SIGHASH_ALL` from shared coins is refused: anyone holding it could still send it
-to BTC. The scan shows how each donor was proven.
+to BTC. The scan shows how each donor was proven. When the donor's own scan already proved the coin
+exists on its home chain only (see
+[explicitly chain-specific coins](../reference/transaction-model.md#explicitly-chain-specific-coins)),
+that proof is used instead of tracing again.
 
 ### Fan-out
 

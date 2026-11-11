@@ -6,6 +6,16 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Coins that can only exist on one chain are recognized as such.** Until now a coin counted as
+  separated only because the other chains didn't have it, which says nothing about later: anyone
+  holding its creating transaction could broadcast it there. `scan` now checks, for coins on one
+  chain only that were made after the forks, whether the creating transaction can't be valid
+  anywhere else (an XBT `0x21` signature, the ECX replay marker, a post-fork coinbase, one of this
+  tool's own splits, or an input made by such a transaction). Those coins show as "XBT only" (or
+  BTC, ECX) with the reason, count as separated even when another chain's server can't be asked, and
+  `donor scan` uses the same proof for a donor's provenance. Lookups are bounded and paced like the
+  rest of the scan. See
+  [explicitly chain-specific coins](docs/reference/transaction-model.md#explicitly-chain-specific-coins).
 - **The Wallet tab says what kind of wallet each descriptor is**, for example "Multisig 2-of-3 ·
   native (wsh) · sorted keys" or "Single key · Taproot (tr)". It shows in the imported-wallets table
   and in the Scan QR preview of a whole pasted or scanned descriptor. Until now a multisig

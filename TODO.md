@@ -76,8 +76,6 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ## 4. Features
 
-- [ ] **Explicit chain-specific coins.** Detect coins that are already chain-specific because their
-      creating transaction is protected, rather than only "absent elsewhere". Feeds the donor work.
 - [ ] UI: show the per-coin plan, verify and broadcast state on the Coins tab.
 - [ ] UI: an opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just

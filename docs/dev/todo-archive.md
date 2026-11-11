@@ -4,6 +4,20 @@ Finished items moved out of [TODO.md](../../TODO.md), newest first. When you tic
 TODO, move it here (keep the evidence: what was checked, when, against what) and delete it from the
 TODO.
 
+## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
+
+- **Explicit chain-specific coins (2026-11-11):** `scan` proves a single-chain coin created after
+  the forks can't exist elsewhere from its creating transaction (`src/core/chain_specific.ts`): an
+  XBT `0x21` signature, the ECX locktime marker, a post-fork coinbase (BIP34 height against the
+  per-pair shared heights), this tool's own protected sends, or an input whose creator is ruled out
+  on that chain (several inputs may share the work). Bounded (4 generations, 12 fetches a coin, 200
+  a scan); pre-fork coins are skipped without fetching. A proof is ignored when another chain
+  reports the coin unspent or spent. Proven coins are `separated` (shown as "XBT only" etc.) even
+  with an `unknown` or `gone` answer elsewhere, and donor scans take their provenance from it.
+  _Checked:_ `tests/chain_specific_test.ts` (each rule, the height boundaries, inheritance, the
+  search limit, contradiction, and an end-to-end scan on fake Esplora chains with one chain's server
+  failing for the coin), plus a donor test. Not yet run against real chains.
+
 ## 0.1.0-pre-alpha.2 release (2026-11-05)
 
 - **Released** as

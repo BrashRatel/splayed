@@ -44,6 +44,7 @@ import {
   donorKey,
   evaluateDonors,
   loadDonorScan,
+  protectedByChain,
   protectedTxids,
   saveDonorScan,
 } from "../core/donors.ts";
@@ -961,6 +962,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
       log: (m) => io.out(m),
       progress: io.progress,
       rpcRange,
+      ownProtected: await protectedByChain(config.dataDir),
     });
   } finally {
     for (const b of Object.values(backends)) await b?.close?.();
@@ -1077,7 +1079,11 @@ function printStatus(
       shortOutpoint(coin.txid, coin.vout),
       sats(coin.value),
       ...CHAIN_IDS.map((chain) => observationCell(coin.observations[chain], result.tips[chain])),
-      c.status === "shared" ? `SHARED (${c.unspentOn.join("+").toUpperCase()})` : c.status,
+      c.status === "shared"
+        ? `SHARED (${c.unspentOn.join("+").toUpperCase()})`
+        : c.chainSpecific
+        ? `separated (${c.chainSpecific.chain.toUpperCase()} only)`
+        : c.status,
     ]);
     if (c.reasons.length || c.nextSteps.length) {
       details.push(
@@ -1351,6 +1357,7 @@ async function cmdDonor(
             backends,
             log: (m) => io.out(m),
             rpcRange,
+            ownProtected: await protectedByChain(config.dataDir),
           },
         );
         const evaluated = await evaluateDonors(
