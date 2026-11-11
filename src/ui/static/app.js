@@ -1259,8 +1259,96 @@ function keepValue(key, el) {
   return el;
 }
 
+/** Records or withdraws the donor opt-in, then reloads. */
+async function setDonorOptIn(accept) {
+  try {
+    await api("/api/donors/opt-in", { method: "POST", body: JSON.stringify({ accept }) });
+  } catch (e) {
+    return alert(e.message);
+  }
+  await refresh();
+}
+
+/** What donors are, the rules splayed enforces, and the on-chain linkage they create. */
+function donorRules() {
+  const list = (...items) => h("ul", {}, ...items.map((t) => h("li", {}, t)));
+  return [
+    h("h3", {}, "What a donor is"),
+    h(
+      "p",
+      {},
+      "A donor is a coin that exists on ONE chain only. A transaction that spends your shared coin together with a donor is invalid on the chains that have never seen the donor, so your shared coin can be signed with a plain SIGHASH_ALL signature (stock hardware wallets can do that) instead of the 0x21 signature only a few XBT signers make.",
+    ),
+    list(
+      "XBT donors (forks first): the XBT split spends an XBT-only donor instead of needing a 0x21 signer. ECX keeps its locktime; BTC is left alone until the forks are split.",
+      "BTC donors (BTC first): your BTC copy moves first, next to a BTC-only donor. Then ECX, then XBT with a plain signature and no protection of its own: those files are held back until the coin is spent and confirmed on BTC and ECX. Needs a BTC destination (Wallet).",
+    ),
+    h("h3", {}, "Rules splayed enforces"),
+    list(
+      "A donor must be unspent and deep enough on its chain, and ABSENT on the others. A chain that couldn't be asked doesn't count as absent.",
+      "Its origin must be provable: a coinbase of its chain (mature: 100 blocks), the output of a protected split this tool verified and sent, or a donor funded elsewhere whose funding transaction can be traced on chain to one of those or to a 0x21 signature. Anything else is refused as “unproven”: whoever holds its funding transaction could still put it on another chain.",
+      "One donor per transaction, and every signature plain SIGHASH_ALL (or Taproot default), so each signature commits to the donor input. Your signer must sign the donor input too.",
+      "Verify still asks your own nodes, if you configured any: the target chain must accept the transaction and the others reject it. Broadcast checks again that the donor is absent elsewhere and refuses if it can't ask.",
+    ),
+    h("h3", {}, "What it reveals on chain"),
+    h(
+      "p",
+      {},
+      "Blockchain analysis assumes the inputs of one transaction have one owner. A donor route makes that true in public, permanently:",
+    ),
+    list(
+      "Each donor transaction links the donor wallet to the coins it is spent with, and both to the destination the output goes to.",
+      "“All coins in one transaction” links all of those coins together as well (one donor for all of them).",
+      "Donors from one fan-out share a parent transaction, so they are linked to each other, and so are the coins later split with them. Fan out separate donors for coins you want to keep apart.",
+      "A donor funded from somewhere else (an exchange, another wallet) links that source too.",
+      "The donor's value ends up at your destination on that chain, with the split coin.",
+    ),
+    h(
+      "p",
+      { class: "note" },
+      "The guided route (no donors: ECX locktime, XBT 0x21 signature) creates none of these links. Use donors when your XBT signer can't make 0x21 signatures, or to move BTC first.",
+    ),
+  ];
+}
+
+/** Until donor routes are turned on, the Donors tab is only this. */
+function donorOptInScreen() {
+  // In state, so a re-render (job output, polling) keeps the tick.
+  const understood = h("input", { type: "checkbox", id: "donor-optin-ack" });
+  understood.checked = state.donorAck === true;
+  const on = h("button", {
+    disabled: !understood.checked,
+    "data-blocked": !understood.checked,
+    onclick: () => understood.checked && setDonorOptIn(true),
+  }, "Turn on donor routes");
+  understood.addEventListener("change", () => {
+    state.donorAck = understood.checked;
+    on.disabled = !understood.checked;
+    on.toggleAttribute("data-blocked", !understood.checked);
+  });
+  return h(
+    "div",
+    { class: "card donor-optin" },
+    h("h2", {}, "Advanced: donor routes (opt-in)"),
+    h(
+      "p",
+      { class: "note" },
+      "Read this before using donors. Nothing here runs until you turn donor routes on, and the Donors tab can't import, scan, fan out or plan with donors before that.",
+    ),
+    ...donorRules(),
+    h(
+      "label",
+      { class: "check", for: "donor-optin-ack" },
+      understood,
+      " I understand that donor transactions publicly and permanently link my donor wallet to the coins it is spent with, and those coins to each other when they share a transaction or a fan-out.",
+    ),
+    h("div", { class: "row" }, on),
+  );
+}
+
 function viewDonors() {
   const d = state.donors ?? { descriptors: [], scan: null };
+  if (!d.optIn) return [donorOptInScreen()];
   // A donor import that went through clears the pasted descriptor; a refused one keeps it.
   const job = state.job;
   if (
@@ -1374,22 +1462,21 @@ function viewDonors() {
       h(
         "p",
         { class: "note" },
-        "A donor is a coin that exists on ONE chain only, so a transaction that also spends it can't be valid on the others. That lets your shared coins be signed with a plain SIGHASH_ALL signature (stock hardware wallets can do that) instead of needing a special signer.",
+        `Donor routes are on (since ${
+          new Date(d.optIn.at).toLocaleString()
+        }). Every donor transaction links your donor wallet to the coins it is spent with, on chain, for good.`,
       ),
+      h("details", {}, h("summary", {}, "The donor rules and what they reveal"), ...donorRules()),
       h(
-        "p",
-        { class: "note" },
-        "XBT donors (forks first): the XBT split spends an XBT-only donor, which replaces the 0x21 signer. ECX keeps its locktime and BTC is left alone until the forks are split.",
-      ),
-      h(
-        "p",
-        { class: "note" },
-        "BTC donors (BTC first): your BTC copy is moved first, with a BTC-only donor next to it. Then ECX, then XBT with a plain signature; the XBT files are held back until the coin is spent and confirmed on BTC and ECX. This needs a BTC destination: set it in Wallet. Tick BTC donors below and “Create plan with donors” builds this route.",
-      ),
-      h(
-        "p",
-        { class: "note" },
-        "A donor must be absent from the other chains and have a provable origin: a coinbase of its chain, an output of a split this tool verified, or a donor funded elsewhere whose funding transaction can be traced on chain. Every donor you spend publicly links the donor wallet to the coins it is spent with, and its value ends up at the destination on that chain.",
+        "div",
+        { class: "row" },
+        h("button", {
+          class: "secondary",
+          onclick: () => {
+            state.donorAck = false;
+            setDonorOptIn(false);
+          },
+        }, "Turn donor routes off"),
       ),
     ),
     h(

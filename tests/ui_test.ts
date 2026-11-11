@@ -170,7 +170,7 @@ Deno.test("UI: init asks both questions through the browser; declining the first
 });
 
 Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", async () => {
-  await withUi(async ({ runJob, api }) => {
+  await withUi(async ({ runJob, api, dataDir }) => {
     assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
     assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
     assertEquals((await runJob(["scan"])).exitCode, 0);
@@ -211,7 +211,44 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     assert(seen.signedUpload?.name.includes(".signed."), JSON.stringify(seen.signedUpload));
     assertEquals((await coinStages())[0], ["plan ecx signed"]);
     // The donor view starts empty, and a donor wallet imported from the UI shows up in it.
-    assertEquals(await (await api("/api/donors")).json(), { descriptors: [], scan: null });
+    assertEquals(await (await api("/api/donors")).json(), {
+      descriptors: [],
+      scan: null,
+      optIn: null,
+    });
+    // Donor routes are opt-in: until the rules are accepted, no donor job runs from the UI,
+    // whether a donor command or a plan with donors.
+    for (
+      const args of [
+        ["donor", "import", ECX_DEST],
+        ["donor", "scan"],
+        ["plan", "--chains", "xbt", "--donor", `${"ab".repeat(32)}:0`],
+        ["plan", "--btc-first"],
+      ]
+    ) {
+      const refused = await api("/api/run", { method: "POST", body: JSON.stringify({ args }) });
+      assertEquals(refused.status, 403, args.join(" "));
+      assert((await refused.json()).error.includes("Donor routes are off"));
+    }
+    const bogus = await api("/api/donors/opt-in", { method: "POST", body: "{}" });
+    assertEquals(bogus.status, 400);
+    await bogus.body?.cancel();
+    const optIn = async (accept: boolean) =>
+      (await (await api("/api/donors/opt-in", {
+        method: "POST",
+        body: JSON.stringify({ accept }),
+      })).json()).optIn;
+    assertEquals(await optIn(false), null); // turning off when it's off is fine
+    const on = await optIn(true);
+    assertEquals(on.rules, 1);
+    assertEquals((await (await api("/api/donors")).json()).optIn.at, on.at);
+    // An opt-in to older rules doesn't count.
+    await Deno.writeTextFile(
+      `${dataDir}/donor-opt-in.json`,
+      JSON.stringify({ version: 1, rules: 0, at: on.at }),
+    );
+    assertEquals((await (await api("/api/donors")).json()).optIn, null);
+    await optIn(true);
     // The main wallet's own descriptor is refused as a donor wallet.
     // It is a refusal, not a typing mistake: exit 1 and just the reason, no usage text.
     const same = await runJob(["donor", "import", SRC_DESC]);

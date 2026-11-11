@@ -37,7 +37,7 @@ import {
   unsentReplacementsByPlan,
 } from "../core/plan_admin.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
-import { loadDonorScan } from "../core/donors.ts";
+import { donorOptIn, loadDonorScan, setDonorOptIn, usesDonors } from "../core/donors.ts";
 import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
 import { decodePsbt, encodePsbt, mergePsbts, type Psbt } from "../core/psbt.ts";
 import { inputContexts, signatureProgress } from "../core/sigcheck.ts";
@@ -605,7 +605,14 @@ export function startUi(
             nextIndex: d.nextIndex ?? 0,
           })),
           scan: (await loadDonorScan(options.dataDir)) ?? null,
+          optIn: (await donorOptIn(options.dataDir)) ?? null,
         });
+      }
+      if (req.method === "POST" && path === "/api/donors/opt-in") {
+        const body = await readBody(req) as { accept?: unknown };
+        if (typeof body.accept !== "boolean") throw new JobError("accept must be true or false");
+        await setDonorOptIn(options.dataDir, body.accept);
+        return json({ optIn: (await donorOptIn(options.dataDir)) ?? null });
       }
       if (req.method === "GET" && path === "/api/plans") {
         return json(await plansView(options.dataDir));
@@ -628,6 +635,16 @@ export function startUi(
       }
       if (req.method === "POST" && path === "/api/run") {
         const body = await readBody(req) as { args?: unknown };
+        // Donor routes link wallets on chain: the UI runs them only after the rules were accepted.
+        if (
+          Array.isArray(body.args) && usesDonors(body.args.map(String)) &&
+          !(await donorOptIn(options.dataDir))
+        ) {
+          throw new JobError(
+            "Donor routes are off. Read the donor rules on the Donors tab and turn them on first.",
+            403,
+          );
+        }
         return json(jobs.start(body.args));
       }
       if (req.method === "GET" && path === "/api/jobs/current") return json(jobs.current());

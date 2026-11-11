@@ -5,9 +5,24 @@ shared coin _and_ a donor is invalid on the chains that have never seen the dono
 coin can be signed with an ordinary `SIGHASH_ALL` signature. Every donor transaction publicly links
 the donor wallet to the coins it is spent with.
 
-Both routes are opt-in. In the web UI, switch on **Advanced** in the tab bar to get a Donors tab:
-import the donor wallet, scan it, tick one or more donors, then fan them out or plan the splits with
-them.
+Both routes are opt-in. In the web UI, switch on **Advanced** in the tab bar to get a Donors tab,
+read the rules and the linkage they create, and turn donor routes on (the UI refuses donor commands
+until then). Then import the donor wallet, scan it, tick one or more donors, and fan them out or
+plan the splits with them.
+
+### What donors reveal
+
+Blockchain analysis assumes the inputs of one transaction have one owner, and a donor route makes
+that true in public:
+
+- each donor transaction links the donor wallet to the coins it is spent with, and both to the
+  destination its output goes to;
+- `--batch all` links all those coins together too;
+- donors made by one fan-out share a parent transaction, so they, and the coins later split with
+  them, are linked to each other;
+- a donor funded from somewhere else (an exchange, another wallet) links that source as well.
+
+The guided route (ECX locktime, XBT `0x21`) creates none of these links.
 
 ## The XBT donor route
 

@@ -6,6 +6,15 @@ TODO.
 
 ## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
 
+- **Donor opt-in screen (2026-11-11):** until donor routes are turned on, the Donors tab shows only
+  what donors are, the rules splayed enforces, and the on-chain linkage (donor wallet ↔ coins ↔
+  destination, `--batch all`, fan-out siblings, outside funding), with an "I understand" tick. The
+  opt-in is stored in the data folder (`donor-opt-in.json`, versioned by `DONOR_RULES_VERSION`,
+  removed by wipe), and the server refuses donor jobs from the UI without it (403): any `donor`
+  command, `--donor`, `--btc-first`. _Checked:_ the UI end-to-end test (each kind of donor job
+  refused, opt-in and opt-out, a stale rules version not counting), plus a unit test for
+  `usesDonors`. The CLI is unchanged.
+
 - **Per-coin plan, verify and broadcast state on the Coins tab (2026-11-11):** a **Split** column
   with one badge per chain (unsigned, signed, verified, sent, `depth/required conf`, or how a send
   ended), the most advanced transaction when several plans spend the coin, from the plans' own

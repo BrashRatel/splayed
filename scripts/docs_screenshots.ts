@@ -401,6 +401,11 @@ await page.click("#modal-no");
 // ---- Advanced: donors ----
 await page.click("#advanced-toggle");
 await tab("donors");
+// Opt-in first: the rules and the linkage, then the tab itself.
+await shot("26-donors-opt-in");
+await page.locator("#donor-optin-ack").check();
+await page.getByRole("button", { name: "Turn on donor routes" }).click();
+await page.getByRole("button", { name: "Turn donor routes off" }).waitFor();
 await shot("26-donors-tab");
 await browser.close();
 ui.server.shutdown?.();

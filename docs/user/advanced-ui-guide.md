@@ -90,7 +90,15 @@ resolve by itself (a stranger's spend, a dropped split you won't send again) can
 
 ## Donors: stock hardware wallets and moving BTC first
 
-Switch **Advanced** on at the right of the tab bar to reveal a **Donors** tab.
+Switch **Advanced** on at the right of the tab bar to reveal a **Donors** tab. The first time, it
+shows only the donor rules and what donors reveal on chain: each donor transaction links the donor
+wallet to the coins it is spent with (and those coins to each other when they share a transaction or
+a fan-out), permanently. Tick that you understand and press **Turn on donor routes**. Until then the
+UI runs no donor command and no plan with donors. The choice is kept in the data folder
+(`donor-opt-in.json`, removed by **Burn history**); **Turn donor routes off** on the tab withdraws
+it. The command line has no such switch.
+
+![The donor opt-in](../images/web-ui/26-donors-opt-in.png)
 
 ![Donors tab](../images/web-ui/26-donors-tab.png)
 

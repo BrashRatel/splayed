@@ -131,3 +131,32 @@ Deno.test("donor: a coin the scan proved home-only gets its provenance from that
   assertEquals(r.coins[1].provenance, "coinbase");
   assertEquals(r.coins[2].provenance, "unproven");
 });
+
+Deno.test("usesDonors: donor commands and plans with donors, nothing else", async () => {
+  const { usesDonors } = await import("../src/core/donors.ts");
+  for (
+    const yes of [["donor", "show"], ["plan", "--donor", "x:0"], ["plan", "--donor=x:0"], [
+      "plan",
+      "--btc-first",
+    ]]
+  ) {
+    assertEquals(usesDonors(yes), true, yes.join(" "));
+  }
+  for (const no of [["plan", "--chains", "ecx"], ["scan"], ["import", "donor"], []]) {
+    assertEquals(usesDonors(no), false, no.join(" "));
+  }
+});
+
+Deno.test("donor opt-in: stored per data folder, withdrawn, and removed by wipe", async () => {
+  const { donorOptIn, setDonorOptIn } = await import("../src/core/donors.ts");
+  const { wipeAll } = await import("../src/core/wipe.ts");
+  const dir = await Deno.makeTempDir();
+  assertEquals(await donorOptIn(dir), undefined);
+  await setDonorOptIn(dir, true, new Date("2026-11-11T10:00:00Z"));
+  assertEquals((await donorOptIn(dir))?.at, "2026-11-11T10:00:00.000Z");
+  await setDonorOptIn(dir, false);
+  assertEquals(await donorOptIn(dir), undefined);
+  await setDonorOptIn(dir, true);
+  await wipeAll(dir);
+  assertEquals(await donorOptIn(dir), undefined);
+});

@@ -697,3 +697,13 @@ tr.new-shared-row td {
 .signin {
   max-width: 620px;
 }
+.donor-optin h3 {
+  margin: 16px 0 6px;
+}
+.donor-optin ul {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.donor-optin li {
+  margin: 4px 0;
+}

@@ -6,6 +6,13 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **Donor routes in the web UI are opt-in.** Before donor routes are turned on, the Donors tab
+  explains what a donor is, the rules splayed enforces and what donors reveal on chain: each donor
+  transaction permanently links the donor wallet to the coins it is spent with, and those coins to
+  each other when they share a transaction or a fan-out. Until you tick that you understand and turn
+  them on, the UI runs no donor command and no plan with donors (the server refuses them). The
+  choice is kept in the data folder and can be withdrawn; Burn history removes it. The command line
+  is unchanged.
 - **The Coins tab shows where each coin's split is.** A new **Split** column has one badge per chain
   the coin is planned on: planned, signed, verified, sent, then its depth against the confirmations
   you require, or how a send ended (rejected, conflict, replaced by a fee bump). When several plans
