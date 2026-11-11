@@ -2,6 +2,7 @@ import { assert, assertEquals } from "./assert.ts";
 import {
   bumpable,
   bumpQuestion,
+  coinPlanSummary,
   depthText,
   isOpenAlert,
   minimumBumpRate,
@@ -153,4 +154,41 @@ Deno.test("Plans tab: an acknowledged alert is shown muted, with when it was ack
   );
   assertEquals(isOpenAlert(rec), true);
   assertEquals(isOpenAlert({ ...rec, acknowledged: "x" }), false);
+});
+
+Deno.test("Coins tab: one split badge per chain, the most advanced transaction there", () => {
+  const tx = (plan: string, chain: string, stage: string, more: Record<string, unknown> = {}) => ({
+    plan,
+    chain,
+    order: 1,
+    file: `${chain}/001.psbt`,
+    stage,
+    ...more,
+  });
+  assertEquals(coinPlanSummary([]), []);
+  assertEquals(coinPlanSummary(undefined), []);
+  // A fee bump (newest) replaced the ECX split; XBT is only verified.
+  const s = coinPlanSummary([
+    tx("P-bump1", "ecx", "confirmed", { depth: 12 }),
+    tx("P", "ecx", "replaced", { detail: "by fee bump P-bump1" }),
+    tx("P", "xbt", "verified"),
+  ], { ecx: 50, xbt: 50 });
+  assertEquals(s.map((e) => [e.chain, e.text, e.cls]), [
+    ["ecx", "ECX #1: 12/50 conf", "pending"],
+    ["xbt", "XBT #1: verified · not sent", "verified"],
+  ]);
+  assert(s[0].title.includes("Plan P-bump1"), s[0].title);
+  assert(s[0].title.includes("1 more transaction"), s[0].title);
+  // Deep enough is green; a send that vanished says so.
+  assertEquals(
+    coinPlanSummary([tx("P", "ecx", "confirmed", { depth: 50 })], { ecx: 50 })[0].cls,
+    "accepted",
+  );
+  const gone = coinPlanSummary([tx("P", "ecx", "sent", { detail: "not on the network now" })]);
+  assertEquals(gone[0].text, "ECX #1: sent · not on the network now");
+  // A rejected newer plan doesn't hide an older one that went out.
+  assertEquals(
+    coinPlanSummary([tx("P2", "ecx", "rejected"), tx("P1", "ecx", "sent")])[0].text,
+    "ECX #1: sent · in the mempool",
+  );
 });

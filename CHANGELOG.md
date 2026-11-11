@@ -6,6 +6,10 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **The Coins tab shows where each coin's split is.** A new **Split** column has one badge per chain
+  the coin is planned on: planned, signed, verified, sent, then its depth against the confirmations
+  you require, or how a send ended (rejected, conflict, replaced by a fee bump). When several plans
+  spend the coin it shows the most advanced one. Clicking it opens Plans.
 - **Coins that can only exist on one chain are recognized as such.** Until now a coin counted as
   separated only because the other chains didn't have it, which says nothing about later: anyone
   holding its creating transaction could broadcast it there. `scan` now checks, for coins on one

@@ -76,7 +76,6 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ## 4. Features
 
-- [ ] UI: show the per-coin plan, verify and broadcast state on the Coins tab.
 - [ ] UI: an opt-in screen explaining the donor rules and the on-chain linkage they create.
 - [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just
       by address.

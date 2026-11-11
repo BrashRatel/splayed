@@ -180,6 +180,19 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     const { plans } = await (await api("/api/plans")).json();
     const p = plans[0];
     const t = p.transactions[0];
+    // The Coins tab sees each coin's split, stage by stage.
+    const coinStages = async () =>
+      ((await (await api("/api/status")).json()).scan.coins as {
+        txid: string;
+        vout: number;
+        planTxs: { plan: string; chain: string; stage: string }[];
+      }[]).filter((c) => c.planTxs.length).map((c) =>
+        c.planTxs.map((x) => `${x.plan === p.id ? "plan" : x.plan} ${x.chain} ${x.stage}`)
+      );
+    const planned = await coinStages();
+    assert(planned.length >= 1, JSON.stringify(planned));
+    assertEquals(planned[0], ["plan ecx unsigned"]);
+    assertEquals((await (await api("/api/status")).json()).scan.confirmations.ecx, 50);
     // Download the unsigned PSBT as a binary file, sign it like any wallet would, upload it.
     const dl = await api(
       `/api/plans/${p.id}/download?file=${encodeURIComponent(t.file)}&format=binary`,
@@ -196,6 +209,7 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     // The plans view reports that the signed file arrived, before anything is verified.
     const seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
     assert(seen.signedUpload?.name.includes(".signed."), JSON.stringify(seen.signedUpload));
+    assertEquals((await coinStages())[0], ["plan ecx signed"]);
     // The donor view starts empty, and a donor wallet imported from the UI shows up in it.
     assertEquals(await (await api("/api/donors")).json(), { descriptors: [], scan: null });
     // The main wallet's own descriptor is refused as a donor wallet.
@@ -237,6 +251,7 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     assert(verify.text.includes("VERIFIED"));
     const after = (await (await api("/api/plans")).json()).plans[0];
     assert(after.transactions[0].progress.verified);
+    assertEquals((await coinStages())[0], ["plan ecx verified"]);
     // Fee bump is reachable from the UI; nothing is broadcast, so there is nothing to replace.
     const bump = await runJob(["bump", p.id, "--yes"]);
     assertEquals(bump.exitCode, 1, bump.text);

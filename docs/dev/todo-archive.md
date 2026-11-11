@@ -6,6 +6,13 @@ TODO.
 
 ## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
 
+- **Per-coin plan, verify and broadcast state on the Coins tab (2026-11-11):** a **Split** column
+  with one badge per chain (unsigned, signed, verified, sent, `depth/required conf`, or how a send
+  ended), the most advanced transaction when several plans spend the coin, from the plans' own
+  records (`txStage` in `plan_admin.ts`, `coinPlanSummary` in `plan_status.js`). _Checked:_ unit
+  tests for each stage and for choosing between plans (a fee bump, a rejected newer plan), and the
+  UI end-to-end test following one coin from planned to signed to verified through `/api/status`.
+
 - **Explicit chain-specific coins (2026-11-11):** `scan` proves a single-chain coin created after
   the forks can't exist elsewhere from its creating transaction (`src/core/chain_specific.ts`): an
   XBT `0x21` signature, the ECX locktime marker, a post-fork coinbase (BIP34 height against the

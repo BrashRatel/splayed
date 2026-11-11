@@ -145,6 +145,12 @@ the coin can never turn up there. Its **details** say how splayed knows.
 
 Click **details** under a shared coin to see its next steps.
 
+Once a coin is in a plan, the **Split** column shows how far it has got on each chain: planned (not
+signed), signed (a signed file was uploaded), verified, sent, then the depth against the
+confirmations you require (green once deep enough). If several plans spend the coin, for example
+after a fee bump, it shows the most advanced one; hover for the plan's name. Click it to open
+**Plans**. It reads the plans' own records, so press **Track** there to refresh the depths.
+
 ## 5. Plan: create the transactions
 
 Open **Plans & signing**.

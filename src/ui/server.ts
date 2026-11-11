@@ -335,6 +335,7 @@ async function statusView(dataDir: string, env: Record<string, string | undefine
     scan: {
       scannedAt: scan.scannedAt,
       tips: scan.tips,
+      confirmations: ctx.confirmations,
       addressesRevealed: scan.addressesRevealed,
       warnings: scan.warnings,
       coins: withPlans(
@@ -348,8 +349,9 @@ async function statusView(dataDir: string, env: Record<string, string | undefine
 
 /**
  * Adds the plans (not archived) that already spend a coin: `plannedIn` lists their ids, newest
- * first, and `broadcastIn` those of them that sent a transaction spending it. Read-only; the plan
- * form and the new-shared-coins banner use it to say what's left to plan.
+ * first, and `broadcastIn` those of them that sent a transaction spending it. `planTxs` is each
+ * spending transaction's stage (unsigned … confirmed), newest plan first, for the Coins tab.
+ * Read-only; the plan form and the new-shared-coins banner use it to say what's left to plan.
  */
 function withPlans<T extends { txid: string; vout: number }>(
   coins: T[],
@@ -361,6 +363,7 @@ function withPlans<T extends { txid: string; vout: number }>(
       ...c,
       plannedIn: spends.map((s) => s.plan),
       broadcastIn: spends.filter((s) => s.sent).map((s) => s.plan),
+      planTxs: spends.flatMap((s) => s.txs.map((t) => ({ plan: s.plan, ...t }))),
     };
   });
 }

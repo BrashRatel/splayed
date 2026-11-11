@@ -1,6 +1,13 @@
 import { scanSignedPsbt, showPsbtQr } from "./qr.js";
 import { walletQrImport } from "./wallet_qr.js";
-import { bumpable, bumpQuestion, depthText, isOpenAlert, reorgAlerts } from "./plan_status.js";
+import {
+  bumpable,
+  bumpQuestion,
+  coinPlanSummary,
+  depthText,
+  isOpenAlert,
+  reorgAlerts,
+} from "./plan_status.js";
 // splayed web UI. Every action runs a splayed CLI command on the local server (same checks,
 // same prompts). Text from the server is only ever inserted with textContent.
 
@@ -1042,7 +1049,11 @@ function viewCoins() {
     h(
       "table",
       {},
-      h("tr", {}, ...["Coin", "Value", "BTC", "XBT", "ECX", "Status"].map((t) => h("th", {}, t))),
+      h(
+        "tr",
+        {},
+        ...["Coin", "Value", "BTC", "XBT", "ECX", "Status", "Split"].map((t) => h("th", {}, t)),
+      ),
       ...s.coins.map((c) =>
         h(
           "tr",
@@ -1093,11 +1104,43 @@ function viewCoins() {
               )
               : null,
           ),
+          h("td", {}, ...splitCell(c, s.confirmations)),
         )
       ),
     ),
+    h(
+      "p",
+      { class: "note" },
+      "Split: how far each plan spending the coin has got on each chain (planned, signed, verified, sent, confirmed), from the plan's own records. Click one to open Plans; Track there refreshes the depths.",
+    ),
   ));
   return view;
+}
+
+/** The Coins tab's Split cell: one badge per chain the coin is planned on. */
+function splitCell(c, required) {
+  const entries = coinPlanSummary(c.planTxs, required);
+  if (!entries.length) {
+    return c.classification.status === "shared"
+      ? [h("span", { class: "muted" }, "not planned")]
+      : [];
+  }
+  return entries.map((e) =>
+    h(
+      "div",
+      {},
+      h("span", {
+        class: `badge ${e.cls} link`,
+        title: e.title,
+        role: "button",
+        tabindex: "0",
+        onclick: () => selectTab("plans"),
+        onkeydown: (ev) => {
+          if (ev.key === "Enter") selectTab("plans");
+        },
+      }, e.text),
+    )
+  );
 }
 
 function readFileB64(file) {

@@ -109,3 +109,68 @@ export function bumpQuestion(txs) {
     "Empty = the tool's suggestion (the backend's estimate, at least 1.5x the current rate).",
   ].join("\n");
 }
+
+/** Most advanced first: the one to show for a chain when several plans spend the same coin. */
+const STAGE_RANK = [
+  "confirmed",
+  "sent",
+  "sending",
+  "unknown",
+  "verified",
+  "signed",
+  "unsigned",
+  "conflict",
+  "rejected",
+  "superseded",
+  "replaced",
+];
+
+/**
+ * What the Coins tab says about a coin's splits: one entry per chain it is planned on, the most
+ * advanced of its transactions there (newest plan on a tie), as `{ chain, text, cls, title }`.
+ * `planTxs` is the status API's list (newest plan first); `required` the confirmations per chain.
+ */
+export function coinPlanSummary(planTxs, required = {}) {
+  const byChain = new Map();
+  for (const t of planTxs ?? []) {
+    const best = byChain.get(t.chain);
+    if (!best || STAGE_RANK.indexOf(t.stage) < STAGE_RANK.indexOf(best.stage)) {
+      byChain.set(t.chain, t);
+    }
+  }
+  return [...byChain.values()].map((t) => {
+    const need = required[t.chain];
+    const deep = t.stage === "confirmed" && need !== undefined && t.depth >= need;
+    const text = {
+      unsigned: "planned · not signed",
+      signed: "signed · not verified",
+      verified: "verified · not sent",
+      sending: "sending",
+      sent: t.detail ? `sent · ${t.detail}` : "sent · in the mempool",
+      confirmed: need === undefined ? `${t.depth} conf` : `${t.depth}/${need} conf`,
+      unknown: "sent? result unknown",
+      rejected: "rejected",
+      conflict: "conflict",
+      superseded: "superseded",
+      replaced: "replaced",
+    }[t.stage] ?? t.stage;
+    const cls = {
+      confirmed: deep ? "accepted" : "pending",
+      sent: t.detail ? "unknown" : "pending",
+      sending: "sending",
+      unknown: "unknown",
+      verified: "verified",
+      rejected: "rejected",
+      conflict: "conflict",
+    }[t.stage] ?? "";
+    const others = (planTxs ?? []).filter((x) => x !== t && x.chain === t.chain).length;
+    return {
+      chain: t.chain,
+      text: `${t.chain.toUpperCase()} #${t.order}: ${text}`,
+      cls,
+      title: `Plan ${t.plan}${t.detail && t.stage !== "sent" ? ` (${t.detail})` : ""}${
+        others ? `; ${others} more transaction${others === 1 ? "" : "s"} on this chain` : ""
+      }`,
+    };
+  });
+}
