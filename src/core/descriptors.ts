@@ -558,6 +558,30 @@ export interface ParsedDescriptor {
   xpubs: GlobalXpub[];
   /** False if any key lacks a [fingerprint/path] origin. */
   allKeysHaveOrigin: boolean;
+  /** What kind of wallet this is, for people: "Multisig 2-of-3 · native (wsh) · sorted keys". */
+  summary: string;
+}
+
+const KIND_NAMES: Record<OutputKind, string> = {
+  "pkh": "legacy (pkh)",
+  "wpkh": "native SegWit (wpkh)",
+  "sh-wpkh": "nested SegWit (sh(wpkh))",
+  "tr": "Taproot (tr)",
+  "wsh-ms": "native (wsh)",
+  "sh-wsh-ms": "nested (sh(wsh))",
+  "sh-ms": "legacy (sh)",
+};
+
+/** A one-line description of a parsed descriptor's wallet type. */
+function describe(expr: ScriptExpr): string {
+  let inner: ScriptExpr = expr;
+  while ("inner" in inner) inner = inner.inner;
+  const kind = KIND_NAMES[kindOf(expr)];
+  if ("threshold" in inner) {
+    const order = inner.type === "sortedmulti" ? "sorted keys" : "keys in the order given";
+    return `Multisig ${inner.threshold}-of-${inner.keys.length} · ${kind} · ${order}`;
+  }
+  return `Single key · ${kind}`;
 }
 
 export function parseDescriptor(
@@ -647,6 +671,7 @@ export function parseDescriptor(
     normalized: `${normalized}#${descriptorChecksum(normalized)}`,
     branches,
     hadChecksum,
+    summary: describe(expr),
   };
 }
 

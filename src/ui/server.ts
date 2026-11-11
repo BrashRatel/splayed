@@ -156,6 +156,7 @@ function walletPreview(
     descriptor,
     normalized: parsed.normalized,
     kind: parsed.kind,
+    summary: parsed.summary,
     branches: parsed.branches.length,
     firstAddresses: parsed.branches.map((b) => b.derive(0).address),
   };
@@ -279,6 +280,7 @@ async function overview(dataDir: string, env: Record<string, string | undefined>
       number: i + 1,
       label: d.label,
       descriptor: d.descriptor,
+      summary: parsed.summary,
       firstAddresses: parsed.branches.map((b) => b.derive(0).address),
     };
   });

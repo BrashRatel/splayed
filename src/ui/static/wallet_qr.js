@@ -173,6 +173,7 @@ export function walletQrImport({ api, h, purpose, title, onUse }) {
       const p = await preview(body);
       resultArea.replaceChildren(
         h("h3", {}, heading),
+        h("p", { class: "wallet-summary" }, p.summary),
         ...extra,
         descriptorBlock(p.descriptor),
         h(

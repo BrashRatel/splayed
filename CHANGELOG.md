@@ -2,6 +2,16 @@
 
 All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
+## Unreleased
+
+### Added
+
+- **The Wallet tab says what kind of wallet each descriptor is**, for example "Multisig 2-of-3 ·
+  native (wsh) · sorted keys" or "Single key · Taproot (tr)". It shows in the imported-wallets table
+  and in the Scan QR preview of a whole pasted or scanned descriptor. Until now a multisig
+  descriptor pasted whole was imported and scanned correctly, but nothing on screen said it was
+  multisig or gave its threshold.
+
 ## 0.1.0-pre-alpha.2 (2026-11-05)
 
 ### Added

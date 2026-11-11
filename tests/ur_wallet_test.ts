@@ -328,6 +328,14 @@ Deno.test("UI endpoints: /api/wallet/qr decodes in batches; /api/wallet/preview 
     assertEquals(multi.json.descriptor, cos.descriptor);
     assertEquals(multi.json.firstAddresses[0], cos.firstAddress);
     assertEquals(multi.json.branches, 2);
+    assertEquals(multi.json.summary, "Multisig 2-of-3 · native (wsh) · sorted keys");
+    // The same wallet pasted whole is still described as a multisig.
+    const pasted = await call("/api/wallet/preview", {
+      mode: "output",
+      descriptor: cos.descriptor,
+      purpose: "import",
+    });
+    assertEquals(pasted.json.summary, "Multisig 2-of-3 · native (wsh) · sorted keys");
 
     // SeedSigner "Static" text needs no session state.
     const st = fixtures.cases.find((x) => x.kind === "static")!;

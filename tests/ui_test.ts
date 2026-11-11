@@ -686,6 +686,8 @@ Deno.test("UI multisig 3-of-5: built from five cosigner keys, detected as 3 of 5
   await withUi(async ({ runJob, api }) => {
     assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
     assertEquals((await runJob(["import", built])).exitCode, 0);
+    const imported = (await (await api("/api/overview")).json()).descriptors[0];
+    assertEquals(imported.summary, "Multisig 3-of-5 · native (wsh) · sorted keys");
     assertEquals((await runJob(["scan"])).exitCode, 0);
     assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
     assertEquals(

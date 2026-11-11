@@ -800,6 +800,7 @@ function viewWallet() {
             h(
               "td",
               { class: "mono" },
+              h("div", { class: "wallet-summary" }, d.summary),
               d.label ? h("strong", {}, `[${d.label}] `) : null,
               d.descriptor,
             ),

@@ -148,6 +148,12 @@ section#view {
   font-size: 13px;
   margin: 6px 0;
 }
+/* "Multisig 2-of-3 · native (wsh) · sorted keys", above a descriptor. */
+.wallet-summary {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
 .banner {
   border-left: 3px solid var(--accent);
   padding: 8px 12px;
