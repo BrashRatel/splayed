@@ -170,8 +170,8 @@ Splitting (guided route: forks first, BTC untouched):
   dest set <xbt|ecx> <descriptor> [--start-index N]
                                   Where split coins go on that fork (best: a new seed per fork)
   dest show
-  plan --xbt-signer NAME | --donor txid:vout ... [--chains ecx,xbt] [--batch coin|address|all|N]
-       [--fee-rate ecx=2,xbt=3] [--coin txid:vout ...] [--yes]
+  plan --xbt-signer NAME | --donor txid:vout ... [--chains ecx,xbt]
+       [--batch coin|address|linked|all|N] [--fee-rate ecx=2,xbt=3] [--coin txid:vout ...] [--yes]
                                   Write unsigned, replay-protected PSBTs for shared coins.
                                   XBT signers: ${Object.keys(XBT_SIGNERS).join(", ")}
   donor import <descriptor> [--label L] | donor list | donor forget <number>
@@ -1256,7 +1256,9 @@ async function cmdPlan(
           txs.reduce((s, t) => s + t.fee, 0)
         } sats in fees` +
           (linked
-            ? `; ${linked} of them combine coins, publicly linking those addresses on ${chain.toUpperCase()}`
+            ? plan.batch.kind === "linked"
+              ? `; ${linked} of them combine coins that were already linked on chain`
+              : `; ${linked} of them combine coins, publicly linking those addresses on ${chain.toUpperCase()}`
             : "; no coins combined"),
       );
     }

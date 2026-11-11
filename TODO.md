@@ -76,8 +76,6 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ## 4. Features
 
-- [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just
-      by address.
 - [ ] Fee bump for BTC transactions, fan-out transactions, and CPFP of donor or multi-output
       transactions.
 - [ ] Air-gapped QR: BBQr (Coldcard Q) and plain base64 QR codes (the `ur:psbt` type is read but not

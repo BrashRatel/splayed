@@ -6,6 +6,11 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
 
 ### Added
 
+- **`--batch linked`** combines only coins that are already linked on chain, to save fees without
+  linking anything new: coins on the same address, and coins created by transactions your wallet
+  funded entirely that spent from a common address of yours (directly or through a chain of them). A
+  coin someone paid you, or one from a coinjoin, stays on its own unless it shares an address.
+  Anything that can't be read stays apart, with a warning. Also offered in the web UI's plan forms.
 - **Donor routes in the web UI are opt-in.** Before donor routes are turned on, the Donors tab
   explains what a donor is, the rules splayed enforces and what donors reveal on chain: each donor
   transaction permanently links the donor wallet to the coins it is spent with, and those coins to

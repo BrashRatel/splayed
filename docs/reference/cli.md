@@ -61,16 +61,16 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 
 ### `plan` options
 
-| Option                          | Meaning                                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------- |
-| `--xbt-signer NAME`             | `knots`, `sparrow-blake2b`, `shrike`, `embit`, `privkeyio-firmware`.            |
-| `--donor txid:vout`             | Use a donor (repeatable). See [donor routes](../user/advanced-donor-routes.md). |
-| `--btc-first`                   | Plan the BTC-first route (needs `--donor` and a `btc` destination).             |
-| `--chains ecx,xbt`              | Limit which chains are planned.                                                 |
-| `--batch coin\|address\|all\|N` | `coin` (default) keeps coins unlinked; the others combine coins.                |
-| `--fee-rate ecx=2,xbt=3`        | Per-chain sat/vB; default is the backend's 6-block estimate.                    |
-| `--coin txid:vout`              | Plan only these coins (repeatable).                                             |
-| `--yes`                         | Skip confirmation prompts.                                                      |
+| Option                                  | Meaning                                                                                                                |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--xbt-signer NAME`                     | `knots`, `sparrow-blake2b`, `shrike`, `embit`, `privkeyio-firmware`.                                                   |
+| `--donor txid:vout`                     | Use a donor (repeatable). See [donor routes](../user/advanced-donor-routes.md).                                        |
+| `--btc-first`                           | Plan the BTC-first route (needs `--donor` and a `btc` destination).                                                    |
+| `--chains ecx,xbt`                      | Limit which chains are planned.                                                                                        |
+| `--batch coin\|address\|linked\|all\|N` | `coin` (default) keeps coins unlinked; `linked` combines only coins already linked on chain; the others combine coins. |
+| `--fee-rate ecx=2,xbt=3`                | Per-chain sat/vB; default is the backend's 6-block estimate.                                                           |
+| `--coin txid:vout`                      | Plan only these coins (repeatable).                                                                                    |
+| `--yes`                                 | Skip confirmation prompts.                                                                                             |
 
 ## Recovery
 

@@ -20,6 +20,7 @@ import {
   parseDescriptor,
 } from "./descriptors.ts";
 import type { DonorCoin } from "./donors.ts";
+import { linkedGroups } from "./linkage.ts";
 import { ECX_MAINNET_REPLAY_LOCKTIME, SIGHASH_UNIFIED } from "./profiles.ts";
 import {
   derivationValue,
@@ -73,18 +74,24 @@ export class PlanError extends Error {
   }
 }
 
-export type BatchPolicy = { kind: "coin" } | { kind: "address" } | { kind: "all" } | {
-  kind: "size";
-  size: number;
-};
+export type BatchPolicy =
+  | { kind: "coin" }
+  | { kind: "address" }
+  /** Coins already linked on chain go together (linkage.ts); the rest stay one per transaction. */
+  | { kind: "linked" }
+  | { kind: "all" }
+  | { kind: "size"; size: number };
 
 export function parseBatchPolicy(value: string | undefined): BatchPolicy {
   if (!value || value === "coin") return { kind: "coin" };
   if (value === "address") return { kind: "address" };
+  if (value === "linked") return { kind: "linked" };
   if (value === "all") return { kind: "all" };
   const n = Number(value);
   if (Number.isSafeInteger(n) && n >= 1 && n <= 500) return { kind: "size", size: n };
-  throw new PlanError('--batch must be "coin", "address", "all" or a number from 1 to 500');
+  throw new PlanError(
+    '--batch must be "coin", "address", "linked", "all" or a number from 1 to 500',
+  );
 }
 
 // ---- Size estimation (vbytes; deliberately a little high) ----
@@ -241,6 +248,7 @@ export interface Candidate {
 function groupBatches(cands: Candidate[], policy: BatchPolicy): Candidate[][] {
   switch (policy.kind) {
     case "coin":
+    case "linked": // grouped by linkedBatches before this; here only as a fallback
       return cands.map((c) => [c]);
     case "all":
       return cands.length ? [cands] : [];
@@ -347,6 +355,24 @@ export async function buildPlan(
     },
   };
   const filter = options.coins ? new Set(options.coins) : undefined;
+  // --batch linked: every script of the source wallet that could have funded a coin (up to the
+  // highest index the scan found a coin at, plus the gap limit), and transactions read so far.
+  let ours: Set<string> | undefined;
+  const ownScripts = () => {
+    if (ours) return ours;
+    ours = new Set();
+    for (const [d, descriptor] of sources.entries()) {
+      for (const branch of descriptor.branches) {
+        const used = scan.coins
+          .filter((c) => c.descriptorIndex === d && c.branch === branch.branch)
+          .map((c) => c.derivationIndex ?? 0);
+        const last = branch.ranged ? Math.max(0, ...used) + config.scan.gapLimit : 0;
+        for (let i = 0; i <= last; i++) ours.add(branch.derive(i).scriptPubKey);
+      }
+    }
+    return ours;
+  };
+  const linkCache = new Map<string, Tx>();
   const transactions: PlannedTx[] = [];
   const reserved: Partial<Record<PlanChain, number>> = {};
   const now = new Date();
@@ -515,7 +541,38 @@ export async function buildPlan(
 
     // 4. Batches -> transactions.
     let nextIndex = destination.nextIndex;
-    const batches = groupBatches(live, options.batch)
+    let grouped: Candidate[][];
+    if (options.batch.kind === "linked") {
+      const linked = await linkedGroups(
+        live.map((c) => ({
+          txid: c.coin.txid,
+          vout: c.coin.vout,
+          scriptPubKey: c.coin.scriptPubKey,
+          prevTx: c.prevTx,
+        })),
+        {
+          rawTransaction: (txid) => backend.rawTransaction(txid),
+          ours: ownScripts(),
+          cache: linkCache,
+        },
+      );
+      grouped = linked.groups.map((g) => g.map((i) => live[i]));
+      const together = grouped.filter((g) => g.length > 1);
+      log(
+        `${chain.toUpperCase()}: ${live.length} coin(s) in ${grouped.length} group(s) already ` +
+          `linked on chain (${together.length} with more than one coin)`,
+      );
+      if (linked.unread) {
+        warnings.push(
+          `${chain.toUpperCase()} --batch linked: couldn't read how ${linked.unread} coin(s) were ` +
+            "funded; they are kept apart unless their address links them (fees are a little " +
+            "higher, nothing is linked that wasn't already).",
+        );
+      }
+    } else {
+      grouped = groupBatches(live, options.batch);
+    }
+    const batches = grouped
       .sort((a, b) =>
         a.reduce((s, c) => s + c.coin.value, 0) - b.reduce((s, c) => s + c.coin.value, 0)
       );

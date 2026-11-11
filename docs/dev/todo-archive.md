@@ -6,6 +6,16 @@ TODO.
 
 ## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
 
+- **`--batch linked` (2026-11-11):** batches only coins already linked on chain
+  (`src/core/linkage.ts`): the same address, or creating transactions funded entirely from the
+  source wallet that spent from a common address of it (union-find, so chains of own spends join;
+  siblings of one such transaction too). Any outside input (a payment, a coinjoin) links nothing;
+  input scripts are read from witnesses/scriptSigs (P2WPKH, P2WSH, nested, P2PKH, P2SH), otherwise
+  from the previous transaction; unreadable means "kept apart" with a warning. One generation only,
+  ≤100 fetches per chain, cached across chains. In the plan form and the donor plan form. _Checked:_
+  `tests/linkage_test.ts` (script recognition, reuse, shared funding address, siblings, payment to
+  you, coinjoin, unreadable, and `plan --batch linked` end to end on fake chains).
+
 - **Donor opt-in screen (2026-11-11):** until donor routes are turned on, the Donors tab shows only
   what donors are, the rules splayed enforces, and the on-chain linkage (donor wallet ↔ coins ↔
   destination, `--batch all`, fan-out siblings, outside funding), with an "I understand" tick. The

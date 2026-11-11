@@ -1428,10 +1428,11 @@ function viewDonors() {
     h(
       "select",
       {},
-      ...[["coin", "one coin per transaction (needs one donor each)"], [
-        "all",
-        "all coins in one transaction (one donor, links the coins)",
-      ]].map(([v, t]) => h("option", { value: v }, t)),
+      ...[
+        ["coin", "one coin per transaction (needs one donor each)"],
+        ["linked", "coins already linked on chain together (one donor per group)"],
+        ["all", "all coins in one transaction (one donor, links the coins)"],
+      ].map(([v, t]) => h("option", { value: v }, t)),
     ),
   );
   const alsoEcx = h("input", { type: "checkbox" });
@@ -1836,10 +1837,12 @@ function viewPlans() {
   const batch = h(
     "select",
     {},
-    ...[["coin", "one coin per transaction (unlinked)"], ["address", "group by address"], [
-      "all",
-      "all coins in one transaction (links them)",
-    ]].map(([v, t]) => h("option", { value: v }, t)),
+    ...[
+      ["coin", "one coin per transaction (unlinked)"],
+      ["linked", "group coins already linked on chain"],
+      ["address", "group by address"],
+      ["all", "all coins in one transaction (links them)"],
+    ].map(([v, t]) => h("option", { value: v }, t)),
   );
   const feeEcx = feeInput();
   const feeXbt = feeInput();

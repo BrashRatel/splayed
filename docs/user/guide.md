@@ -117,6 +117,12 @@ Options:
 
 - `--batch coin` (default) keeps coins unlinked. `--batch address`, `--batch N` and `--batch all`
   combine coins, and the summary says which addresses that links publicly.
+- `--batch linked` combines only coins that are **already linked on chain**, so it saves fees
+  without revealing anything new: coins on the same address, and coins created by transactions that
+  your wallet funded entirely and that spent from a common address of yours (directly or through a
+  chain of them). A coin someone else paid you, or one from a coinjoin, stays on its own unless it
+  shares an address. Only each coin's own funding transaction is read; anything it can't read stays
+  apart.
 - Fees come from `--fee-rate` or the backend's 6-block estimate. A batch whose fee would be over 10%
   of its value is skipped.
 
