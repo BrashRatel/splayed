@@ -1104,7 +1104,7 @@ function viewCoins() {
               )
               : null,
           ),
-          h("td", {}, ...splitCell(c, s.confirmations)),
+          h("td", { class: "split-cell" }, ...splitCell(c, s.confirmations)),
         )
       ),
     ),

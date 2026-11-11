@@ -707,3 +707,12 @@ tr.new-shared-row td {
 .donor-optin li {
   margin: 4px 0;
 }
+/* Coins tab, Split column: badges wrap so the table stays inside its card. */
+td.split-cell {
+  max-width: 170px;
+}
+td.split-cell .badge {
+  white-space: normal;
+  border-radius: 8px;
+  margin-bottom: 2px;
+}
