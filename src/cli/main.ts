@@ -3360,19 +3360,27 @@ async function cmdUi(
   }
   io.out("Press Ctrl+C to stop; a Tor started by splayed stops with it.");
   if (open) {
-    const opener = Deno.build.os === "darwin"
-      ? "open"
-      : Deno.build.os === "windows"
-      ? "explorer"
-      : "xdg-open";
+    const { cmd, args } = browserCommand(Deno.build.os, ui.url);
     try {
-      new Deno.Command(opener, { args: [ui.url], stdout: "null", stderr: "null" }).spawn();
+      new Deno.Command(cmd, { args, stdout: "null", stderr: "null" }).spawn();
     } catch {
       io.err("Couldn't open a browser; copy the URL above.");
     }
   }
   await ui.server.finished;
   return 0;
+}
+
+/**
+ * The command that opens `url` in the user's default browser. On Windows this is not `explorer`:
+ * given a URL with a fragment (the UI's `#token=…`) Explorer opens a folder window instead of the
+ * browser. `rundll32 url.dll,FileProtocolHandler` hands the URL to the registered http handler
+ * as is, and unlike `cmd /c start` it needs no shell quoting.
+ */
+export function browserCommand(os: string, url: string): { cmd: string; args: string[] } {
+  if (os === "darwin") return { cmd: "open", args: [url] };
+  if (os === "windows") return { cmd: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  return { cmd: "xdg-open", args: [url] };
 }
 
 /** Process entry point: runs a command, then always stops a Tor this process started. */

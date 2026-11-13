@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "./assert.ts";
 import { HDKey } from "@scure/bip32";
 import { mnemonicToSeedSync } from "@scure/bip39";
-import { type CliIO, main } from "../src/cli/main.ts";
+import { browserCommand, type CliIO, main } from "../src/cli/main.ts";
 import { parseDescriptor } from "../src/core/descriptors.ts";
 import type { ChainId } from "../src/core/profiles.ts";
 import { addOutput, type FakeChain, fakeChain, FakeEsploraTransport, txid } from "./fakes.ts";
@@ -363,4 +363,14 @@ Deno.test("import and status name a multisig wallet's threshold and key order", 
   const scan = harness(chains);
   await main(["--data-dir", dir, "scan"], scan.io);
   assert(scan.text().includes("Wallets:\n  1. Multisig 2-of-3 · native (wsh)"), scan.text());
+});
+
+Deno.test("ui --open: Windows opens the default browser, not Explorer, and keeps the #token", () => {
+  const url = "http://127.0.0.1:8123/#token=abc";
+  assertEquals(browserCommand("windows", url), {
+    cmd: "rundll32",
+    args: ["url.dll,FileProtocolHandler", url],
+  });
+  assertEquals(browserCommand("darwin", url), { cmd: "open", args: [url] });
+  assertEquals(browserCommand("linux", url), { cmd: "xdg-open", args: [url] });
 });
