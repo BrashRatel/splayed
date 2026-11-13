@@ -4,14 +4,17 @@ Open work only, grouped by kind and ordered by impact within each group. When an
 it to [docs/dev/todo-archive.md](docs/dev/todo-archive.md) (with what was checked and when) and
 delete it here.
 
-## Pre-alpha.2
+## Alpha Release Gates
 
-Released 2026-11-05 (see the [archive](docs/dev/todo-archive.md)). Open:
+Must be done before the alpha release (pre-alpha.2 was released 2026-11-05; see the
+[archive](docs/dev/todo-archive.md)):
 
-- [ ] Publish the StartOS package to a registry (community, via Start9's submission process, or a
-      self-hosted one) and document the steps in [releasing.md](docs/dev/releasing.md). Guides:
-      [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
-      and [publishing](https://docs.start9.com/packaging/publishing.html).
+- [ ] **Windows `Start splayed.cmd` auto-launch:** it opens a Windows Explorer window instead of the
+      user's web browser. It should open the UI in the default browser.
+- [ ] **StartOS: passwords for external servers.** A StartOS user has no way to set the environment
+      variables that RPC backends read their passwords from (the "Password env var (not the
+      password)" field, `password_env`). Add a way to supply them on StartOS (e.g. a config/action
+      that stores the secret and exposes it to the service as an env var).
 
 ## 1. Bugs and issues
 
@@ -69,12 +72,13 @@ No known high- or medium-impact bugs are open. Highest impact first:
 - [ ] Run the macOS (arm64 and x86_64) builds from `scripts/package_release.ts` on real machines,
       with their bundled Tor: the binary starts, managed Tor bootstraps, and a scan works. They are
       cross-compiled and the Tor bundles are hash-checked, but nothing has been run there. Try the
-      new `Start splayed.command` and README steps (Gatekeeper) there, and `Start splayed.cmd` on
-      Windows.
+      new `Start splayed.command` and README steps (Gatekeeper) there.
 - [ ] Run the Linux aarch64 archive on a real arm64 host: its bundled `tor` starts and bootstraps
       and a scan works (so far only checked statically: right architecture, libraries beside it).
-- [ ] **StartOS package (`splayed-startos`) `v0.1.0:5`:** run the aarch64 build on an arm device if
-      one is available (x86_64 is done).
+- [ ] Publish the StartOS package to a registry (community, via Start9's submission process, or a
+      self-hosted one) and document the steps in [releasing.md](docs/dev/releasing.md). Guides:
+      [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
+      and [publishing](https://docs.start9.com/packaging/publishing.html).
 
 ## 3. Docs hygiene
 
