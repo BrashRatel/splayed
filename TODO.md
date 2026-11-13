@@ -9,12 +9,10 @@ delete it here.
 Must be done before the alpha release (pre-alpha.2 was released 2026-11-05; see the
 [archive](docs/dev/todo-archive.md)):
 
-- [ ] **Windows `Start splayed.cmd` auto-launch:** it opens a Windows Explorer window instead of the
-      user's web browser. It should open the UI in the default browser.
-- [ ] **StartOS: passwords for external servers.** A StartOS user has no way to set the environment
-      variables that RPC backends read their passwords from (the "Password env var (not the
-      password)" field, `password_env`). Add a way to supply them on StartOS (e.g. a config/action
-      that stores the secret and exposes it to the service as an env var).
+- [ ] **Confirm the two fixes on real systems** (both done 2026-11-13, see the archive):
+      `Start splayed.cmd` opens the default browser on Windows 10/11; on StartOS, merge
+      splayed-startos branch `server-passwords`, sideload, and reach a password-protected RPC node
+      with a **Server passwords** entry.
 
 ## 1. Bugs and issues
 

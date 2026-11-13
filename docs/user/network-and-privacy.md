@@ -91,6 +91,12 @@ deno task cli config show
 deno task cli init
 ```
 
+- **An RPC password is never stored in the config.** `--password-env` (`password_env` in
+  `config.toml`) names the environment variable splayed reads it from, so set that variable wherever
+  splayed runs: your shell, the Docker override file's `environment` (see
+  [Docker](docker.md#a-node-on-the-docker-host)), or on StartOS the package's **Server passwords**
+  action (the same variable name, then the password; splayed restarts to read it).
+
 - **Adding your own backend for a chain removes that chain's profile default**, so the default is
   never contacted. `config backend fallback` and `config backend reset` bring defaults back.
 - Backends are tried in priority order and the tool stops at the first that passes its identity

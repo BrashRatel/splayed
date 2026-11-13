@@ -44,8 +44,20 @@ All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Ne
   list). Until now a multisig descriptor pasted whole was imported and scanned correctly, but
   nothing on screen said it was multisig or gave its threshold.
 
+- **RPC passwords on StartOS.** The StartOS package has a new **Server passwords** action (in
+  [splayed-startos](https://github.com/BrashRatel/splayed-startos)): for a node you added in the web
+  UI with an RPC user, enter the variable name from its "Password env var" field and the password,
+  and splayed gets it as that environment variable. Until now a StartOS user had no way to set one.
+  The web UI's node credentials and the "needs a password" error now say where to set the variable
+  (shell, Docker override file, or that action).
+
 ### Fixed
 
+- **`Start splayed.cmd` on Windows opened a File Explorer window instead of the browser.**
+  `ui
+  --open` ran `explorer` with the UI address, and Explorer doesn't treat an address with a
+  `#token=…` part as a web page. It now uses `rundll32 url.dll,FileProtocolHandler`, which opens the
+  default browser with the address unchanged.
 - **The BTC-first route's XBT split was held back for good after a fee bump** of the plan's own BTC
   or ECX transaction: the gate checked the original txid, saw the coin spent by "another
   transaction" (the replacement) and never released the XBT split. It now follows the fee bumps (and

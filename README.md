@@ -52,7 +52,9 @@ Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
 [releases page](https://github.com/BrashRatel/splayed/releases), or build it from
 [splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
 StartOS proxy, reaches public servers over the Tor service, and detects/uses your Bitcoin node (and
-chain).
+chain). For a node elsewhere that needs an RPC password, give the password with the package's
+**Server passwords** action, under the variable name you entered in the server's "Password env var"
+field.
 
 ### Release binary
 

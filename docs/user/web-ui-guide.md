@@ -75,7 +75,10 @@ Most people can leave everything as it is. You can:
   [Network and privacy](network-and-privacy.md);
 - set how many **Confirmations** each chain needs before a spend counts as final;
 - **Add your own backend** (a node or Electrum server you run), which replaces that chain's default.
-  **Detect chain & add** asks the server which chain it follows and adds it there;
+  **Detect chain & add** asks the server which chain it follows and adds it there. For a node with
+  an RPC user and password, splayed never stores the password: put a variable name in **Password env
+  var** and set that variable where splayed runs (your shell, the Docker override file, or on
+  StartOS the **Server passwords** action);
 - change the **Scan settings**: the gap limit (unused addresses checked past the last used one) and
   the jitter between lookups.
 
