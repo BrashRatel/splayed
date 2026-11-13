@@ -9,8 +9,7 @@ delete it here.
 Must be done before the alpha release (pre-alpha.2 was released 2026-11-05; see the
 [archive](docs/dev/todo-archive.md)):
 
-- [ ] **Merge splayed-startos branch `server-passwords`** (package 0.1.0:8, the Server passwords
-      action; tested on StartOS 2026-11-13) so the release build picks it up.
+None open.
 
 ## 1. Bugs and issues
 
