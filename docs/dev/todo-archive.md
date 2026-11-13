@@ -17,17 +17,18 @@ TODO.
   (2026-11-13): `Start splayed.cmd` opens the UI in the default browser.
 
 - **StartOS: passwords for external RPC servers (2026-11-13, alpha gate):** a new **Server
-  passwords** action in splayed-startos (branch `server-passwords`, commit 4c5156f; package version
-  0.1.0:8) stores `{variable, password}` pairs in `store.json` (startos volume, backed up with the
-  node login). `main.ts` puts them into every splayed process's environment before the package's own
-  `SPLAYED_*` settings, and the action refuses `SPLAYED_*`, `LC_*`, `LD_*` and the container's own
-  variables (`PATH`, `HOME`, ...), so a stored password can't replace a setting. splayed restarts
-  when the list changes (the store is read with `.const()`). Options weighed: a password file or a
-  password field in splayed's own config (rejected: splayed keeps refusing to store RPC passwords,
-  and Docker users already set variables in the override file). splayed itself: the web UI's node
-  credentials and the missing-password error now say where the variable is set. _Checked:_ `tsc` and
-  the `ncc` bundle of the package, and a test build (0.1.0:8 on splayed 6c90377) sideloaded over
-  0.1.0:7 on StartOS by the maintainer (2026-11-13), which worked as expected.
+  passwords** action in splayed-startos (PR #2, merged 2026-11-13 as 70efe09; package version
+  0.1.0:8, pinning splayed `features-sprint` 52dc972) stores `{variable, password}` pairs in
+  `store.json` (startos volume, backed up with the node login). `main.ts` puts them into every
+  splayed process's environment before the package's own `SPLAYED_*` settings, and the action
+  refuses `SPLAYED_*`, `LC_*`, `LD_*` and the container's own variables (`PATH`, `HOME`, ...), so a
+  stored password can't replace a setting. splayed restarts when the list changes (the store is read
+  with `.const()`). Options weighed: a password file or a password field in splayed's own config
+  (rejected: splayed keeps refusing to store RPC passwords, and Docker users already set variables
+  in the override file). splayed itself: the web UI's node credentials and the missing-password
+  error now say where the variable is set. _Checked:_ `tsc` and the `ncc` bundle of the package, and
+  a test build (0.1.0:8 on splayed 6c90377) sideloaded over 0.1.0:7 on StartOS by the maintainer
+  (2026-11-13), which worked as expected.
 
 - **RBF fee bumps for BTC and fan-out transactions (2026-11-11):** `bump` now visits BTC (the
   BTC-first route; the replacement keeps its BTC donor) and replaces multi-output fan-outs, taking
