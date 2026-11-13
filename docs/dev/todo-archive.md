@@ -12,8 +12,9 @@ TODO.
   `rundll32
   url.dll,FileProtocolHandler <url>` on Windows (hands the URL to the registered http
   handler as is; `cmd /c start` was rejected because the token would need cmd quoting), `open` on
-  macOS, `xdg-open` elsewhere. _Checked:_ unit test per OS in `tests/cli_test.ts`. Not run on
-  Windows (see TODO).
+  macOS, `xdg-open` elsewhere. _Checked:_ unit test per OS in `tests/cli_test.ts`, and the test
+  build of `features-sprint` at 6c90377 (Windows x86_64 zip) on Windows by the maintainer
+  (2026-11-13): `Start splayed.cmd` opens the UI in the default browser.
 
 - **StartOS: passwords for external RPC servers (2026-11-13, alpha gate):** a new **Server
   passwords** action in splayed-startos (branch `server-passwords`, commit 4c5156f; package version
@@ -25,7 +26,8 @@ TODO.
   password field in splayed's own config (rejected: splayed keeps refusing to store RPC passwords,
   and Docker users already set variables in the override file). splayed itself: the web UI's node
   credentials and the missing-password error now say where the variable is set. _Checked:_ `tsc` and
-  the `ncc` bundle of the package; not sideloaded on a StartOS server (see TODO).
+  the `ncc` bundle of the package, and a test build (0.1.0:8 on splayed 6c90377) sideloaded over
+  0.1.0:7 on StartOS by the maintainer (2026-11-13), which worked as expected.
 
 - **RBF fee bumps for BTC and fan-out transactions (2026-11-11):** `bump` now visits BTC (the
   BTC-first route; the replacement keeps its BTC donor) and replaces multi-output fan-outs, taking
