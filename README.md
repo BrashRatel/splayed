@@ -15,24 +15,17 @@ plan → sign (in your wallet) → verify → broadcast. Your keys never leave y
 > the [release notes](docs/release-notes/0.1.0-pre-alpha.2.md) and [TODO.md](TODO.md) first. Testers
 > wanted: please file a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
-## How it works
-
-|     | First own block | Replay protection                                                       |
-| --- | --------------- | ----------------------------------------------------------------------- |
-| XBT | 961,632         | Opt-in per signature: `SIGHASH_UNIFIED` (ALL becomes 0x21)              |
-| ECX | 973,728         | Opt-in per transaction: `nLockTime = 499,999,998` and a non-final input |
-
-Both protections are one-directional: they stop a fork transaction replaying onto BTC, but an
-ordinary BTC transaction still replays onto the forks. So the guided route is **forks first, BTC
-last**:
-
-1. **ECX:** send each shared coin to yourself with the ECX marker. Any signer works.
-2. **XBT:** send it to yourself with a 0x21 signature. This needs a
-   [supported signer](docs/user/signers.md); stock hardware wallets can use the
-   [donor route](docs/user/advanced-donor-routes.md).
-3. **BTC:** once both splits are deeply confirmed, spend the BTC copy normally.
-
 ## Quick start
+
+### StartOS
+
+Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
+[releases page](https://github.com/BrashRatel/splayed/releases), or build it from
+[splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
+StartOS proxy, reaches public servers over the Tor service, and detects/uses your Bitcoin node (and
+chain). For a node elsewhere that needs an RPC password, give the password with the package's
+**Server passwords** action, under the variable name you entered in the server's "Password env var"
+field.
 
 ### Docker
 
@@ -45,16 +38,6 @@ docker compose -f docker/compose.yml exec splayed cat /data/ui-token   # your ac
 ```
 
 Then open <http://localhost:8080/> and paste the token.
-
-### StartOS
-
-Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
-[releases page](https://github.com/BrashRatel/splayed/releases), or build it from
-[splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
-StartOS proxy, reaches public servers over the Tor service, and detects/uses your Bitcoin node (and
-chain). For a node elsewhere that needs an RPC password, give the password with the package's
-**Server passwords** action, under the variable name you entered in the server's "Password env var"
-field.
 
 ### Release binary
 
@@ -105,6 +88,23 @@ deno task cli broadcast <plan-id>    # says where the test is, asks, then sends 
 
 Prefer a browser? `deno task ui` (or `./splayed ui` for the release binary) runs the same steps in a
 local web UI.
+
+## How it works
+
+|     | First own block | Replay protection                                                       |
+| --- | --------------- | ----------------------------------------------------------------------- |
+| XBT | 961,632         | Opt-in per signature: `SIGHASH_UNIFIED` (ALL becomes 0x21)              |
+| ECX | 973,728         | Opt-in per transaction: `nLockTime = 499,999,998` and a non-final input |
+
+Both protections are one-directional: they stop a fork transaction replaying onto BTC, but an
+ordinary BTC transaction still replays onto the forks. So the guided route is **forks first, BTC
+last**:
+
+1. **ECX:** send each shared coin to yourself with the ECX marker. Any signer works.
+2. **XBT:** send it to yourself with a 0x21 signature. This needs a
+   [supported signer](docs/user/signers.md); stock hardware wallets can use the
+   [donor route](docs/user/advanced-donor-routes.md).
+3. **BTC:** once both splits are deeply confirmed, spend the BTC copy normally.
 
 ## Documentation
 
