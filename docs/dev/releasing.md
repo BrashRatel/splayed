@@ -78,7 +78,9 @@ Tools: `deno`, `docker` with the buildx builder above, `zip`, `tar`, `gpg` with 
    folder made by `start-cli s9pk init-workspace` that holds the package repo), so a plain clone
    like `../splayed-startos` can edit and push but not build. Build in the workspace's clone,
    `../start9-workspace/splayed-startos`, once the package change is merged:
-   - In `../splayed-startos` (`master`): `git submodule update --init`, then
+   - In `../splayed-startos` (`master`): first `git pull` (the workspace clone falls behind GitHub,
+     and the next revision number comes from `origin/master`'s `startos/versions/current.ts`, not
+     the local one), `git submodule update --init`, then
      `git -C upstream-project fetch --tags origin && git -C upstream-project checkout vX`.
    - Edit `startos/versions/current.ts`: version
      `<splayed version without the pre-release part>:<n>` (`0.1.0:7` is the revision after
