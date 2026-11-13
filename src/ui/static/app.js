@@ -746,6 +746,11 @@ function viewNetwork() {
         h("label", {}, "Password env var (not the password)", f.pwenv),
         h("label", {}, "CA file (PEM)", f.ca),
       ),
+      h(
+        "p",
+        { class: "note" },
+        "splayed never stores an RPC password. Name an environment variable here and set it where splayed runs: in your shell, in the Docker override file, or on StartOS with the Server passwords action (same name, then the password).",
+      ),
     ),
     h(
       "div",
