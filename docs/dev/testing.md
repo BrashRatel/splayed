@@ -30,7 +30,7 @@ question) are tested on each: `tests/backends_e2e_test.ts`, `alerts_e2e_test.ts`
 ## Regtest integration suite
 
 `deno task test:integration` needs Docker Compose v2, internet access for the first build and
-roughly 5 minutes for it (the eCash node compiles from source); the run itself (190 steps) then
+roughly 5 minutes for it (the eCash node compiles from source); the run itself (211 steps) then
 takes about 3 minutes with warm Docker caches, and one earlier run took 10. It builds three images,
 none of which touches an existing container or volume:
 

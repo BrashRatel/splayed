@@ -37,7 +37,7 @@ import {
   unsentReplacementsByPlan,
 } from "../core/plan_admin.ts";
 import { CHAIN_IDS, CHAIN_NAMES, type ChainId } from "../core/profiles.ts";
-import { loadDonorScan } from "../core/donors.ts";
+import { donorOptIn, loadDonorScan, setDonorOptIn, usesDonors } from "../core/donors.ts";
 import { psbtFromUr, psbtToUr, URDecoder, URError } from "../core/ur.ts";
 import { decodePsbt, encodePsbt, mergePsbts, type Psbt } from "../core/psbt.ts";
 import { inputContexts, signatureProgress } from "../core/sigcheck.ts";
@@ -156,6 +156,7 @@ function walletPreview(
     descriptor,
     normalized: parsed.normalized,
     kind: parsed.kind,
+    summary: parsed.summary,
     branches: parsed.branches.length,
     firstAddresses: parsed.branches.map((b) => b.derive(0).address),
   };
@@ -279,6 +280,7 @@ async function overview(dataDir: string, env: Record<string, string | undefined>
       number: i + 1,
       label: d.label,
       descriptor: d.descriptor,
+      summary: parsed.summary,
       firstAddresses: parsed.branches.map((b) => b.derive(0).address),
     };
   });
@@ -333,6 +335,7 @@ async function statusView(dataDir: string, env: Record<string, string | undefine
     scan: {
       scannedAt: scan.scannedAt,
       tips: scan.tips,
+      confirmations: ctx.confirmations,
       addressesRevealed: scan.addressesRevealed,
       warnings: scan.warnings,
       coins: withPlans(
@@ -346,8 +349,9 @@ async function statusView(dataDir: string, env: Record<string, string | undefine
 
 /**
  * Adds the plans (not archived) that already spend a coin: `plannedIn` lists their ids, newest
- * first, and `broadcastIn` those of them that sent a transaction spending it. Read-only; the plan
- * form and the new-shared-coins banner use it to say what's left to plan.
+ * first, and `broadcastIn` those of them that sent a transaction spending it. `planTxs` is each
+ * spending transaction's stage (unsigned … confirmed), newest plan first, for the Coins tab.
+ * Read-only; the plan form and the new-shared-coins banner use it to say what's left to plan.
  */
 function withPlans<T extends { txid: string; vout: number }>(
   coins: T[],
@@ -359,6 +363,7 @@ function withPlans<T extends { txid: string; vout: number }>(
       ...c,
       plannedIn: spends.map((s) => s.plan),
       broadcastIn: spends.filter((s) => s.sent).map((s) => s.plan),
+      planTxs: spends.flatMap((s) => s.txs.map((t) => ({ plan: s.plan, ...t }))),
     };
   });
 }
@@ -600,7 +605,14 @@ export function startUi(
             nextIndex: d.nextIndex ?? 0,
           })),
           scan: (await loadDonorScan(options.dataDir)) ?? null,
+          optIn: (await donorOptIn(options.dataDir)) ?? null,
         });
+      }
+      if (req.method === "POST" && path === "/api/donors/opt-in") {
+        const body = await readBody(req) as { accept?: unknown };
+        if (typeof body.accept !== "boolean") throw new JobError("accept must be true or false");
+        await setDonorOptIn(options.dataDir, body.accept);
+        return json({ optIn: (await donorOptIn(options.dataDir)) ?? null });
       }
       if (req.method === "GET" && path === "/api/plans") {
         return json(await plansView(options.dataDir));
@@ -623,6 +635,16 @@ export function startUi(
       }
       if (req.method === "POST" && path === "/api/run") {
         const body = await readBody(req) as { args?: unknown };
+        // Donor routes link wallets on chain: the UI runs them only after the rules were accepted.
+        if (
+          Array.isArray(body.args) && usesDonors(body.args.map(String)) &&
+          !(await donorOptIn(options.dataDir))
+        ) {
+          throw new JobError(
+            "Donor routes are off. Read the donor rules on the Donors tab and turn them on first.",
+            403,
+          );
+        }
         return json(jobs.start(body.args));
       }
       if (req.method === "GET" && path === "/api/jobs/current") return json(jobs.current());

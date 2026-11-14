@@ -36,13 +36,13 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 
 ## Coins
 
-| Command                           | Purpose                                                                                 |
-| --------------------------------- | --------------------------------------------------------------------------------------- |
-| `import <descriptor> [--label L]` | Add a watch-only output descriptor (xpub-based).                                        |
-| `descriptors`                     | List imported descriptors.                                                              |
-| `forget <number>`                 | Remove an imported descriptor (number from `descriptors`).                              |
-| `scan [--rpc-range N]`            | Find your coins on all three chains and cross-check them. `--rpc-range` is 1 to 100000. |
-| `status [--json]`                 | Show per-coin state from the last scan (no network).                                    |
+| Command                           | Purpose                                                                                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import <descriptor> [--label L]` | Add a watch-only output descriptor (xpub-based). Says what kind of wallet it is ("Multisig 2-of-3 · native (wsh) · sorted keys") and its first addresses. |
+| `descriptors`                     | List imported descriptors, each with its wallet type.                                                                                                     |
+| `forget <number>`                 | Remove an imported descriptor (number from `descriptors`).                                                                                                |
+| `scan [--rpc-range N]`            | Find your coins on all three chains and cross-check them. `--rpc-range` is 1 to 100000.                                                                   |
+| `status [--json]`                 | Show the imported wallets (with their type) and per-coin state from the last scan (no network). `--json` adds a `wallets` list.                           |
 
 ## Splitting
 
@@ -61,25 +61,25 @@ Run commands as `deno task cli <command>` (or `splayed <command>` from a compile
 
 ### `plan` options
 
-| Option                          | Meaning                                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------- |
-| `--xbt-signer NAME`             | `knots`, `sparrow-blake2b`, `shrike`, `embit`, `privkeyio-firmware`.            |
-| `--donor txid:vout`             | Use a donor (repeatable). See [donor routes](../user/advanced-donor-routes.md). |
-| `--btc-first`                   | Plan the BTC-first route (needs `--donor` and a `btc` destination).             |
-| `--chains ecx,xbt`              | Limit which chains are planned.                                                 |
-| `--batch coin\|address\|all\|N` | `coin` (default) keeps coins unlinked; the others combine coins.                |
-| `--fee-rate ecx=2,xbt=3`        | Per-chain sat/vB; default is the backend's 6-block estimate.                    |
-| `--coin txid:vout`              | Plan only these coins (repeatable).                                             |
-| `--yes`                         | Skip confirmation prompts.                                                      |
+| Option                                  | Meaning                                                                                                                |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--xbt-signer NAME`                     | `knots`, `sparrow-blake2b`, `shrike`, `embit`, `privkeyio-firmware`.                                                   |
+| `--donor txid:vout`                     | Use a donor (repeatable). See [donor routes](../user/advanced-donor-routes.md).                                        |
+| `--btc-first`                           | Plan the BTC-first route (needs `--donor` and a `btc` destination).                                                    |
+| `--chains ecx,xbt`                      | Limit which chains are planned.                                                                                        |
+| `--batch coin\|address\|linked\|all\|N` | `coin` (default) keeps coins unlinked; `linked` combines only coins already linked on chain; the others combine coins. |
+| `--fee-rate ecx=2,xbt=3`                | Per-chain sat/vB; default is the backend's 6-block estimate.                                                           |
+| `--coin txid:vout`                      | Plan only these coins (repeatable).                                                                                    |
+| `--yes`                                 | Skip confirmation prompts.                                                                                             |
 
 ## Recovery
 
-| Command                                                                        | Purpose                                           |
-| ------------------------------------------------------------------------------ | ------------------------------------------------- |
-| `bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--yes]` | RBF replacement plan at a higher fee.             |
-| `bump <plan> ... --another`                                                    | Write one even though a bump is unsent.           |
-| `bump <plan> --tx N --drop txid:vout [--drop ...]`                             | Replace one batch transaction without some coins. |
-| `bump <plan> --cpfp [--chains ...] [--tx N ...] --fee-rate ecx=20`             | Child-pays-for-parent; the rate is for the pair.  |
+| Command                                                                            | Purpose                                                                                                    |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `bump <plan> [--chains btc,ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--yes]` | RBF replacement plan at a higher fee (splits, BTC-first BTC transactions, fan-outs: the last output pays). |
+| `bump <plan> ... --another`                                                        | Write one even though a bump is unsent.                                                                    |
+| `bump <plan> --tx N --drop txid:vout [--drop ...]`                                 | Replace one batch transaction without some coins.                                                          |
+| `bump <plan> --cpfp [--chains ...] [--tx N ...] --fee-rate ecx=20`                 | Child-pays-for-parent; the rate is for the pair.                                                           |
 
 See [Recovery](../user/recovery.md).
 

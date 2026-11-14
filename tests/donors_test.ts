@@ -90,3 +90,73 @@ Deno.test("donor: coinbase detection", () => {
     "0000000000000000" + "00" + "00000000";
   assertEquals(isCoinbase(ordinary), false);
 });
+
+Deno.test("donor: a coin the scan proved home-only gets its provenance from that proof", async () => {
+  const { evaluateDonors } = await import("../src/core/donors.ts");
+  const scan = {
+    version: 1 as const,
+    scannedAt: "2026-11-11T00:00:00Z",
+    profile: "mainnet",
+    tips: { xbt: 1000 },
+    backends: {},
+    addressesRevealed: {},
+    warnings: [],
+    coins: [
+      {
+        ...coin(),
+        onlyOn: {
+          chain: "xbt" as const,
+          kind: "replay-protected" as const,
+          via: "a 0x21 signature",
+        },
+      },
+      {
+        ...coin(),
+        vout: 1,
+        onlyOn: { chain: "xbt" as const, kind: "coinbase" as const, via: "x" },
+      },
+      // A BTC proof says nothing about an XBT donor.
+      {
+        ...coin(),
+        vout: 2,
+        onlyOn: { chain: "btc" as const, kind: "coinbase" as const, via: "x" },
+      },
+    ],
+  };
+  // No backends: anything not proven by the scan stays unproven.
+  const r = await evaluateDonors(scan, {}, { xbt: 6, btc: 6 }, { xbt: new Set(), btc: new Set() });
+  assertEquals(r.coins[0].provenance, "verified-funding");
+  assertEquals(r.coins[0].funding, "a 0x21 signature");
+  assertEquals(r.coins[0].eligible, true);
+  assertEquals(r.coins[1].provenance, "coinbase");
+  assertEquals(r.coins[2].provenance, "unproven");
+});
+
+Deno.test("usesDonors: donor commands and plans with donors, nothing else", async () => {
+  const { usesDonors } = await import("../src/core/donors.ts");
+  for (
+    const yes of [["donor", "show"], ["plan", "--donor", "x:0"], ["plan", "--donor=x:0"], [
+      "plan",
+      "--btc-first",
+    ]]
+  ) {
+    assertEquals(usesDonors(yes), true, yes.join(" "));
+  }
+  for (const no of [["plan", "--chains", "ecx"], ["scan"], ["import", "donor"], []]) {
+    assertEquals(usesDonors(no), false, no.join(" "));
+  }
+});
+
+Deno.test("donor opt-in: stored per data folder, withdrawn, and removed by wipe", async () => {
+  const { donorOptIn, setDonorOptIn } = await import("../src/core/donors.ts");
+  const { wipeAll } = await import("../src/core/wipe.ts");
+  const dir = await Deno.makeTempDir();
+  assertEquals(await donorOptIn(dir), undefined);
+  await setDonorOptIn(dir, true, new Date("2026-11-11T10:00:00Z"));
+  assertEquals((await donorOptIn(dir))?.at, "2026-11-11T10:00:00.000Z");
+  await setDonorOptIn(dir, false);
+  assertEquals(await donorOptIn(dir), undefined);
+  await setDonorOptIn(dir, true);
+  await wipeAll(dir);
+  assertEquals(await donorOptIn(dir), undefined);
+});

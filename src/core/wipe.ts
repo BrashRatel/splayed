@@ -2,13 +2,13 @@
  * "Wipe all": forget everything splayed has recorded about the user's coins, and start over.
  *
  * Removed: imported and donor descriptors, fork destinations, scan results, every plan folder
- * (unsigned and signed PSBTs, progress, uploads) and the network confirmation, so `init` has to
- * be run again. Kept: the network settings in splayed.toml, including servers the user added,
+ * (unsigned and signed PSBTs, progress, uploads), the web UI's donor opt-in and the network
+ * confirmation, so `init` has to be run again. Kept: the network settings in splayed.toml, including servers the user added,
  * and the UI access token. Nothing on any blockchain changes, and no keys are involved.
  */
 import { join } from "node:path";
 import { type Config, GATE_FILE } from "./config.ts";
-import { DONOR_SCAN_FILE } from "./donors.ts";
+import { DONOR_OPT_IN_FILE, DONOR_SCAN_FILE } from "./donors.ts";
 import { unsettledTransactions } from "./plan_admin.ts";
 import { type Plan, PLANS_DIR } from "./planner.ts";
 import { SCAN_FILE } from "./scan.ts";
@@ -83,7 +83,7 @@ export function nothingToWipe(p: WipePreview): boolean {
 }
 
 export async function wipeAll(dataDir: string): Promise<void> {
-  for (const file of [WALLET_FILE, SCAN_FILE, DONOR_SCAN_FILE, GATE_FILE]) {
+  for (const file of [WALLET_FILE, SCAN_FILE, DONOR_SCAN_FILE, DONOR_OPT_IN_FILE, GATE_FILE]) {
     await Deno.remove(join(dataDir, file)).catch((error) => {
       if (!(error instanceof Deno.errors.NotFound)) throw error;
     });

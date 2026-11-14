@@ -17,10 +17,18 @@ with `multi` or `sortedmulti`).
 
 ## Multisig
 
-**Importing (step 3).** Press **Scan QR** and, for each cosigner in turn, scan its multisig xpub
-(**Add cosigner**). Set how many signatures are required, and **check that the first receive address
-matches your coordinator** (for example Sparrow) before pressing **Use this**. Without a camera,
-paste the QR text instead. You can also paste a multisig descriptor directly.
+**Importing (step 3).** There is no separate multisig button: press **Scan QR** and scan the first
+cosigner's **multisig** xpub export (SeedSigner: Seeds → your seed → Export Xpub → Multisig). The
+popup then switches to the cosigner list shown below. If you scan a single-sig export instead, you
+get a single-key wallet, so pick the multisig export on the device. For each further cosigner press
+**Add cosigner** and scan its export. Set how many signatures are required and whether keys are
+sorted, and **check that the first receive address matches your coordinator** (for example Sparrow)
+before pressing **Use this**. Without a camera, paste the QR text instead.
+
+You can also paste a whole multisig descriptor (from Sparrow or another coordinator) into the box,
+or scan the coordinator's wallet QR. That skips the cosigner list; the preview and the imported
+wallets table then say what splayed read, for example "Multisig 2-of-3 · native (wsh) · sorted
+keys". Check the threshold and key count there.
 
 ![Multisig wallet from three SeedSigner exports](../images/web-ui/07-wallet-qr-multisig.png)
 
@@ -90,7 +98,15 @@ resolve by itself (a stranger's spend, a dropped split you won't send again) can
 
 ## Donors: stock hardware wallets and moving BTC first
 
-Switch **Advanced** on at the right of the tab bar to reveal a **Donors** tab.
+Switch **Advanced** on at the right of the tab bar to reveal a **Donors** tab. The first time, it
+shows only the donor rules and what donors reveal on chain: each donor transaction links the donor
+wallet to the coins it is spent with (and those coins to each other when they share a transaction or
+a fan-out), permanently. Tick that you understand and press **Turn on donor routes**. Until then the
+UI runs no donor command and no plan with donors. The choice is kept in the data folder
+(`donor-opt-in.json`, removed by **Burn history**); **Turn donor routes off** on the tab withdraws
+it. The command line has no such switch.
+
+![The donor opt-in](../images/web-ui/26-donors-opt-in.png)
 
 ![Donors tab](../images/web-ui/26-donors-tab.png)
 
@@ -100,3 +116,10 @@ hardware wallet** do the XBT step, and lets you move your **BTC** copy first. Im
 wallet, scan it, tick donors, then **Create plan with donors**. Donors have strict origin rules and
 each one publicly links the donor wallet to your coins; read
 [Advanced donor routes](advanced-donor-routes.md) before using them.
+
+A donor coin the scan proved exists on its chain only (see
+[XBT only](web-ui-guide.md#4-coins-find-whats-shared)) shows that proof as its origin. **Fee bump…**
+works on donor plans as on any other: BTC transactions of the BTC-first route keep their donor, and
+a fan-out's extra fee comes out of its last output (the change, if any), so the other new donors
+keep their size. The held-back XBT split waits for whichever BTC or ECX transaction (original or
+bump) confirms.

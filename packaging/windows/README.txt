@@ -2,7 +2,7 @@ splayed {{VERSION}} for Windows (x86_64)
 =======================================
 
 splayed finds your coins that exist on more than one chain (BTC, XBT, ECX) and writes unsigned
-transactions that move them apart. It never holds your keys: your wallet signs. It is PRE-ALPHA
+transactions that move them apart. It never holds your keys: your wallet signs. It is ALPHA
 software that moves real coins, so start with a small amount.
 
 

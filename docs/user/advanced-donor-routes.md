@@ -5,9 +5,24 @@ shared coin _and_ a donor is invalid on the chains that have never seen the dono
 coin can be signed with an ordinary `SIGHASH_ALL` signature. Every donor transaction publicly links
 the donor wallet to the coins it is spent with.
 
-Both routes are opt-in. In the web UI, switch on **Advanced** in the tab bar to get a Donors tab:
-import the donor wallet, scan it, tick one or more donors, then fan them out or plan the splits with
-them.
+Both routes are opt-in. In the web UI, switch on **Advanced** in the tab bar to get a Donors tab,
+read the rules and the linkage they create, and turn donor routes on (the UI refuses donor commands
+until then). Then import the donor wallet, scan it, tick one or more donors, and fan them out or
+plan the splits with them.
+
+### What donors reveal
+
+Blockchain analysis assumes the inputs of one transaction have one owner, and a donor route makes
+that true in public:
+
+- each donor transaction links the donor wallet to the coins it is spent with, and both to the
+  destination its output goes to;
+- `--batch all` links all those coins together too;
+- donors made by one fan-out share a parent transaction, so they, and the coins later split with
+  them, are linked to each other;
+- a donor funded from somewhere else (an exchange, another wallet) links that source as well.
+
+The guided route (ECX locktime, XBT `0x21`) creates none of these links.
 
 ## The XBT donor route
 
@@ -46,7 +61,10 @@ another chain: it carries a SIGHASH_UNIFIED (0x21) signature (XBT only), or one 
 made by a transaction that cannot be valid elsewhere, followed back (at most 6 levels, 40
 transactions) to a coinbase of that chain or to a split this tool verified. A funding transaction
 signed with plain `SIGHASH_ALL` from shared coins is refused: anyone holding it could still send it
-to BTC. The scan shows how each donor was proven.
+to BTC. The scan shows how each donor was proven. When the donor's own scan already proved the coin
+exists on its home chain only (see
+[explicitly chain-specific coins](../reference/transaction-model.md#explicitly-chain-specific-coins)),
+that proof is used instead of tracing again.
 
 ### Fan-out
 
@@ -87,7 +105,10 @@ The plan has three groups:
   own BTC and ECX transactions, or the backend's spend details) and your own nodes reject it. Send
   BTC and ECX, wait for them, run `broadcast` again.
 
-Fee bumps are not supported for BTC transactions yet.
+Stuck BTC transactions can be fee-bumped like any split (`bump <plan> --chains btc`; see
+[recovery](recovery.md#stuck-transactions-fee-bump-rbf)): the replacement keeps its donor, and the
+held-back XBT split waits for whichever of them confirms. Fan-outs can be bumped too; the extra fee
+comes out of their last output.
 
 ## Trying it by hand
 

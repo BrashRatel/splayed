@@ -123,6 +123,81 @@ export interface PlannedSpend {
   plan: string;
   /** A transaction of this plan spending the coin was sent (or may have been). */
   sent: boolean;
+  /** Each of this plan's transactions that spends the coin, and how far it has got. */
+  txs: CoinTxState[];
+}
+
+/**
+ * How far one planned transaction has got, from the plan's own records (no chain lookups):
+ * unsigned → signed (a signed file was uploaded) → verified → sent → confirmed, or one of the
+ * ways a send ends otherwise (the broadcast statuses).
+ */
+export type CoinTxStage =
+  | "unsigned"
+  | "signed"
+  | "verified"
+  | "sending"
+  | "sent"
+  | "confirmed"
+  | "unknown"
+  | "rejected"
+  | "conflict"
+  | "replaced"
+  | "superseded";
+
+export interface CoinTxState {
+  chain: PlannedTx["chain"];
+  order: number;
+  file: string;
+  stage: CoinTxStage;
+  /** For "confirmed": how deep `track` last saw it. */
+  depth?: number;
+  /** A short note: what replaced or superseded it, or that a sent one is no longer on the network. */
+  detail?: string;
+}
+
+/** The stage of one transaction from its progress record; `uploaded`: a signed file came in. */
+export function txStage(p: TxProgress | undefined, uploaded: boolean): Omit<
+  CoinTxState,
+  "chain" | "order" | "file"
+> {
+  const b = p?.broadcast;
+  if (b) {
+    if (b.status === "replaced" || p!.replacedBy) {
+      return {
+        stage: "replaced",
+        detail: p!.replacedBy ? `by fee bump ${p!.replacedBy.plan}` : b.detail,
+      };
+    }
+    if (b.status === "superseded" || p!.supersededBy) {
+      return {
+        stage: "superseded",
+        detail: p!.supersededBy ? `by plan ${p!.supersededBy.plan}` : b.detail,
+      };
+    }
+    const c = p!.confirmations;
+    if (c && c.depth > 0) return { stage: "confirmed", depth: c.depth };
+    if (c?.state === "conflict") return { stage: "conflict" };
+    if (b.status === "accepted") {
+      const gone = c?.state === "absent" || p!.unmined?.state === "absent";
+      return gone ? { stage: "sent", detail: "not on the network now" } : { stage: "sent" };
+    }
+    return { stage: b.status };
+  }
+  if (p?.verified) return { stage: "verified" };
+  return { stage: uploaded ? "signed" : "unsigned" };
+}
+
+/** Whether the web UI received a signed file for this transaction (uploads/<stem>.signed.*). */
+async function hasUpload(dir: string, file: string): Promise<boolean> {
+  const stem = file.replace("/", "-").replace(/\.psbt$/u, "");
+  for (const kind of ["psbt", "hex"]) {
+    try {
+      await Deno.stat(join(dir, "uploads", `${stem}.signed.${kind}`));
+      return true;
+    } catch { /* not uploaded */ }
+  }
+  return false;
 }
 
 /**
@@ -146,7 +221,7 @@ export async function plannedOutpoints(dataDir: string): Promise<Map<string, Pla
     const plan = await readJson<Plan>(join(dir, "plan.json")).catch(() => undefined);
     if (!plan?.transactions || await archivedAt(dir)) continue;
     const progress: Progress = await loadProgress(dir).catch(() => ({ version: 1, txs: {} }));
-    const spends = new Map<string, boolean>();
+    const spends = new Map<string, { sent: boolean; txs: CoinTxState[] }>();
     for (const t of plan.transactions) {
       const p = progress.txs[t.file];
       // A transaction superseded by another plan's spend of the coin isn't out there either; the
@@ -154,13 +229,22 @@ export async function plannedOutpoints(dataDir: string): Promise<Map<string, Pla
       const sent = !!p?.broadcast &&
         (!["rejected", "conflict", "superseded"].includes(p.broadcast.status) ||
           !!p.confirmations);
+      const state: CoinTxState = {
+        chain: t.chain,
+        order: t.order,
+        file: t.file,
+        ...txStage(p, !p?.verified && !p?.broadcast && await hasUpload(dir, t.file)),
+      };
       for (const i of t.inputs ?? []) {
         const key = `${i.txid}:${i.vout}`;
-        spends.set(key, (spends.get(key) ?? false) || sent);
+        const entry = spends.get(key) ?? { sent: false, txs: [] };
+        entry.sent ||= sent;
+        entry.txs.push(state);
+        spends.set(key, entry);
       }
     }
-    for (const [key, sent] of spends) {
-      out.set(key, [...(out.get(key) ?? []), { plan: plan.id ?? id, sent }]);
+    for (const [key, { sent, txs }] of spends) {
+      out.set(key, [...(out.get(key) ?? []), { plan: plan.id ?? id, sent, txs }]);
     }
   }
   return out;

@@ -31,6 +31,8 @@ third_party/            licenses for adapted code
 | `execute.ts`                          | `verify`, `broadcast` and `track`.                                          |
 | `bump.ts`                             | RBF and CPFP replacement plans.                                             |
 | `donors.ts`, `origin.ts`, `fanout.ts` | Donor wallets, provenance proofs, fan-out.                                  |
+| `chain_specific.ts`                   | Proving a coin exists on one chain only, from its creating transaction.     |
+| `linkage.ts`                          | Which coins are already linked on chain (`--batch linked`).                 |
 | `ur.ts`                               | Uniform Resources / fountain coding for animated QR.                        |
 | `identity.ts`                         | Backend chain-identity checks against checkpoints.                          |
 

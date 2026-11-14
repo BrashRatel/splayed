@@ -51,7 +51,9 @@ deno task cli scan
 deno task cli status        # or: status --json
 ```
 
-`import` prints the first address of each branch. Check they match your wallet.
+`import` says what kind of wallet it read (for example `Single key · native SegWit (wpkh)` or
+`Multisig 2-of-3 · native (wsh) · sorted keys`) and prints the first address of each branch. Check
+both match your wallet. `descriptors`, `scan` and `status` list the wallets with their type too.
 
 Supported descriptors:
 
@@ -75,6 +77,14 @@ Each coin gets one status:
 | `pending`    | A spend is unconfirmed, shallow, or its depth can't be checked   |
 | `unverified` | A chain couldn't be asked. Never treated as safe                 |
 | `spent`      | Not unspent anywhere                                             |
+
+A coin that exists on one chain only because of **how it was made** shows as `separated (XBT only)`
+(or BTC, ECX), with the reason in the details. Its creating transaction can't be valid on the other
+chains: it carries the XBT `0x21` signature or the ECX replay marker, it is a coinbase after the
+forks, or it descends from such a transaction (one of this tool's splits, for example). Such a coin
+can never turn up on the other chains later, so it counts as separated even when another chain's
+server couldn't be asked. Coins that are merely absent elsewhere keep the ordinary status: their
+creating transaction could still be broadcast there by someone holding it.
 
 ### Coins that turn up later
 
@@ -109,6 +119,12 @@ Options:
 
 - `--batch coin` (default) keeps coins unlinked. `--batch address`, `--batch N` and `--batch all`
   combine coins, and the summary says which addresses that links publicly.
+- `--batch linked` combines only coins that are **already linked on chain**, so it saves fees
+  without revealing anything new: coins on the same address, and coins created by transactions that
+  your wallet funded entirely and that spent from a common address of yours (directly or through a
+  chain of them). A coin someone else paid you, or one from a coinjoin, stays on its own unless it
+  shares an address. Only each coin's own funding transaction is read; anything it can't read stays
+  apart.
 - Fees come from `--fee-rate` or the backend's 6-block estimate. A batch whose fee would be over 10%
   of its value is skipped.
 
@@ -162,12 +178,12 @@ before you spend: a coin that turns up later is flagged as
 ## Starting over
 
 `splayed wipe` forgets everything recorded about your coins: imported and donor descriptors, fork
-destinations, scan results and every plan (PSBTs, signed files, progress). It resets the network
-confirmation, so you run `splayed init` again, and keeps your network settings and any servers you
-added. It lists what goes and asks first. If a transaction you sent isn't confirmed yet it warns and
-asks again, because `track` stops following it; with `--yes` it refuses in that case unless you add
-`--force`. Nothing on any blockchain changes, and no keys are involved. In the web UI this is the
-**Burn history** button.
+destinations, scan results, every plan (PSBTs, signed files, progress) and the web UI's donor
+opt-in. It resets the network confirmation, so you run `splayed init` again, and keeps your network
+settings and any servers you added. It lists what goes and asks first. If a transaction you sent
+isn't confirmed yet it warns and asks again, because `track` stops following it; with `--yes` it
+refuses in that case unless you add `--force`. Nothing on any blockchain changes, and no keys are
+involved. In the web UI this is the **Burn history** button.
 
 ## When something goes wrong
 

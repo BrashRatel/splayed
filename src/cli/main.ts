@@ -44,6 +44,7 @@ import {
   donorKey,
   evaluateDonors,
   loadDonorScan,
+  protectedByChain,
   protectedTxids,
   saveDonorScan,
 } from "../core/donors.ts";
@@ -169,8 +170,8 @@ Splitting (guided route: forks first, BTC untouched):
   dest set <xbt|ecx> <descriptor> [--start-index N]
                                   Where split coins go on that fork (best: a new seed per fork)
   dest show
-  plan --xbt-signer NAME | --donor txid:vout ... [--chains ecx,xbt] [--batch coin|address|all|N]
-       [--fee-rate ecx=2,xbt=3] [--coin txid:vout ...] [--yes]
+  plan --xbt-signer NAME | --donor txid:vout ... [--chains ecx,xbt]
+       [--batch coin|address|linked|all|N] [--fee-rate ecx=2,xbt=3] [--coin txid:vout ...] [--yes]
                                   Write unsigned, replay-protected PSBTs for shared coins.
                                   XBT signers: ${Object.keys(XBT_SIGNERS).join(", ")}
   donor import <descriptor> [--label L] | donor list | donor forget <number>
@@ -213,11 +214,13 @@ Splitting (guided route: forks first, BTC untouched):
                                   input is spent by a transaction that isn't one of your plans;
                                   and while any such alert is open. --ack acknowledges the open
                                   alerts (after asking): kept on record, shown muted, exit 0.
-  bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--another] [--yes]
+  bump <plan> [--chains btc,ecx,xbt] [--tx N ...] [--fee-rate ecx=5,xbt=8] [--another] [--yes]
                                   Stuck split? Write a new plan that spends the same inputs at a
                                   higher fee (RBF, BIP125). Sign, verify and broadcast it like any
-                                  plan; nodes replace the original with it. Refused while a bump
-                                  of the same transaction is written and not sent (--another: anyway).
+                                  plan; nodes replace the original with it. Also BTC (BTC-first
+                                  route) and donor fan-outs (the last output pays). Refused while a
+                                  bump of the same transaction is written and not sent (--another:
+                                  anyway).
   bump <plan> --tx N --drop txid:vout [--drop ...]
                                   Replace one transaction of a batch without some of its coins; the
                                   dropped coins stay unspent and can go in a later plan.
@@ -880,6 +883,7 @@ async function cmdImport(config: Config, args: string[], label: string | undefin
     networkForProfile(config.profile),
   );
   io.out(added ? "Imported (watch-only):" : "Already imported:");
+  io.out(`  ${parsed.summary}`);
   io.out(`  ${parsed.normalized}`);
   if (!parsed.hadChecksum) io.out("  (no checksum was given; one has been added)");
   if (/\b[tuvyzTUVYZ]pub/u.test(args[0])) {
@@ -898,10 +902,34 @@ async function cmdDescriptors(config: Config, io: CliIO) {
     io.out("No descriptors imported yet.");
     return 0;
   }
-  wallet.descriptors.forEach((d, i) =>
-    io.out(`${i + 1}. ${d.label ? `[${d.label}] ` : ""}${d.descriptor}`)
-  );
+  for (const w of walletSummaries(config, wallet)) {
+    io.out(`${w.number}. ${w.label ? `[${w.label}] ` : ""}${w.summary}\n   ${w.descriptor}`);
+  }
   return 0;
+}
+
+/** Each imported descriptor with what kind of wallet it is (see ParsedDescriptor.summary). */
+function walletSummaries(config: Config, wallet: Awaited<ReturnType<typeof loadWallet>>) {
+  const network = networkForProfile(config.profile);
+  return wallet.descriptors.map((d, i) => {
+    let summary: string;
+    try {
+      summary = parseDescriptor(d.descriptor, network).summary;
+    } catch (error) {
+      summary = `can't be read (${(error as Error).message})`;
+    }
+    return { number: i + 1, label: d.label, descriptor: d.descriptor, summary };
+  });
+}
+
+/** The "Wallets:" lines above the status table. */
+async function printWallets(config: Config, io: CliIO) {
+  const wallets = walletSummaries(config, await loadWallet(config.dataDir));
+  if (!wallets.length) return;
+  io.out("Wallets:");
+  for (const w of wallets) {
+    io.out(`  ${w.number}. ${w.label ? `[${w.label}] ` : ""}${w.summary}`);
+  }
 }
 
 async function cmdForget(config: Config, args: string[], io: CliIO) {
@@ -961,6 +989,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
       log: (m) => io.out(m),
       progress: io.progress,
       rpcRange,
+      ownProtected: await protectedByChain(config.dataDir),
     });
   } finally {
     for (const b of Object.values(backends)) await b?.close?.();
@@ -971,6 +1000,7 @@ async function cmdScan(config: Config, io: CliIO, rpcRangeFlag?: string) {
   await saveScan(config.dataDir, result);
   for (const w of result.warnings) io.err(`Warning: ${w}`);
   io.out("");
+  await printWallets(config, io);
   printStatus(config, result, io);
   printNewShared(result, io);
   // New shared coins aren't a scan failure (exit 1 stays for warnings): they are listed in
@@ -1032,6 +1062,7 @@ async function cmdStatus(config: Config, io: CliIO, json: boolean) {
     io.out(JSON.stringify(
       {
         ...result,
+        wallets: walletSummaries(config, await loadWallet(config.dataDir)),
         coins: result.coins.map((coin) => ({ ...coin, classification: classify(coin, ctx) })),
       },
       null,
@@ -1039,6 +1070,7 @@ async function cmdStatus(config: Config, io: CliIO, json: boolean) {
     ));
     return 0;
   }
+  await printWallets(config, io);
   printStatus(config, result, io);
   printNewShared(result, io);
   return 0;
@@ -1077,7 +1109,11 @@ function printStatus(
       shortOutpoint(coin.txid, coin.vout),
       sats(coin.value),
       ...CHAIN_IDS.map((chain) => observationCell(coin.observations[chain], result.tips[chain])),
-      c.status === "shared" ? `SHARED (${c.unspentOn.join("+").toUpperCase()})` : c.status,
+      c.status === "shared"
+        ? `SHARED (${c.unspentOn.join("+").toUpperCase()})`
+        : c.chainSpecific
+        ? `separated (${c.chainSpecific.chain.toUpperCase()} only)`
+        : c.status,
     ]);
     if (c.reasons.length || c.nextSteps.length) {
       details.push(
@@ -1250,7 +1286,9 @@ async function cmdPlan(
           txs.reduce((s, t) => s + t.fee, 0)
         } sats in fees` +
           (linked
-            ? `; ${linked} of them combine coins, publicly linking those addresses on ${chain.toUpperCase()}`
+            ? plan.batch.kind === "linked"
+              ? `; ${linked} of them combine coins that were already linked on chain`
+              : `; ${linked} of them combine coins, publicly linking those addresses on ${chain.toUpperCase()}`
             : "; no coins combined"),
       );
     }
@@ -1351,6 +1389,7 @@ async function cmdDonor(
             backends,
             log: (m) => io.out(m),
             rpcRange,
+            ownProtected: await protectedByChain(config.dataDir),
           },
         );
         const evaluated = await evaluateDonors(
@@ -2032,7 +2071,14 @@ async function cmdBroadcast(
             opened.push(gb);
             chains[gc] = { backend: gb, confirmations: config.chains[gc].confirmations };
           }
-          const problems = await gateProblems({ planTx: t, planDir: dir, plan, progress, chains });
+          const problems = await gateProblems({
+            planTx: t,
+            planDir: dir,
+            plan,
+            progress,
+            chains,
+            dataDir: config.dataDir,
+          });
           if (problems.length) {
             io.err(
               `${t.file}: held back until the coin is spent and deep on BTC and ECX:\n  ${
@@ -2449,10 +2495,19 @@ async function cmdTrack(
 ) {
   await requireNetworkConfirmed(config);
   if (!id) throw new UsageError("track <plan> [--ack]");
-  /** Alerts first raised in this run haven't been seen yet: --ack never mutes those. */
-  const runStart = new Date().toISOString();
   const { dir, plan } = await loadPlanDir(config.dataDir, id);
   const progress = await loadProgress(dir);
+  /**
+   * Alerts first raised in this run haven't been seen yet: --ack never mutes those. Earlier ones
+   * are the records already on file when the run started (by content, not by clock: two runs can
+   * start within the same millisecond).
+   */
+  const alertKey = (file: string, r: ReorgRecord) => `${file}\n${r.at}\n${r.kind}\n${r.detail}`;
+  const onRecord = new Set(
+    Object.entries(progress.txs).flatMap(([file, p]) =>
+      (p.reorgs ?? []).map((r) => alertKey(file, r))
+    ),
+  );
   const rows = [["Chain", "#", "Txid", "Broadcast", "Confirmations"]];
   /** Loud alerts, with the record each belongs to (unrecorded ones can't be acknowledged). */
   const alerts: { text: string; rec?: ReorgRecord }[] = [];
@@ -2825,7 +2880,7 @@ async function cmdTrack(
     const all = plan.transactions.flatMap((t) =>
       (progress.txs[t.file]?.reorgs ?? []).filter(isOpenAlert).map((r) => ({ t, r }))
     );
-    const open = all.filter(({ r }) => r.at < runStart);
+    const open = all.filter(({ t, r }) => onRecord.has(alertKey(t.file, r)));
     const fresh = all.length - open.length;
     if (fresh) {
       io.out(
@@ -2905,7 +2960,9 @@ async function cmdBump(
   },
 ) {
   await requireNetworkConfirmed(config);
-  if (!id) throw new UsageError("bump <plan> [--chains ecx,xbt] [--tx N ...] [--fee-rate ecx=5]");
+  if (!id) {
+    throw new UsageError("bump <plan> [--chains btc,ecx,xbt] [--tx N ...] [--fee-rate ecx=5]");
+  }
   if (opts.another && opts.cpfp) throw new UsageError("--another is for RBF bumps, not --cpfp");
   if (opts.cpfp && opts.drop?.length) throw new UsageError("--cpfp and --drop don't combine");
   if (opts.drop?.length && opts.tx?.length !== 1) {
@@ -2916,8 +2973,8 @@ async function cmdBump(
   const progress = await loadProgress(dir);
   const rates = parseFeeRates(opts.feeRate);
   const chainFilter = opts.chains?.split(",").map((c) => c.trim());
-  if (chainFilter && !chainFilter.every((c) => c === "ecx" || c === "xbt")) {
-    throw new UsageError("--chains takes ecx, xbt or ecx,xbt");
+  if (chainFilter && !chainFilter.every((c) => c === "btc" || c === "ecx" || c === "xbt")) {
+    throw new UsageError("--chains takes btc, ecx and xbt, comma-separated");
   }
   const pendingBumps = await unsentReplacements(config.dataDir, plan.id);
   const replacements: PlannedTx[] = [];
@@ -2925,7 +2982,8 @@ async function cmdBump(
   let refused = 0;
   const opened: ChainBackend[] = [];
   try {
-    for (const chain of ["ecx", "xbt"] as const) {
+    // BTC only has transactions on the BTC-first route; a fan-out has them on its donors' chain.
+    for (const chain of ["btc", "ecx", "xbt"] as const) {
       if (chainFilter && !chainFilter.includes(chain)) continue;
       const txs = plan.transactions.filter((t) =>
         t.chain === chain && progress.txs[t.file]?.broadcast &&
@@ -3302,19 +3360,27 @@ async function cmdUi(
   }
   io.out("Press Ctrl+C to stop; a Tor started by splayed stops with it.");
   if (open) {
-    const opener = Deno.build.os === "darwin"
-      ? "open"
-      : Deno.build.os === "windows"
-      ? "explorer"
-      : "xdg-open";
+    const { cmd, args } = browserCommand(Deno.build.os, ui.url);
     try {
-      new Deno.Command(opener, { args: [ui.url], stdout: "null", stderr: "null" }).spawn();
+      new Deno.Command(cmd, { args, stdout: "null", stderr: "null" }).spawn();
     } catch {
       io.err("Couldn't open a browser; copy the URL above.");
     }
   }
   await ui.server.finished;
   return 0;
+}
+
+/**
+ * The command that opens `url` in the user's default browser. On Windows this is not `explorer`:
+ * given a URL with a fragment (the UI's `#token=…`) Explorer opens a folder window instead of the
+ * browser. `rundll32 url.dll,FileProtocolHandler` hands the URL to the registered http handler
+ * as is, and unlike `cmd /c start` it needs no shell quoting.
+ */
+export function browserCommand(os: string, url: string): { cmd: string; args: string[] } {
+  if (os === "darwin") return { cmd: "open", args: [url] };
+  if (os === "windows") return { cmd: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  return { cmd: "xdg-open", args: [url] };
 }
 
 /** Process entry point: runs a command, then always stops a Tor this process started. */

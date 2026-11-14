@@ -9,30 +9,23 @@ chain can be **replayed** on the others, moving the copies you meant to keep. sp
 coins on all three chains, tells you which ones are still shared, and walks each shared coin through
 plan → sign (in your wallet) → verify → broadcast. Your keys never leave your wallet.
 
-> **Status: pre-alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
+> **Status: alpha.** The full guided route works end to end against real Bitcoin Core, Knots and
 > eCash nodes on regtest, and has split real UTXOs on mainnet (ECX and XBT away from BTC, BTC
 > confirmed untouched). It is **not security-reviewed**: start with one small coin/utxo, and read
-> the [release notes](docs/release-notes/0.1.0-pre-alpha.2.md) and [TODO.md](TODO.md) first. Testers
+> the [release notes](docs/release-notes/0.1.0-alpha.1.md) and [TODO.md](TODO.md) first. Testers
 > wanted: please file a [tester report](https://github.com/BrashRatel/splayed/issues/new/choose).
 
-## How it works
-
-|     | First own block | Replay protection                                                       |
-| --- | --------------- | ----------------------------------------------------------------------- |
-| XBT | 961,632         | Opt-in per signature: `SIGHASH_UNIFIED` (ALL becomes 0x21)              |
-| ECX | 973,728         | Opt-in per transaction: `nLockTime = 499,999,998` and a non-final input |
-
-Both protections are one-directional: they stop a fork transaction replaying onto BTC, but an
-ordinary BTC transaction still replays onto the forks. So the guided route is **forks first, BTC
-last**:
-
-1. **ECX:** send each shared coin to yourself with the ECX marker. Any signer works.
-2. **XBT:** send it to yourself with a 0x21 signature. This needs a
-   [supported signer](docs/user/signers.md); stock hardware wallets can use the
-   [donor route](docs/user/advanced-donor-routes.md).
-3. **BTC:** once both splits are deeply confirmed, spend the BTC copy normally.
-
 ## Quick start
+
+### StartOS
+
+Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
+[releases page](https://github.com/BrashRatel/splayed/releases), or build it from
+[splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
+StartOS proxy, reaches public servers over the Tor service, and detects/uses your Bitcoin node (and
+chain). For a node elsewhere that needs an RPC password, give the password with the package's
+**Server passwords** action, under the variable name you entered in the server's "Password env var"
+field.
 
 ### Docker
 
@@ -46,32 +39,24 @@ docker compose -f docker/compose.yml exec splayed cat /data/ui-token   # your ac
 
 Then open <http://localhost:8080/> and paste the token.
 
-### StartOS
-
-Install the `.s9pk` for your server's architecture (x86_64 or aarch64) from the
-[releases page](https://github.com/BrashRatel/splayed/releases), or build it from
-[splayed-startos](https://github.com/BrashRatel/splayed-startos). It runs the web UI behind the
-StartOS proxy, reaches public servers over the Tor service, and detects/uses your Bitcoin node (and
-chain).
-
 ### Release binary
 
 No Deno install needed; Tor is bundled. Archives are published for Linux x86_64 and aarch64, macOS
 arm64 and x86_64, and Windows x86_64 on the
-[releases page](https://github.com/BrashRatel/splayed/releases) (pre-alpha releases aren't marked
-"latest" on GitHub, so go there directly). The Linux x86_64 and Windows x86_64 ones have been run
-from a clean extract (Windows through a full mainnet split); the macOS and Linux aarch64 ones have
-not. Download, verify, then run; Linux x86_64 shown, other platforms are the same with their archive
+[releases page](https://github.com/BrashRatel/splayed/releases) (pre-releases aren't marked "latest"
+on GitHub, so go there directly). The Linux x86_64 and Windows x86_64 ones have been run from a
+clean extract (Windows through a full mainnet split); the macOS and Linux aarch64 ones have not.
+Download, verify, then run; Linux x86_64 shown, other platforms are the same with their archive
 name:
 
 ```sh
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/splayed-0.1.0-pre-alpha.2-linux-x86_64.tar.gz
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/SHA256SUMS
-curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-pre-alpha.2/SHA256SUMS.asc
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-alpha.1/splayed-0.1.0-alpha.1-linux-x86_64.tar.gz
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-alpha.1/SHA256SUMS
+curl -LO https://github.com/BrashRatel/splayed/releases/download/v0.1.0-alpha.1/SHA256SUMS.asc
 sha256sum -c --ignore-missing SHA256SUMS   # check the download
 gpg --verify SHA256SUMS.asc SHA256SUMS  # check it against the key in SECURITY.md
-tar xzf splayed-0.1.0-pre-alpha.2-linux-x86_64.tar.gz
-cd splayed-0.1.0-pre-alpha.2-linux-x86_64
+tar xzf splayed-0.1.0-alpha.1-linux-x86_64.tar.gz
+cd splayed-0.1.0-alpha.1-linux-x86_64
 ```
 
 Then run the same commands as below, with `./splayed` in place of `deno task cli` (and
@@ -103,6 +88,23 @@ deno task cli broadcast <plan-id>    # says where the test is, asks, then sends 
 
 Prefer a browser? `deno task ui` (or `./splayed ui` for the release binary) runs the same steps in a
 local web UI.
+
+## How it works
+
+|     | First own block | Replay protection                                                       |
+| --- | --------------- | ----------------------------------------------------------------------- |
+| XBT | 961,632         | Opt-in per signature: `SIGHASH_UNIFIED` (ALL becomes 0x21)              |
+| ECX | 973,728         | Opt-in per transaction: `nLockTime = 499,999,998` and a non-final input |
+
+Both protections are one-directional: they stop a fork transaction replaying onto BTC, but an
+ordinary BTC transaction still replays onto the forks. So the guided route is **forks first, BTC
+last**:
+
+1. **ECX:** send each shared coin to yourself with the ECX marker. Any signer works.
+2. **XBT:** send it to yourself with a 0x21 signature. This needs a
+   [supported signer](docs/user/signers.md); stock hardware wallets can use the
+   [donor route](docs/user/advanced-donor-routes.md).
+3. **BTC:** once both splits are deeply confirmed, spend the BTC copy normally.
 
 ## Documentation
 

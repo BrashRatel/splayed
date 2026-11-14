@@ -264,7 +264,8 @@ export async function rpcAuthorization(
     if (!password) {
       throw new BackendError(
         `RPC user "${auth.user}" needs a password in the environment variable ` +
-          `${auth.passwordEnv ?? "(set password_env)"}`,
+          `${auth.passwordEnv ?? "(set password_env)"}. Set it where splayed runs: your ` +
+          "shell, the Docker override file, or on StartOS the Server passwords action.",
       );
     }
     return `Basic ${btoa(`${auth.user}:${password}`)}`;

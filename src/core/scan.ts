@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { ChainBackend, FoundUtxo, OutputObservation } from "../backends/types.ts";
 import type { Config } from "./config.ts";
 import type { ParsedDescriptor } from "./descriptors.ts";
+import { ownHistoryFrom, proveChainSpecific } from "./chain_specific.ts";
 import { CHAIN_IDS, type ChainId } from "./profiles.ts";
 import { type ProgressSink, throttleProgress } from "./progress.ts";
 import { classify, type CoinRecord, type SeparationStatus } from "./state.ts";
@@ -51,6 +52,13 @@ export interface ScanDeps {
   progress?: ProgressSink;
   /** Clock for progress throttling; tests replace it. */
   now?: () => number;
+  /**
+   * Transactions this tool verified and sent with protection, per chain: their outputs exist on
+   * that chain only (donors.ts protectedTxids).
+   */
+  ownProtected?: Partial<Record<ChainId, Set<string>>>;
+  /** Most transactions fetched in all to prove coins chain-specific (default 200). */
+  proofBudget?: number;
 }
 
 interface Origin {
@@ -252,10 +260,67 @@ export async function runScan(
     });
   }
 
-  const coinList = [...coins.entries()].map(([key, coin]) => ({
+  const coinList: CoinRecord[] = [...coins.entries()].map(([key, coin]) => ({
     ...coin,
     observations: observed.get(key) as CoinRecord["observations"],
   }));
+
+  // ---- 3. Explicitly chain-specific coins ----
+  // A coin unspent on one chain only, created after that chain's own history began, may have a
+  // creating transaction that can't be valid anywhere else. Pre-fork coins are skipped: their
+  // block is on every chain, so there's nothing to prove and nothing to fetch.
+  let budget = deps.proofBudget ?? 200;
+  const candidates = coinList.filter((coin) => {
+    const unspent = CHAIN_IDS.filter((c) => coin.observations[c].state === "unspent");
+    if (unspent.length !== 1) return false;
+    const home = unspent[0];
+    const obs = coin.observations[home];
+    if (obs.state !== "unspent" || obs.createdHeight === undefined) return false;
+    if (obs.createdHeight <= ownHistoryFrom(config.profile, home)) return false;
+    return CHAIN_IDS.every((c) => c === home || coin.observations[c].state !== "spent");
+  });
+  if (candidates.length) {
+    log(`Checking whether ${candidates.length} single-chain coin(s) can exist only there…`);
+  }
+  let proven = 0;
+  let skipped = 0;
+  for (const [n, coin] of candidates.entries()) {
+    const home = CHAIN_IDS.find((c) => coin.observations[c].state === "unspent")!;
+    const backend = deps.backends[home];
+    if (!backend) continue;
+    if (budget <= 0) {
+      skipped++;
+      continue;
+    }
+    progress({
+      phase: "crosscheck",
+      done: n,
+      total: candidates.length,
+      detail: "checking which coins exist on one chain only",
+    });
+    const result = await proveChainSpecific(coin.txid, home, {
+      profile: config.profile,
+      rawTransaction: async (id) => {
+        budget--;
+        await pace(backend);
+        return await backend.rawTransaction(id);
+      },
+      ownProtected: deps.ownProtected?.[home],
+    }, { depth: 4, fetches: Math.min(12, Math.max(budget, 0)) });
+    if (result.ok) {
+      coin.onlyOn = result.proof;
+      proven++;
+    }
+  }
+  if (candidates.length) {
+    log(`${proven} of ${candidates.length} proven to exist on one chain only`);
+    if (skipped) {
+      warnings.push(
+        `Didn't check whether ${skipped} coin(s) exist on one chain only (transaction lookup ` +
+          "limit); they are judged by what each chain reports, as before.",
+      );
+    }
+  }
   coinList.sort((a, b) => a.txid.localeCompare(b.txid) || a.vout - b.vout);
   return {
     version: 1,

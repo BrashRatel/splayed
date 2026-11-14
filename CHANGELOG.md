@@ -2,6 +2,70 @@
 
 All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
+## 0.1.0-alpha.1 (2026-11-14)
+
+### Added
+
+- **Fee bumps (RBF) for BTC and fan-out transactions.** `bump` now replaces the BTC transactions of
+  the BTC-first route (`--chains btc`; the replacement keeps its BTC donor, so XBT and ECX still
+  reject it) and donor fan-outs (the extra fee comes out of the last output; every other new donor
+  keeps its value). The web UI offers **Fee bump…** for BTC transactions too. CPFP for these is not
+  available yet.
+- **`--batch linked`** combines only coins that are already linked on chain, to save fees without
+  linking anything new: coins on the same address, and coins created by transactions your wallet
+  funded entirely that spent from a common address of yours (directly or through a chain of them). A
+  coin someone paid you, or one from a coinjoin, stays on its own unless it shares an address.
+  Anything that can't be read stays apart, with a warning. Also offered in the web UI's plan forms.
+- **Donor routes in the web UI are opt-in.** Before donor routes are turned on, the Donors tab
+  explains what a donor is, the rules splayed enforces and what donors reveal on chain: each donor
+  transaction permanently links the donor wallet to the coins it is spent with, and those coins to
+  each other when they share a transaction or a fan-out. Until you tick that you understand and turn
+  them on, the UI runs no donor command and no plan with donors (the server refuses them). The
+  choice is kept in the data folder and can be withdrawn; Burn history removes it. The command line
+  is unchanged.
+- **The Coins tab shows where each coin's split is.** A new **Split** column has one badge per chain
+  the coin is planned on: planned, signed, verified, sent, then its depth against the confirmations
+  you require, or how a send ended (rejected, conflict, replaced by a fee bump). When several plans
+  spend the coin it shows the most advanced one. Clicking it opens Plans.
+- **Coins that can only exist on one chain are recognized as such.** Until now a coin counted as
+  separated only because the other chains didn't have it, which says nothing about later: anyone
+  holding its creating transaction could broadcast it there. `scan` now checks, for coins on one
+  chain only that were made after the forks, whether the creating transaction can't be valid
+  anywhere else (an XBT `0x21` signature, the ECX replay marker, a post-fork coinbase, one of this
+  tool's own splits, or an input made by such a transaction). Those coins show as "XBT only" (or
+  BTC, ECX) with the reason, count as separated even when another chain's server can't be asked, and
+  `donor scan` uses the same proof for a donor's provenance. Lookups are bounded and paced like the
+  rest of the scan. See
+  [explicitly chain-specific coins](docs/reference/transaction-model.md#explicitly-chain-specific-coins).
+- **splayed says what kind of wallet each descriptor is**, for example "Multisig 2-of-3 · native
+  (wsh) · sorted keys" or "Single key · Taproot (tr)". In the web UI it shows in the
+  imported-wallets table and in the Scan QR preview of a whole pasted or scanned descriptor; on the
+  command line in `import`, `descriptors`, `scan` and `status` (`status --json` has a `wallets`
+  list). Until now a multisig descriptor pasted whole was imported and scanned correctly, but
+  nothing on screen said it was multisig or gave its threshold.
+
+- **RPC passwords on StartOS.** The StartOS package has a new **Server passwords** action (in
+  [splayed-startos](https://github.com/BrashRatel/splayed-startos)): for a node you added in the web
+  UI with an RPC user, enter the variable name from its "Password env var" field and the password,
+  and splayed gets it as that environment variable. Until now a StartOS user had no way to set one.
+  The web UI's node credentials and the "needs a password" error now say where to set the variable
+  (shell, Docker override file, or that action).
+
+### Fixed
+
+- **`Start splayed.cmd` on Windows opened a File Explorer window instead of the browser.**
+  `ui
+  --open` ran `explorer` with the UI address, and Explorer doesn't treat an address with a
+  `#token=…` part as a web page. It now uses `rundll32 url.dll,FileProtocolHandler`, which opens the
+  default browser with the address unchanged.
+- **The BTC-first route's XBT split was held back for good after a fee bump** of the plan's own BTC
+  or ECX transaction: the gate checked the original txid, saw the coin spent by "another
+  transaction" (the replacement) and never released the XBT split. It now follows the fee bumps (and
+  bumps of bumps) to the transaction that confirmed.
+- **`track --ack` could refuse to acknowledge an alert raised by the previous run** when the two
+  runs started within the same millisecond (seen in CI, not possible by hand): "raised by this run"
+  was decided by comparing timestamps. It now means "not on record when this run started".
+
 ## 0.1.0-pre-alpha.2 (2026-11-05)
 
 ### Added

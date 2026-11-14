@@ -13,25 +13,30 @@ appear as dialogs in the browser.
 ## Tabs
 
 1. **Network:** backends, privacy level per backend, Tor mode, and "Check servers & confirm".
-2. **Wallet:** descriptors and fork destinations. **Scan QR** beside each field reads a wallet
-   export by camera (or pasted text) and fills the field; you still press **Import** or **Set
-   destination**. It reads:
+2. **Wallet:** descriptors and fork destinations; each imported descriptor shows what kind of wallet
+   it is ("Single key · Taproot (tr)", "Multisig 2-of-3 · native (wsh) · sorted keys"). **Scan QR**
+   beside each field reads a wallet export by camera (or pasted text) and fills the field; you still
+   press **Import** or **Set destination**. It reads:
    - a signer's xpub export: animated UR `crypto-account` (SeedSigner's default) or the newer
      `account-descriptor`, and SeedSigner's **Static** `[fingerprint/path]zpub…` text;
    - a whole wallet from a coordinator such as Sparrow: UR `crypto-output` or `output-descriptor`;
    - a plain descriptor.
 
-   For **multisig**, scan each cosigner's multisig xpub export in turn (SeedSigner: Export Xpub →
-   Multisig), set how many signatures are required and whether keys are sorted (`sortedmulti`, what
-   most coordinators use), and compare the first receive address shown with the one in your
-   coordinator before using it. Private keys are refused.
-3. **Coins:** scan, plus per-coin status on all three chains. When a rescan finds shared coins that
-   weren't in the previous scan (or weren't shared then), a red banner lists them with what to do
-   and whether a plan already spends them (and whether it was broadcast). **Plan these coins** opens
-   the plan form with exactly those coins ticked (any already in a plan are left out); **Go to
-   Plans** opens it with the form's selection unchanged. Their rows carry a **new** badge. Once any
-   plan exists, a **N new shared coins** pill in the header (and a line in the setup guide) points
-   back to them from every tab. See [Coins that turn up later](guide.md#coins-that-turn-up-later).
+   For **multisig**, scan each cosigner's multisig xpub export in turn (scanning the first one opens
+   the cosigner list; there is no separate multisig button) (SeedSigner: Export Xpub → Multisig),
+   set how many signatures are required and whether keys are sorted (`sortedmulti`, what most
+   coordinators use), and compare the first receive address shown with the one in your coordinator
+   before using it. Private keys are refused.
+3. **Coins:** scan, plus per-coin status on all three chains (**XBT only** and the like for coins
+   proven to exist on one chain), and a **Split** column: how far each plan spending the coin has
+   got per chain (planned, signed, verified, sent, depth against the required confirmations). When a
+   rescan finds shared coins that weren't in the previous scan (or weren't shared then), a red
+   banner lists them with what to do and whether a plan already spends them (and whether it was
+   broadcast). **Plan these coins** opens the plan form with exactly those coins ticked (any already
+   in a plan are left out); **Go to Plans** opens it with the form's selection unchanged. Their rows
+   carry a **new** badge. Once any plan exists, a **N new shared coins** pill in the header (and a
+   line in the setup guide) points back to them from every tab. See
+   [Coins that turn up later](guide.md#coins-that-turn-up-later).
 4. **Plans & signing:** create a plan, download the unsigned PSBTs (binary or base64), upload signed
    files (for a multisig, one per cosigner: they are merged and the row shows "1 of 2 signatures"),
    then verify, broadcast and track. The **Coins** list in the New plan form shows every coin that
@@ -40,17 +45,19 @@ appear as dialogs in the browser.
    **Select none**, **Only new shared coins** and **Only coins not in a plan** change the pick, and
    a running total shows its value. The pick is passed as `plan --coin txid:vout` per coin (left out
    when it is every coin and none was planned before), and **Create plan** stays disabled, with the
-   reason, while nothing is picked. Each transaction has **QR** and **Scan signed** buttons for
-   [air-gapped signers](signers.md#air-gapped-signers-animated-qr).
+   reason, while nothing is picked. **Batching** offers one coin per transaction, coins already
+   linked on chain (`--batch linked`), by address, or all in one. Each transaction has **QR** and
+   **Scan signed** buttons for [air-gapped signers](signers.md#air-gapped-signers-animated-qr).
 
-Reorg alerts appear above a plan's table, and each broadcast split has a "Fee bump…" button (plus
-one for the whole plan). See [Recovery](recovery.md).
+Reorg alerts appear above a plan's table, and each broadcast transaction (BTC and fan-outs too) has
+a "Fee bump…" button (plus one for the whole plan). See [Recovery](recovery.md).
 
 A **Setup guide** above every tab lists the steps of the guided route, ticks off what's done (from
 the actual state) and explains the next step. **Guide: on/off** in the tab bar hides it.
 
 Switch on **Advanced** in the tab bar to get a **Donors** tab for the
-[donor routes](advanced-donor-routes.md).
+[donor routes](advanced-donor-routes.md). It starts with an opt-in screen (the rules and what donors
+reveal on chain); donor routes stay off until you accept it, and can be turned off again.
 
 The UI is dark by default. The header button switches to light mode, and the choice is remembered in
 that browser.
@@ -59,9 +66,10 @@ that browser.
 
 The header has **Burn history** and a theme button (**Burn eyes** switches to the light theme, **Go
 back** returns to dark). Burn history runs `splayed wipe`: it lists what goes in the Activity log,
-then asks (the dialog defaults to No). It forgets the wallet, destinations, scan results and all
-plans, resets the network confirmation and keeps your servers and settings; the page returns to the
-Network step. If sent transactions are still unconfirmed it warns and asks a second time.
+then asks (the dialog defaults to No). It forgets the wallet, destinations, scan results, all plans
+and the donor opt-in, resets the network confirmation and keeps your servers and settings; the page
+returns to the Network step. If sent transactions are still unconfirmed it warns and asks a second
+time.
 
 ## Security
 
@@ -73,6 +81,9 @@ Network step. If sent transactions are still unconfirmed it warns and asks a sec
 - The CSP allows only the UI's own script and stylesheet.
 - Server data is only ever inserted as text, never as HTML.
 - The UI can't change the data directory, Tor address or profile, and can't start another UI.
+- Donor jobs (any `donor` command, a plan with `--donor` or `--btc-first`) are refused (HTTP 403)
+  until donor routes are turned on in the Donors tab; the opt-in is stored as `donor-opt-in.json` in
+  the data folder. The CLI has no such switch.
 
 ## Demo
 

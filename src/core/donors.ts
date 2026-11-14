@@ -32,6 +32,13 @@ import { parseTx } from "./tx.ts";
 import type { ScanResult } from "./scan.ts";
 
 export const DONOR_SCAN_FILE = "donor-scan.json";
+/** The web UI's record that the donor rules were read and accepted (see donorOptIn). */
+export const DONOR_OPT_IN_FILE = "donor-opt-in.json";
+/**
+ * Bump when the donor rules or the linkage they create change in a way people should read again:
+ * an opt-in to an older version no longer counts.
+ */
+export const DONOR_RULES_VERSION = 1;
 /** Coinbase outputs can't be spent until this many blocks are on top of them. */
 export const COINBASE_MATURITY = 100;
 
@@ -68,7 +75,7 @@ export interface DonorScan {
  * Txids of transactions this tool verified and sent on `home`: their outputs exist on that chain only
  * (the transaction was protected, so it never reached the other chains).
  */
-export async function protectedTxids(dataDir: string, home: DonorHome): Promise<Set<string>> {
+export async function protectedTxids(dataDir: string, home: ChainId): Promise<Set<string>> {
   const out = new Set<string>();
   const root = join(dataDir, PLANS_DIR);
   try {
@@ -97,6 +104,15 @@ export async function protectedTxids(dataDir: string, home: DonorHome): Promise<
 }
 
 export const protectedXbtTxids = (dataDir: string) => protectedTxids(dataDir, "xbt");
+
+/** protectedTxids for every chain, for a scan's chain-specific proofs. */
+export async function protectedByChain(dataDir: string): Promise<Record<ChainId, Set<string>>> {
+  return {
+    btc: await protectedTxids(dataDir, "btc"),
+    xbt: await protectedTxids(dataDir, "xbt"),
+    ecx: await protectedTxids(dataDir, "ecx"),
+  };
+}
 
 export interface DonorContext {
   tips: ScanResult["tips"];
@@ -187,6 +203,12 @@ export async function evaluateDonors(
       const backend = backends[home];
       if (protectedByHome[home].has(coin.txid)) {
         provenance = "protected-spend";
+      } else if (coin.onlyOn?.chain === home) {
+        // The scan already proved its creating transaction can't be valid elsewhere.
+        provenance = coin.onlyOn.kind === "coinbase" ? "coinbase" : "verified-funding";
+        if (provenance === "verified-funding") {
+          fundingNotes.set(`${coin.txid}:${coin.vout}`, coin.onlyOn.via);
+        }
       } else if (backend) {
         try {
           if (isCoinbase(await backend.rawTransaction(coin.txid))) {
@@ -260,4 +282,43 @@ export function describeDonor(c: DonorCoin): string {
   return c.eligible
     ? `${home} donor · ${c.provenance}${c.funding ? ` (${c.funding})` : ""}`
     : `${home} · ${c.provenance} · NOT usable: ${c.reasons[0]}`;
+}
+
+export interface DonorOptIn {
+  version: 1;
+  rules: number;
+  at: string;
+}
+
+/** The web UI's donor opt-in, if one was given for the current rules. */
+export async function donorOptIn(dataDir: string): Promise<DonorOptIn | undefined> {
+  const r = await readJson<DonorOptIn>(join(dataDir, DONOR_OPT_IN_FILE));
+  return r?.rules === DONOR_RULES_VERSION ? r : undefined;
+}
+
+/** Records (accept) or withdraws the opt-in. */
+export async function setDonorOptIn(dataDir: string, accept: boolean, now = new Date()) {
+  if (accept) {
+    await writeJsonAtomic(
+      join(dataDir, DONOR_OPT_IN_FILE),
+      {
+        version: 1,
+        rules: DONOR_RULES_VERSION,
+        at: now.toISOString(),
+      } satisfies DonorOptIn,
+    );
+    return;
+  }
+  await Deno.remove(join(dataDir, DONOR_OPT_IN_FILE)).catch((error) => {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  });
+}
+
+/** Whether CLI arguments use a donor route: any `donor` command, or a plan with donors. */
+export function usesDonors(args: readonly string[]): boolean {
+  return args[0] === "donor" ||
+    args.some((a) =>
+      a === "--donor" || a.startsWith("--donor=") || a === "--btc-first" ||
+      a.startsWith("--btc-first=")
+    );
 }

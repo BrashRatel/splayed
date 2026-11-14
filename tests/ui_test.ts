@@ -170,7 +170,7 @@ Deno.test("UI: init asks both questions through the browser; declining the first
 });
 
 Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", async () => {
-  await withUi(async ({ runJob, api }) => {
+  await withUi(async ({ runJob, api, dataDir }) => {
     assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
     assertEquals((await runJob(["import", SRC_DESC])).exitCode, 0);
     assertEquals((await runJob(["scan"])).exitCode, 0);
@@ -180,6 +180,19 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     const { plans } = await (await api("/api/plans")).json();
     const p = plans[0];
     const t = p.transactions[0];
+    // The Coins tab sees each coin's split, stage by stage.
+    const coinStages = async () =>
+      ((await (await api("/api/status")).json()).scan.coins as {
+        txid: string;
+        vout: number;
+        planTxs: { plan: string; chain: string; stage: string }[];
+      }[]).filter((c) => c.planTxs.length).map((c) =>
+        c.planTxs.map((x) => `${x.plan === p.id ? "plan" : x.plan} ${x.chain} ${x.stage}`)
+      );
+    const planned = await coinStages();
+    assert(planned.length >= 1, JSON.stringify(planned));
+    assertEquals(planned[0], ["plan ecx unsigned"]);
+    assertEquals((await (await api("/api/status")).json()).scan.confirmations.ecx, 50);
     // Download the unsigned PSBT as a binary file, sign it like any wallet would, upload it.
     const dl = await api(
       `/api/plans/${p.id}/download?file=${encodeURIComponent(t.file)}&format=binary`,
@@ -196,8 +209,46 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     // The plans view reports that the signed file arrived, before anything is verified.
     const seen = (await (await api("/api/plans")).json()).plans[0].transactions[0];
     assert(seen.signedUpload?.name.includes(".signed."), JSON.stringify(seen.signedUpload));
+    assertEquals((await coinStages())[0], ["plan ecx signed"]);
     // The donor view starts empty, and a donor wallet imported from the UI shows up in it.
-    assertEquals(await (await api("/api/donors")).json(), { descriptors: [], scan: null });
+    assertEquals(await (await api("/api/donors")).json(), {
+      descriptors: [],
+      scan: null,
+      optIn: null,
+    });
+    // Donor routes are opt-in: until the rules are accepted, no donor job runs from the UI,
+    // whether a donor command or a plan with donors.
+    for (
+      const args of [
+        ["donor", "import", ECX_DEST],
+        ["donor", "scan"],
+        ["plan", "--chains", "xbt", "--donor", `${"ab".repeat(32)}:0`],
+        ["plan", "--btc-first"],
+      ]
+    ) {
+      const refused = await api("/api/run", { method: "POST", body: JSON.stringify({ args }) });
+      assertEquals(refused.status, 403, args.join(" "));
+      assert((await refused.json()).error.includes("Donor routes are off"));
+    }
+    const bogus = await api("/api/donors/opt-in", { method: "POST", body: "{}" });
+    assertEquals(bogus.status, 400);
+    await bogus.body?.cancel();
+    const optIn = async (accept: boolean) =>
+      (await (await api("/api/donors/opt-in", {
+        method: "POST",
+        body: JSON.stringify({ accept }),
+      })).json()).optIn;
+    assertEquals(await optIn(false), null); // turning off when it's off is fine
+    const on = await optIn(true);
+    assertEquals(on.rules, 1);
+    assertEquals((await (await api("/api/donors")).json()).optIn.at, on.at);
+    // An opt-in to older rules doesn't count.
+    await Deno.writeTextFile(
+      `${dataDir}/donor-opt-in.json`,
+      JSON.stringify({ version: 1, rules: 0, at: on.at }),
+    );
+    assertEquals((await (await api("/api/donors")).json()).optIn, null);
+    await optIn(true);
     // The main wallet's own descriptor is refused as a donor wallet.
     // It is a refusal, not a typing mistake: exit 1 and just the reason, no usage text.
     const same = await runJob(["donor", "import", SRC_DESC]);
@@ -237,6 +288,7 @@ Deno.test("UI end to end: plan, download PSBT, upload signed file, verify", asyn
     assert(verify.text.includes("VERIFIED"));
     const after = (await (await api("/api/plans")).json()).plans[0];
     assert(after.transactions[0].progress.verified);
+    assertEquals((await coinStages())[0], ["plan ecx verified"]);
     // Fee bump is reachable from the UI; nothing is broadcast, so there is nothing to replace.
     const bump = await runJob(["bump", p.id, "--yes"]);
     assertEquals(bump.exitCode, 1, bump.text);
@@ -686,6 +738,8 @@ Deno.test("UI multisig 3-of-5: built from five cosigner keys, detected as 3 of 5
   await withUi(async ({ runJob, api }) => {
     assertEquals((await runJob(["init"], [true, true])).exitCode, 0);
     assertEquals((await runJob(["import", built])).exitCode, 0);
+    const imported = (await (await api("/api/overview")).json()).descriptors[0];
+    assertEquals(imported.summary, "Multisig 3-of-5 · native (wsh) · sorted keys");
     assertEquals((await runJob(["scan"])).exitCode, 0);
     assertEquals((await runJob(["dest", "set", "ecx", ECX_DEST])).exitCode, 0);
     assertEquals(

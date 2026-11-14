@@ -4,14 +4,12 @@ Open work only, grouped by kind and ordered by impact within each group. When an
 it to [docs/dev/todo-archive.md](docs/dev/todo-archive.md) (with what was checked and when) and
 delete it here.
 
-## Pre-alpha.2
+## Alpha Release Gates
 
-Released 2026-11-05 (see the [archive](docs/dev/todo-archive.md)). Open:
+Must be done before the alpha release (pre-alpha.2 was released 2026-11-05; see the
+[archive](docs/dev/todo-archive.md)):
 
-- [ ] Publish the StartOS package to a registry (community, via Start9's submission process, or a
-      self-hosted one) and document the steps in [releasing.md](docs/dev/releasing.md). Guides:
-      [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
-      and [publishing](https://docs.start9.com/packaging/publishing.html).
+None open.
 
 ## 1. Bugs and issues
 
@@ -32,7 +30,10 @@ No known high- or medium-impact bugs are open. Highest impact first:
 ### Review
 
 - [ ] Independent review of `src/core/sigcheck.ts`, `src/core/planner.ts`, `src/core/psbt.ts`,
-      `src/net/*` and `src/ui/server.ts`.
+      `src/net/*` and `src/ui/server.ts`, and the post-pre-alpha.2 additions that decide safety or
+      privacy: `src/core/chain_specific.ts` (a proof makes a coin count as separated),
+      `src/core/linkage.ts` (`--batch linked` merges coins) and the gate's fee-bump following in
+      `gateProblems` (`src/core/execute.ts`).
 
 ### Signers
 
@@ -57,18 +58,22 @@ No known high- or medium-impact bugs are open. Highest impact first:
       backends answer `{"confirmed":false}` for a txid that was never broadcast, which is fixed in
       `EsploraBackend.txStatus`; see the archive.)
 - [ ] Remote node RPC over an onion address, end to end.
+- [ ] Chain-specific detection and `--batch linked` on mainnet data: a real `0x21`-funded XBT coin
+      and an ECX-marked coin show as "XBT only"/"ECX only"; the lookup counts and pacing over Tor;
+      `--batch linked` groups on a real wallet's history (so far fake chains only).
 
 ### Platforms
 
 - [ ] Run the macOS (arm64 and x86_64) builds from `scripts/package_release.ts` on real machines,
       with their bundled Tor: the binary starts, managed Tor bootstraps, and a scan works. They are
       cross-compiled and the Tor bundles are hash-checked, but nothing has been run there. Try the
-      new `Start splayed.command` and README steps (Gatekeeper) there, and `Start splayed.cmd` on
-      Windows.
+      new `Start splayed.command` and README steps (Gatekeeper) there.
 - [ ] Run the Linux aarch64 archive on a real arm64 host: its bundled `tor` starts and bootstraps
       and a scan works (so far only checked statically: right architecture, libraries beside it).
-- [ ] **StartOS package (`splayed-startos`) `v0.1.0:5`:** run the aarch64 build on an arm device if
-      one is available (x86_64 is done).
+- [ ] Publish the StartOS package to a registry (community, via Start9's submission process, or a
+      self-hosted one) and document the steps in [releasing.md](docs/dev/releasing.md). Guides:
+      [host registry administration](https://docs.start9.com/packaging/host-registry-administration.html#packages)
+      and [publishing](https://docs.start9.com/packaging/publishing.html).
 
 ## 3. Docs hygiene
 
@@ -76,14 +81,8 @@ No known high- or medium-impact bugs are open. Highest impact first:
 
 ## 4. Features
 
-- [ ] **Explicit chain-specific coins.** Detect coins that are already chain-specific because their
-      creating transaction is protected, rather than only "absent elsewhere". Feeds the donor work.
-- [ ] UI: show the per-coin plan, verify and broadcast state on the Coins tab.
-- [ ] UI: an opt-in screen explaining the donor rules and the on-chain linkage they create.
-- [ ] Batch policy: cluster coins already linked on-chain (common-input heuristics) rather than just
-      by address.
-- [ ] Fee bump for BTC transactions, fan-out transactions, and CPFP of donor or multi-output
-      transactions.
+- [ ] CPFP of donor, BTC and multi-output (fan-out) transactions. (RBF bumps of BTC and fan-out
+      transactions are done; see the archive.)
 - [ ] Air-gapped QR: BBQr (Coldcard Q) and plain base64 QR codes (the `ur:psbt` type is read but not
       written).
 - [ ] PSBT v2 (BIP370) input, for signers that only emit v2.

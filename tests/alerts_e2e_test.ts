@@ -236,8 +236,15 @@ Deno.test("track --ack --yes never mutes an alert first raised by the same run",
   let recs = await recordsOf(s.planDir, test.file);
   assertEquals(recs.map((r) => r.kind), ["conflict"]);
   assert(!recs[0].acknowledged);
-  // Once it has been shown, a later --ack can acknowledge it.
+  // Once it has been shown, a later --ack can acknowledge it, however close in time the runs are:
+  // "earlier" means already on record, not an older clock reading. (It once compared timestamps,
+  // which failed in CI when two runs started within the same millisecond.) A record stamped in the
+  // future is the same case, made certain.
+  const po = JSON.parse(await Deno.readTextFile(join(s.planDir, "progress.json")));
+  po.txs[test.file].reorgs[0].at = "2099-01-01T00:00:00.000Z";
+  await Deno.writeTextFile(join(s.planDir, "progress.json"), JSON.stringify(po));
   assertEquals(await s.run("track", s.id, "--ack", "--yes"), 0, s.err.join("\n"));
   recs = await recordsOf(s.planDir, test.file);
+  assertEquals(recs.length, 1);
   assert(recs[0].acknowledged);
 });

@@ -4,6 +4,83 @@ Finished items moved out of [TODO.md](../../TODO.md), newest first. When you tic
 TODO, move it here (keep the evidence: what was checked, when, against what) and delete it from the
 TODO.
 
+## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
+
+- **Windows launcher opened Explorer, not the browser (2026-11-13, alpha gate):** `ui --open` ran
+  `explorer <url>`, and Explorer treats `http://127.0.0.1:PORT/#token=…` as a path and opens a
+  folder window. The opener is now `browserCommand()` in `src/cli/main.ts`:
+  `rundll32
+  url.dll,FileProtocolHandler <url>` on Windows (hands the URL to the registered http
+  handler as is; `cmd /c start` was rejected because the token would need cmd quoting), `open` on
+  macOS, `xdg-open` elsewhere. _Checked:_ unit test per OS in `tests/cli_test.ts`, and the test
+  build of `features-sprint` at 6c90377 (Windows x86_64 zip) on Windows by the maintainer
+  (2026-11-13): `Start splayed.cmd` opens the UI in the default browser.
+
+- **StartOS: passwords for external RPC servers (2026-11-13, alpha gate):** a new **Server
+  passwords** action in splayed-startos (PR #2, merged 2026-11-13 as 70efe09; package version
+  0.1.0:8, pinning splayed `features-sprint` 52dc972) stores `{variable, password}` pairs in
+  `store.json` (startos volume, backed up with the node login). `main.ts` puts them into every
+  splayed process's environment before the package's own `SPLAYED_*` settings, and the action
+  refuses `SPLAYED_*`, `LC_*`, `LD_*` and the container's own variables (`PATH`, `HOME`, ...), so a
+  stored password can't replace a setting. splayed restarts when the list changes (the store is read
+  with `.const()`). Options weighed: a password file or a password field in splayed's own config
+  (rejected: splayed keeps refusing to store RPC passwords, and Docker users already set variables
+  in the override file). splayed itself: the web UI's node credentials and the missing-password
+  error now say where the variable is set. _Checked:_ `tsc` and the `ncc` bundle of the package, and
+  a test build (0.1.0:8 on splayed 6c90377) sideloaded over 0.1.0:7 on StartOS by the maintainer
+  (2026-11-13), which worked as expected.
+
+- **RBF fee bumps for BTC and fan-out transactions (2026-11-11):** `bump` now visits BTC (the
+  BTC-first route; the replacement keeps its BTC donor) and replaces multi-output fan-outs, taking
+  the extra fee from the last output only. Found and fixed on the way: the BTC-first XBT gate
+  checked the plan's own BTC/ECX sibling by its original txid, so after a fee bump of that sibling
+  (ECX bumps were already possible) the coin looked "spent by another transaction" and the XBT split
+  was held back for good. `gateProblems` now follows `replacedBy` links (bumps of bumps, up to 20)
+  to the transaction that stands. The UI offers **Fee bump…** for BTC transactions too. _Checked:_
+  `tests/bump_test.ts` (fan-out values, donor can't be dropped, dust), `tests/gate_test.ts` (bump,
+  bump of a bump, shallow, a stranger's spend; the first two fail without the fix), and regtest
+  steps: a fan-out bumped and replaced in the XBT mempool with its outputs then usable donors, and a
+  BTC-first BTC transaction bumped, verified (XBT and ECX reject it) and broadcast, after which the
+  gated XBT split is released. CPFP of donor, BTC and multi-output transactions stays open.
+
+- **`--batch linked` (2026-11-11):** batches only coins already linked on chain
+  (`src/core/linkage.ts`): the same address, or creating transactions funded entirely from the
+  source wallet that spent from a common address of it (union-find, so chains of own spends join;
+  siblings of one such transaction too). Any outside input (a payment, a coinjoin) links nothing;
+  input scripts are read from witnesses/scriptSigs (P2WPKH, P2WSH, nested, P2PKH, P2SH), otherwise
+  from the previous transaction; unreadable means "kept apart" with a warning. One generation only,
+  ≤100 fetches per chain, cached across chains. In the plan form and the donor plan form. _Checked:_
+  `tests/linkage_test.ts` (script recognition, reuse, shared funding address, siblings, payment to
+  you, coinjoin, unreadable, and `plan --batch linked` end to end on fake chains).
+
+- **Donor opt-in screen (2026-11-11):** until donor routes are turned on, the Donors tab shows only
+  what donors are, the rules splayed enforces, and the on-chain linkage (donor wallet ↔ coins ↔
+  destination, `--batch all`, fan-out siblings, outside funding), with an "I understand" tick. The
+  opt-in is stored in the data folder (`donor-opt-in.json`, versioned by `DONOR_RULES_VERSION`,
+  removed by wipe), and the server refuses donor jobs from the UI without it (403): any `donor`
+  command, `--donor`, `--btc-first`. _Checked:_ the UI end-to-end test (each kind of donor job
+  refused, opt-in and opt-out, a stale rules version not counting), plus a unit test for
+  `usesDonors`. The CLI is unchanged.
+
+- **Per-coin plan, verify and broadcast state on the Coins tab (2026-11-11):** a **Split** column
+  with one badge per chain (unsigned, signed, verified, sent, `depth/required conf`, or how a send
+  ended), the most advanced transaction when several plans spend the coin, from the plans' own
+  records (`txStage` in `plan_admin.ts`, `coinPlanSummary` in `plan_status.js`). _Checked:_ unit
+  tests for each stage and for choosing between plans (a fee bump, a rejected newer plan), and the
+  UI end-to-end test following one coin from planned to signed to verified through `/api/status`.
+
+- **Explicit chain-specific coins (2026-11-11):** `scan` proves a single-chain coin created after
+  the forks can't exist elsewhere from its creating transaction (`src/core/chain_specific.ts`): an
+  XBT `0x21` signature, the ECX locktime marker, a post-fork coinbase (BIP34 height against the
+  per-pair shared heights), this tool's own protected sends, or an input whose creator is ruled out
+  on that chain (several inputs may share the work). Bounded (4 generations, 12 fetches a coin, 200
+  a scan); pre-fork coins are skipped without fetching. A proof is ignored when another chain
+  reports the coin unspent or spent. Proven coins are `separated` (shown as "XBT only" etc.) even
+  with an `unknown` or `gone` answer elsewhere, and donor scans take their provenance from it.
+  _Checked:_ `tests/chain_specific_test.ts` (each rule, the height boundaries, inheritance, the
+  search limit, contradiction, and an end-to-end scan on fake Esplora chains with one chain's server
+  failing for the coin), plus a donor test. Not yet run against real chains.
+
 ## 0.1.0-pre-alpha.2 release (2026-11-05)
 
 - **Released** as

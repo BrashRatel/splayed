@@ -53,6 +53,31 @@ transaction keeps the replay marker and the predicted txid.
 
 "Deeply" means the per-chain depth set with `config confirmations <chain> N`.
 
+### Explicitly chain-specific coins
+
+"Absent elsewhere" is only true until someone broadcasts the coin's creating transaction on another
+chain. So after cross-checking, `scan` also tries to **prove** that a coin unspent on one chain only
+can't exist anywhere else, from its creating transaction T (`src/core/chain_specific.ts`). T can't
+be valid on chain C when:
+
+- T is a coinbase whose BIP34 height is above the last block its chain shares with C (BTC and ECX
+  share blocks up to 973,727; XBT shares up to 961,631 with both);
+- on XBT, one of T's signatures has the `SIGHASH_UNIFIED` bit;
+- on ECX, T has `nLockTime` 499,999,998 and a non-final input;
+- T is one of this tool's own protected sends on that chain;
+- one of T's inputs was created by a transaction that can't be valid on C.
+
+A coin is proven when every other chain is ruled out, by one rule or several inputs between them.
+Only coins created above the height where their chain's own history begins are checked (a pre-fork
+coin's block is on every chain), and lookups are bounded: 4 generations and 12 transactions per
+coin, 200 per scan, paced like the rest of the scan. A proof is stored on the coin as `onlyOn` in
+`scan.json`.
+
+A proven coin is `separated` even when another chain answered `unknown` or `gone`, since either can
+only mean "never existed". If another chain reports the coin unspent or spent, the proof is ignored
+and the observations decide. Donor scans use the same proof for a donor's provenance (a coinbase
+proof counts as `coinbase`, the rest as `verified-funding`).
+
 ## What `verify` checks
 
 `verify` takes only signatures from the signer's file. Scripts, keys and amounts come from the

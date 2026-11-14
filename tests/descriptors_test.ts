@@ -200,3 +200,28 @@ Deno.test("regtest network: private extended keys are still refused", () => {
     "PRIVATE",
   );
 });
+
+Deno.test("summary: wallet type, threshold and key order in words", () => {
+  const ms = (n: number) => `[${fp}/48h/0h/${n}h/2h]${account(`m/48'/0'/${n}'/2'`)}/<0;1>/*`;
+  const keys = [ms(0), ms(1), ms(2)].join(",");
+  assertEquals(
+    parseDescriptor(`wsh(sortedmulti(2,${keys}))`).summary,
+    "Multisig 2-of-3 · native (wsh) · sorted keys",
+  );
+  assertEquals(
+    parseDescriptor(`sh(wsh(multi(3,${keys})))`).summary,
+    "Multisig 3-of-3 · nested (sh(wsh)) · keys in the order given",
+  );
+  assertEquals(
+    parseDescriptor(`sh(sortedmulti(1,${keys}))`).summary,
+    "Multisig 1-of-3 · legacy (sh) · sorted keys",
+  );
+  assertEquals(
+    parseDescriptor(`wpkh([${fp}/84h/0h/0h]${account("m/84'/0'/0'")}/<0;1>/*)`).summary,
+    "Single key · native SegWit (wpkh)",
+  );
+  assertEquals(
+    parseDescriptor(`tr(${account("m/86'/0'/0'")}/<0;1>/*)`).summary,
+    "Single key · Taproot (tr)",
+  );
+});

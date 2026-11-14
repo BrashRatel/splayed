@@ -57,6 +57,10 @@ async function writePlan(
   return dir;
 }
 
+/** plannedOutpoints' entries without the per-transaction stages. */
+const brief = (l?: { plan: string; sent: boolean }[]) =>
+  l?.map(({ plan, sent }) => ({ plan, sent }));
+
 const exists = async (p: string) => {
   try {
     await Deno.stat(p);
@@ -214,10 +218,23 @@ Deno.test("plannedOutpoints: which plans spend each coin, newest first, and whet
   await Deno.mkdir(join(dataDir, "plans", "not-a-plan"), { recursive: true });
 
   const planned = await plannedOutpoints(dataDir);
-  assertEquals(planned.get(key(1)), [{ plan: NEW, sent: true }, { plan: OLD, sent: true }]);
-  assertEquals(planned.get(key(2)), [{ plan: OLD, sent: false }]);
-  assertEquals(planned.get(key(3)), [{ plan: OLD, sent: true }]);
-  assertEquals(planned.get(key(4)), [{ plan: NEW, sent: true }]);
+  assertEquals(brief(planned.get(key(1))), [{ plan: NEW, sent: true }, {
+    plan: OLD,
+    sent: true,
+  }]);
+  assertEquals(brief(planned.get(key(2))), [{ plan: OLD, sent: false }]);
+  assertEquals(brief(planned.get(key(3))), [{ plan: OLD, sent: true }]);
+  assertEquals(brief(planned.get(key(4))), [{ plan: NEW, sent: true }]);
+  // Each spending transaction's stage, for the Coins tab.
+  const stages = (k: string) =>
+    planned.get(k)!.map((p) => p.txs.map((t) => `${t.chain} ${t.file} ${t.stage}`));
+  assertEquals(stages(key(1)), [
+    ["ecx ecx/001.psbt sending"],
+    ["ecx ecx/001.psbt sent", "xbt xbt/001.psbt unsigned"],
+  ]);
+  assertEquals(stages(key(2)), [["ecx ecx/002.psbt rejected"]]);
+  assertEquals(planned.get(key(3))![0].txs[0].stage, "confirmed");
+  assertEquals(planned.get(key(3))![0].txs[0].depth, 3);
   assertEquals(planned.has(key(5)), false, "archived plans don't count");
   assertEquals(planned.size, 4);
 });
@@ -272,10 +289,9 @@ Deno.test("a split that left its block (depth 0 after track) can't be deleted; i
   assertEquals(await main(["--data-dir", dataDir, "plans", "delete", ID, "--yes"], r.cli), 1);
   assert(r.text().includes("0 of 50 confirmations"), r.text());
   // It was in a block once, so the coin shows as sent in a plan (plannedOutpoints).
-  assertEquals((await plannedOutpoints(dataDir)).get(`${input.txid}:0`), [{
-    plan: ID,
-    sent: true,
-  }]);
+  const spends = (await plannedOutpoints(dataDir)).get(`${input.txid}:0`);
+  assertEquals(brief(spends), [{ plan: ID, sent: true }]);
+  assertEquals(spends![0].txs[0].stage, "conflict");
 });
 
 const B = (status: string) => ({ status, at: "x", backend: "b", attempts: 1 });
@@ -421,10 +437,10 @@ Deno.test("plannedOutpoints: a transaction superseded by another plan isn't coun
       supersededBy: { plan: "P2", file: "f", txid: "cc".repeat(32), depth: 3 },
     },
   });
-  assertEquals((await plannedOutpoints(dataDir)).get(`${input.txid}:0`), [{
-    plan: ID,
-    sent: false,
-  }]);
+  const spends = (await plannedOutpoints(dataDir)).get(`${input.txid}:0`);
+  assertEquals(brief(spends), [{ plan: ID, sent: false }]);
+  assertEquals(spends![0].txs[0].stage, "superseded");
+  assertEquals(spends![0].txs[0].detail, "by plan P2");
 });
 
 Deno.test("identifySpender: without a named spender, this tool's transactions on the same coin are asked about by txid", async () => {
@@ -551,4 +567,42 @@ Deno.test("identifySpender (no spender named, node RPC): a stranger's spend isn'
   // Nothing gone: nothing to explain.
   spent.clear();
   assertEquals((await ask()).kind, "unknown");
+});
+
+Deno.test("txStage: each step from planned to confirmed, and the ways a send ends otherwise", async () => {
+  const { txStage } = await import("../src/core/plan_admin.ts");
+  type Status = NonNullable<import("../src/core/execute.ts").TxProgress["broadcast"]>["status"];
+  const B = (status: Status) => ({ status, at: "x", backend: "b", attempts: 1 });
+  const verified = { at: "x", txid: "aa".repeat(32), finalHex: "00", checks: [] };
+  assertEquals(txStage(undefined, false), { stage: "unsigned" });
+  assertEquals(txStage(undefined, true), { stage: "signed" });
+  assertEquals(txStage({ verified }, true), { stage: "verified" });
+  assertEquals(txStage({ verified, broadcast: B("accepted") }, false), { stage: "sent" });
+  assertEquals(
+    txStage({ verified, broadcast: B("accepted"), unmined: { state: "absent", at: "y" } }, false),
+    { stage: "sent", detail: "not on the network now" },
+  );
+  assertEquals(
+    txStage({ verified, broadcast: B("accepted"), confirmations: { depth: 7, at: "y" } }, false),
+    { stage: "confirmed", depth: 7 },
+  );
+  assertEquals(txStage({ broadcast: B("unknown") }, false), { stage: "unknown" });
+  assertEquals(txStage({ broadcast: B("rejected") }, false), { stage: "rejected" });
+  assertEquals(
+    txStage({ broadcast: B("replaced"), replacedBy: { plan: "P-bump1", file: "f" } }, false),
+    { stage: "replaced", detail: "by fee bump P-bump1" },
+  );
+});
+
+Deno.test("plannedOutpoints: an uploaded signed file shows as signed until it is verified", async () => {
+  const dataDir = await Deno.makeTempDir({ prefix: "splayed-plans-" });
+  const input = { txid: "cd".repeat(32), vout: 0 };
+  const dir = await writePlan(dataDir, ID, [
+    { chain: "ecx", file: "ecx/001-aaaa.psbt", inputs: [input] },
+    { chain: "xbt", file: "xbt/001-bbbb.psbt", inputs: [input] },
+  ]);
+  await Deno.mkdir(join(dir, "uploads"));
+  await Deno.writeTextFile(join(dir, "uploads", "ecx-001-aaaa.signed.psbt"), "x");
+  const txs = (await plannedOutpoints(dataDir)).get(`${input.txid}:0`)![0].txs;
+  assertEquals(txs.map((t) => t.stage), ["signed", "unsigned"]);
 });

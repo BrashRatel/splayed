@@ -26,6 +26,11 @@ any network setting closes the gate again.
   `splayed config scan --gap-limit N --jitter MIN-MAX` or on the Network tab (**Scan settings**); a
   larger gap limit reveals more addresses to a public backend.
 - `status` reports how many addresses were revealed to remote servers.
+- Besides addresses, a backend sees the transactions splayed fetches by txid. `scan` fetches the
+  creating transaction (and a few ancestors) of each coin that is on one chain only and was made
+  after the forks, to tell whether it can exist only there (at most 200 per scan); `plan` fetches
+  each coin's previous transaction, and with `--batch linked` the transactions that funded it. These
+  lookups are paced like the rest of the scan; your own node keeps them private.
 - HTTP goes over connections the tool opens itself (no `fetch()`), so `HTTP(S)_PROXY` environment
   variables can't silently reroute traffic.
 
@@ -85,6 +90,12 @@ deno task cli config backend add btc --kind electrum --url ssl://192.168.1.20:50
 deno task cli config show
 deno task cli init
 ```
+
+- **An RPC password is never stored in the config.** `--password-env` (`password_env` in
+  `config.toml`) names the environment variable splayed reads it from, so set that variable wherever
+  splayed runs: your shell, the Docker override file's `environment` (see
+  [Docker](docker.md#a-node-on-the-docker-host)), or on StartOS the package's **Server passwords**
+  action (the same variable name, then the password; splayed restarts to read it).
 
 - **Adding your own backend for a chain removes that chain's profile default**, so the default is
   never contacted. `config backend fallback` and `config backend reset` bring defaults back.
