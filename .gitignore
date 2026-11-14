@@ -3,3 +3,7 @@ node_modules/
 *.tmp
 dist/
 vendor/tor/
+
+# Local to this device (Claude Code instructions and YubiKey touch-alert wrappers)
+CLAUDE.md
+.claude/bin/
