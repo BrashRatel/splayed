@@ -4,13 +4,6 @@ Open work only, grouped by kind and ordered by impact within each group. When an
 it to [docs/dev/todo-archive.md](docs/dev/todo-archive.md) (with what was checked and when) and
 delete it here.
 
-## Alpha Release Gates
-
-Must be done before the alpha release (pre-alpha.2 was released 2026-11-05; see the
-[archive](docs/dev/todo-archive.md)):
-
-None open.
-
 ## 1. Bugs and issues
 
 No known high- or medium-impact bugs are open. Highest impact first:
@@ -30,7 +23,7 @@ No known high- or medium-impact bugs are open. Highest impact first:
 ### Review
 
 - [ ] Independent review of `src/core/sigcheck.ts`, `src/core/planner.ts`, `src/core/psbt.ts`,
-      `src/net/*` and `src/ui/server.ts`, and the post-pre-alpha.2 additions that decide safety or
+      `src/net/*` and `src/ui/server.ts`, and the additions since pre-alpha.2 that decide safety or
       privacy: `src/core/chain_specific.ts` (a proof makes a coin count as separated),
       `src/core/linkage.ts` (`--batch linked` merges coins) and the gate's fee-bump following in
       `gateProblems` (`src/core/execute.ts`).

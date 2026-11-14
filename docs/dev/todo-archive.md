@@ -4,7 +4,27 @@ Finished items moved out of [TODO.md](../../TODO.md), newest first. When you tic
 TODO, move it here (keep the evidence: what was checked, when, against what) and delete it from the
 TODO.
 
-## Features sprint after pre-alpha.2 (2026-11-11, unreleased)
+## 0.1.0-alpha.1 release (2026-11-14)
+
+- **Released** as
+  [`v0.1.0-alpha.1`](https://github.com/BrashRatel/splayed/releases/tag/v0.1.0-alpha.1) (PR #4
+  merged with CI green: unit tests, CodeQL, regtest; the tag is on the merge commit 4149f91).
+  - _Checks:_ `deno task check`, `lint`, `fmt --check`, `test` (313 passed) and the regtest suite
+    (211 steps) passed locally before the PR.
+  - _Sensitive information:_ tree and history since `v0.1.0-pre-alpha.2` searched again; only public
+    test vectors (BIP32 vector 1 `xprv`), the public security contact, the dummy screenshot token
+    and public mempool onion hosts. The 28 regenerated screenshots carry no text or EXIF chunks.
+  - _StartOS package `0.1.0:9`_ (`splayed-startos` PR #3, pinning `v0.1.0-alpha.1`), built in the
+    workspace clone from the clean merged commit 4552390 (no `-modified`). x86_64 sideloaded over
+    0.1.0:8 on a StartOS server by the maintainer and passed; aarch64 not installed.
+  - _Files:_ five platform archives and both `.s9pk`, `SHA256SUMS` signed with the `SECURITY.md` key
+    (card subkey `245E7F8F43A0FBFA`). The Linux x86_64 archive runs from a clean extract (CLI and
+    bundled tor 0.4.9.15; no scan). Re-downloaded from the release: signature good, 7 of 7 sums
+    match.
+  - _Not done:_ macOS and Linux aarch64 runs on real machines, registry publication (both in the
+    TODO).
+
+## Features sprint after pre-alpha.2 (2026-11-11, released in 0.1.0-alpha.1)
 
 - **Windows launcher opened Explorer, not the browser (2026-11-13, alpha gate):** `ui --open` ran
   `explorer <url>`, and Explorer treats `http://127.0.0.1:PORT/#token=…` as a path and opens a
