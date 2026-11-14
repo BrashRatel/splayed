@@ -2,7 +2,7 @@
 
 All notable changes to splayed. See [TODO.md](TODO.md) for what's still open. Newest first.
 
-## Unreleased
+## 0.1.0-alpha.1 (2026-11-14)
 
 ### Added
 

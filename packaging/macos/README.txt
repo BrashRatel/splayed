@@ -2,7 +2,7 @@ splayed {{VERSION}} for macOS
 =============================
 
 splayed finds your coins that exist on more than one chain (BTC, XBT, ECX) and writes unsigned
-transactions that move them apart. It never holds your keys: your wallet signs. It is PRE-ALPHA
+transactions that move them apart. It never holds your keys: your wallet signs. It is ALPHA
 software that moves real coins, so start with a small amount.
 
 NOTE: this macOS build has not been run on a Mac yet. If it will not start, please say so at
